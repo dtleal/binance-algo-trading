@@ -1,0 +1,157 @@
+import argparse
+import asyncio
+import signal
+
+from trader.config import DEFAULT_SYMBOL, DEFAULT_STOP_LOSS_PCT, DEFAULT_LEVERAGE, ALL_STREAMS, SYMBOL_CONFIGS
+from trader.monitor import run_monitor
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Binance AXS Trader")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # --- monitor ---
+    monitor_parser = subparsers.add_parser("monitor", help="Start market monitoring")
+    monitor_parser.add_argument(
+        "--symbol",
+        default=DEFAULT_SYMBOL,
+        help=f"Trading pair to monitor (default: {DEFAULT_SYMBOL.upper()})",
+    )
+    monitor_parser.add_argument(
+        "--streams",
+        default=None,
+        help=f"Comma-separated streams to subscribe to (default: all). Options: {','.join(ALL_STREAMS)}",
+    )
+
+    # --- short ---
+    short_parser = subparsers.add_parser("short", help="Open a futures short position")
+    short_parser.add_argument(
+        "--quantity", type=float, required=True, help="Quantity of AXS to short"
+    )
+    short_parser.add_argument(
+        "--stop-loss",
+        type=float,
+        default=DEFAULT_STOP_LOSS_PCT,
+        help=f"Stop-loss percentage above entry (default: {DEFAULT_STOP_LOSS_PCT}%%)",
+    )
+    short_parser.add_argument(
+        "--leverage",
+        type=int,
+        default=DEFAULT_LEVERAGE,
+        help=f"Leverage multiplier (default: {DEFAULT_LEVERAGE}x)",
+    )
+
+    # --- status ---
+    subparsers.add_parser("status", help="Show current futures position status")
+
+    # --- close ---
+    subparsers.add_parser("close", help="Close futures short position")
+
+    # --- history ---
+    history_parser = subparsers.add_parser("history", help="Show trade history with P&L")
+    history_parser.add_argument(
+        "--days",
+        type=int,
+        default=7,
+        help="Number of days to look back (default: 7, max: 180)",
+    )
+
+    # --- bot ---
+    bot_parser = subparsers.add_parser("bot", help="Run MomShort automated trading bot")
+    bot_parser.add_argument(
+        "--symbol",
+        default="axsusdt",
+        help="Trading pair symbol (default: axsusdt). Available: axsusdt, sandusdt, manausdt, galausdt",
+    )
+    bot_parser.add_argument(
+        "--leverage",
+        type=int,
+        default=DEFAULT_LEVERAGE,
+        help=f"Leverage multiplier (default: {DEFAULT_LEVERAGE}x)",
+    )
+    bot_parser.add_argument(
+        "--capital",
+        type=float,
+        default=None,
+        help="Trading capital in USDT (default: auto-detect from account)",
+    )
+    bot_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Run without placing orders (log signals only)",
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "monitor":
+        streams = args.streams.split(",") if args.streams else ALL_STREAMS
+        invalid = [s for s in streams if s not in ALL_STREAMS]
+        if invalid:
+            parser.error(f"Invalid streams: {', '.join(invalid)}. Valid: {', '.join(ALL_STREAMS)}")
+        _run_async(run_monitor(args.symbol, streams))
+
+    elif args.command == "short":
+        from trader.short import FuturesShort
+        fs = FuturesShort()
+        _run_async(fs.open(args.quantity, args.stop_loss, args.leverage))
+
+    elif args.command == "status":
+        _run_async(_status_all())
+
+    elif args.command == "close":
+        from trader.short import FuturesShort
+        fs = FuturesShort()
+        _run_async(fs.close())
+
+    elif args.command == "history":
+        if args.days < 1 or args.days > 180:
+            parser.error("--days must be between 1 and 180")
+        from trader.short import FuturesShort
+        _run_async(FuturesShort.history(days=args.days))
+
+    elif args.command == "bot":
+        from trader.bot import MomShortBot
+        from trader.config import get_symbol_config
+        cfg = get_symbol_config(args.symbol)
+        bot = MomShortBot(
+            cfg=cfg,
+            leverage=args.leverage,
+            capital=args.capital,
+            dry_run=args.dry_run,
+        )
+        _run_async(bot.run())
+
+    else:
+        parser.print_help()
+
+
+async def _status_all():
+    """Show status for all configured symbols."""
+    from trader.short import FuturesShort
+    for symbol, cfg in SYMBOL_CONFIGS.items():
+        fs = FuturesShort(symbol=symbol, asset=cfg.asset)
+        await fs.status()
+        print()
+
+
+def _run_async(coro):
+    """Run an async coroutine with graceful Ctrl+C handling."""
+    loop = asyncio.new_event_loop()
+    task = loop.create_task(coro)
+
+    def shutdown(sig, frame):
+        task.cancel()
+
+    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGTERM, shutdown)
+
+    try:
+        loop.run_until_complete(task)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        loop.close()
+
+
+if __name__ == "__main__":
+    main()
