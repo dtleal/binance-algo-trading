@@ -1,0 +1,20 @@
+services:
+{% for bot in bot_symbols %}
+  bot-{{ bot.name }}:
+    image: {{ docker_image }}
+    container_name: binance-bot-{{ bot.name }}
+    command: ["python", "-m", "trader", "bot", "--symbol", "{{ bot.symbol }}", "--leverage", "{{ bot.leverage }}"]
+    env_file: .env
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: {{ container_memory_limit }}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+{% endfor %}

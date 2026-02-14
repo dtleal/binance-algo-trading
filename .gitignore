@@ -6,3 +6,7 @@ logs/
 *.csv
 *.html
 *.png
+
+# Ansible
+infra/ansible/ansible.log
+infra/ansible/*.retry

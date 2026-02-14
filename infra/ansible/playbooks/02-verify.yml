@@ -1,0 +1,56 @@
+---
+- name: Verify binance-trader deployment
+  hosts: do_trader
+  gather_facts: false
+
+  tasks:
+    - name: Check Docker is running
+      ansible.builtin.command:
+        cmd: docker info --format '{{ '{{' }}.ServerVersion{{ '}}' }}'
+      register: docker_info
+      changed_when: false
+
+    - name: Show Docker version
+      ansible.builtin.debug:
+        msg: "Docker {{ docker_info.stdout }}"
+
+    - name: Get container status
+      ansible.builtin.command:
+        cmd: docker compose ps --format json
+        chdir: "{{ app_dir }}"
+      register: compose_ps
+      changed_when: false
+
+    - name: Check each bot container
+      ansible.builtin.command:
+        cmd: "docker inspect --format '{{ '{{' }}.State.Status{{ '}}' }} restarts={{ '{{' }}.RestartCount{{ '}}' }}' binance-bot-{{ item.name }}"
+      loop: "{{ bot_symbols }}"
+      register: container_checks
+      changed_when: false
+
+    - name: Show container health
+      ansible.builtin.debug:
+        msg: "binance-bot-{{ item.item.name }}: {{ item.stdout }}"
+      loop: "{{ container_checks.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"
+
+    - name: Check for errors in recent logs
+      ansible.builtin.command:
+        cmd: "docker compose logs --tail=50 bot-{{ item.name }}"
+        chdir: "{{ app_dir }}"
+      loop: "{{ bot_symbols }}"
+      register: log_checks
+      changed_when: false
+
+    - name: Flag containers with errors
+      ansible.builtin.debug:
+        msg: >-
+          {% if 'ERROR' in item.stdout or 'Traceback' in item.stdout %}
+          WARN: bot-{{ item.item.name }} has errors in recent logs
+          {% else %}
+          PASS: bot-{{ item.item.name }} logs look clean
+          {% endif %}
+      loop: "{{ log_checks.results }}"
+      loop_control:
+        label: "{{ item.item.name }}"

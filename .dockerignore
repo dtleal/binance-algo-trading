@@ -1,0 +1,25 @@
+.git
+.gitignore
+.env
+.venv
+__pycache__
+*.pyc
+
+# Data files
+*.csv
+*.html
+*.png
+
+# Directories
+logs/
+docs/
+infra/
+backtest_sweep/
+images/
+
+# IDE
+.vscode/
+.idea/
+
+# CI
+.github/

@@ -1,0 +1,11 @@
+docker_image: ghcr.io/lucasgouvea/binance-trader:latest
+
+bot_symbols:
+  - name: axs
+    symbol: axsusdt
+    leverage: 5
+  - name: sand
+    symbol: sandusdt
+    leverage: 5
+
+container_memory_limit: 256M

@@ -1,0 +1,18 @@
+services:
+  bot-axs:
+    build: .
+    container_name: binance-bot-axs
+    command: ["python", "-m", "trader", "bot", "--symbol", "axsusdt", "--leverage", "5"]
+    env_file: .env
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  bot-sand:
+    build: .
+    container_name: binance-bot-sand
+    command: ["python", "-m", "trader", "bot", "--symbol", "sandusdt", "--leverage", "5"]
+    env_file: .env
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
