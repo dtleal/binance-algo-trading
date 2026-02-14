@@ -11,7 +11,7 @@ services:
   bot-sand:
     build: .
     container_name: binance-bot-sand
-    command: ["python", "-m", "trader", "bot", "--symbol", "sandusdt", "--leverage", "5"]
+    command: ["python", "-m", "trader", "bot", "--symbol", "sandusdt", "--leverage", "5", "--capital", "30"]
     env_file: .env
     volumes:
       - ./logs:/app/logs

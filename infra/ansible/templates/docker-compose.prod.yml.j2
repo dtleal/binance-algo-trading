@@ -3,7 +3,7 @@ services:
   bot-{{ bot.name }}:
     image: {{ docker_image }}
     container_name: binance-bot-{{ bot.name }}
-    command: ["python", "-m", "trader", "bot", "--symbol", "{{ bot.symbol }}", "--leverage", "{{ bot.leverage }}"]
+    command: ["python", "-m", "trader", "bot", "--symbol", "{{ bot.symbol }}", "--leverage", "{{ bot.leverage }}"{{ ', "--capital", "' ~ bot.capital ~ '"' if bot.capital is defined }}]
     env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"

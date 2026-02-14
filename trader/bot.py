@@ -294,15 +294,21 @@ class MomShortBot:
             )
             from binance_common.configuration import ConfigurationWebSocketStreams
 
-            proxy = _parse_proxy(SOCKS_PROXY)
             ws_config = ConfigurationWebSocketStreams(
                 stream_url=DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
-                proxy=proxy,
             )
             ws_client = DerivativesTradingUsdsFutures(config_ws_streams=ws_config)
         else:
-            ws_config = self._ConfigWS(stream_url=self._ws_url, proxy=self._proxy)
+            ws_config = self._ConfigWS(stream_url=self._ws_url)
             ws_client = self._ws_factory(config_ws_streams=ws_config)
+
+        # Monkey-patch: aiohttp needs ProxyConnector for SOCKS5 proxies.
+        # The SDK creates a plain ClientSession, so we inject one with the connector.
+        if SOCKS_PROXY:
+            from aiohttp_socks import ProxyConnector
+            import aiohttp
+            connector = ProxyConnector.from_url(SOCKS_PROXY)
+            ws_client.websocket_streams.session = aiohttp.ClientSession(connector=connector)
 
         connection = None
         stream = None

@@ -7,5 +7,6 @@ bot_symbols:
   - name: sand
     symbol: sandusdt
     leverage: 5
+    capital: 30
 
 container_memory_limit: 256M
