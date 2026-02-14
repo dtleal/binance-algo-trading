@@ -53,57 +53,66 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
 
       - name: Deploy to server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: root
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            set -e
-            APP_DIR=/opt/binance-trader
-            mkdir -p $APP_DIR/logs
+        run: |
+          ssh -i ~/.ssh/deploy_key root@${{ secrets.DEPLOY_HOST }} bash -s <<'EOF'
+          set -euo pipefail
+          APP_DIR=/opt/binance-trader
+          mkdir -p $APP_DIR/logs
 
-            cat > $APP_DIR/.env <<'ENVEOF'
-            API_KEY=${{ secrets.BINANCE_API_KEY }}
-            SECRET_KEY=${{ secrets.BINANCE_SECRET_KEY }}
-            ENVEOF
-            chmod 600 $APP_DIR/.env
+          cat > $APP_DIR/.env <<ENVEOF
+          API_KEY=${{ secrets.BINANCE_API_KEY }}
+          SECRET_KEY=${{ secrets.BINANCE_SECRET_KEY }}
+          ENVEOF
+          chmod 600 $APP_DIR/.env
 
-            cat > $APP_DIR/docker-compose.yml <<'COMPEOF'
-            services:
-              bot-axs:
-                image: ghcr.io/${{ github.repository }}:latest
-                container_name: binance-bot-axs
-                command: ["python", "-m", "trader", "bot", "--symbol", "axsusdt", "--leverage", "5"]
-                env_file: .env
-                volumes:
-                  - ./logs:/app/logs
-                restart: unless-stopped
-                deploy:
-                  resources:
-                    limits:
-                      memory: 256M
+          cat > $APP_DIR/docker-compose.yml <<'COMPEOF'
+          services:
+            bot-axs:
+              image: ghcr.io/lucasgouvea/binance-trader:latest
+              container_name: binance-bot-axs
+              command: ["python", "-m", "trader", "bot", "--symbol", "axsusdt", "--leverage", "5"]
+              env_file: .env
+              volumes:
+                - ./logs:/app/logs
+              restart: unless-stopped
+              deploy:
+                resources:
+                  limits:
+                    memory: 256M
 
-              bot-sand:
-                image: ghcr.io/${{ github.repository }}:latest
-                container_name: binance-bot-sand
-                command: ["python", "-m", "trader", "bot", "--symbol", "sandusdt", "--leverage", "5"]
-                env_file: .env
-                volumes:
-                  - ./logs:/app/logs
-                restart: unless-stopped
-                deploy:
-                  resources:
-                    limits:
-                      memory: 256M
-            COMPEOF
+            bot-sand:
+              image: ghcr.io/lucasgouvea/binance-trader:latest
+              container_name: binance-bot-sand
+              command: ["python", "-m", "trader", "bot", "--symbol", "sandusdt", "--leverage", "5"]
+              env_file: .env
+              volumes:
+                - ./logs:/app/logs
+              restart: unless-stopped
+              deploy:
+                resources:
+                  limits:
+                    memory: 256M
+          COMPEOF
 
-            cd $APP_DIR
-            docker compose pull
-            docker compose up -d
+          echo "--- Logging in to GHCR ---"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            echo "--- Container status ---"
-            docker compose ps
+          cd $APP_DIR
+          docker compose pull
+          docker compose up -d
+
+          echo "--- Container status ---"
+          docker compose ps
+          EOF
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key
