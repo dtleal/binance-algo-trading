@@ -70,6 +70,7 @@ jobs:
           cat > $APP_DIR/.env <<ENVEOF
           API_KEY=${{ secrets.BINANCE_API_KEY }}
           SECRET_KEY=${{ secrets.BINANCE_SECRET_KEY }}
+          SOCKS_PROXY=socks5://host.docker.internal:1081
           ENVEOF
           chmod 600 $APP_DIR/.env
 
@@ -80,6 +81,8 @@ jobs:
               container_name: binance-bot-axs
               command: ["python", "-m", "trader", "bot", "--symbol", "axsusdt", "--leverage", "5"]
               env_file: .env
+              extra_hosts:
+                - "host.docker.internal:host-gateway"
               volumes:
                 - ./logs:/app/logs
               restart: unless-stopped
@@ -93,6 +96,8 @@ jobs:
               container_name: binance-bot-sand
               command: ["python", "-m", "trader", "bot", "--symbol", "sandusdt", "--leverage", "5"]
               env_file: .env
+              extra_hosts:
+                - "host.docker.internal:host-gateway"
               volumes:
                 - ./logs:/app/logs
               restart: unless-stopped

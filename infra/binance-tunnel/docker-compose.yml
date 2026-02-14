@@ -1,0 +1,22 @@
+# Reverse SOCKS tunnel for Binance API traffic
+# Routes Binance requests from the DO droplet through this machine's IP
+#
+# Usage:
+#   docker compose up -d          # start tunnel
+#   docker compose logs -f        # check status
+#   docker compose down           # stop tunnel
+
+services:
+  binance-tunnel:
+    build: .
+    container_name: binance_tunnel
+    restart: always
+    command: ["root@134.209.3.234"]
+    volumes:
+      - ~/.ssh/id_rsa:/root/.ssh/id_rsa:ro
+      - ~/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"

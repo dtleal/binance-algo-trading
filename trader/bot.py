@@ -12,12 +12,24 @@ from enum import Enum, auto
 from trader.config import (
     BINANCE_API_KEY,
     BINANCE_SECRET_KEY,
+    SOCKS_PROXY,
     DEFAULT_LEVERAGE,
     LOG_DIR,
     AXS_CONFIG,
     SymbolConfig,
 )
 from trader.strategy import VWAPTracker, MomShortSignal
+
+def _parse_proxy(url: str) -> dict | None:
+    """Parse 'socks5://host:port' into the SDK proxy dict format."""
+    if not url:
+        return None
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if not parsed.hostname or not parsed.port:
+        raise SystemExit(f"Invalid SOCKS_PROXY format: '{url}'. Expected 'socks5://host:port'")
+    return {"protocol": parsed.scheme, "host": parsed.hostname, "port": parsed.port}
+
 
 GREEN = "\033[92m"
 RED = "\033[91m"
@@ -67,9 +79,11 @@ class MomShortBot:
                 ConfigurationRestAPI,
                 ConfigurationWebSocketStreams,
             )
+            self._proxy = _parse_proxy(SOCKS_PROXY)
             rest_config = ConfigurationRestAPI(
                 api_key=BINANCE_API_KEY,
                 api_secret=BINANCE_SECRET_KEY,
+                proxy=self._proxy,
             )
             self._ws_url = DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL
             self._client = DerivativesTradingUsdsFutures(config_rest_api=rest_config)
@@ -280,12 +294,14 @@ class MomShortBot:
             )
             from binance_common.configuration import ConfigurationWebSocketStreams
 
+            proxy = _parse_proxy(SOCKS_PROXY)
             ws_config = ConfigurationWebSocketStreams(
-                stream_url=DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL
+                stream_url=DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
+                proxy=proxy,
             )
             ws_client = DerivativesTradingUsdsFutures(config_ws_streams=ws_config)
         else:
-            ws_config = self._ConfigWS(stream_url=self._ws_url)
+            ws_config = self._ConfigWS(stream_url=self._ws_url, proxy=self._proxy)
             ws_client = self._ws_factory(config_ws_streams=ws_config)
 
         connection = None

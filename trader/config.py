@@ -8,6 +8,7 @@ load_dotenv()
 
 BINANCE_API_KEY = os.getenv("API_KEY", "")
 BINANCE_SECRET_KEY = os.getenv("SECRET_KEY", "")
+SOCKS_PROXY = os.getenv("SOCKS_PROXY", "")  # e.g. "socks5://127.0.0.1:1081"
 
 DEFAULT_SYMBOL = "axsusdt"
 DEFAULT_SYMBOL_UPPER = "AXSUSDT"

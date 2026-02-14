@@ -155,6 +155,22 @@ yarl = ">=1.17.0,<2.0"
 speedups = ["Brotli (>=1.2) ; platform_python_implementation == \"CPython\"", "aiodns (>=3.3.0)", "backports.zstd ; platform_python_implementation == \"CPython\" and python_version < \"3.14\"", "brotlicffi (>=1.2) ; platform_python_implementation != \"CPython\""]
 
 [[package]]
+name = "aiohttp-socks"
+version = "0.11.0"
+description = "Proxy connector for aiohttp"
+optional = false
+python-versions = ">=3.8.0"
+groups = ["main"]
+files = [
+    {file = "aiohttp_socks-0.11.0-py3-none-any.whl", hash = "sha256:9aacce57c931b8fbf8f6d333cf3cafe4c35b971b35430309e167a35a8aab9ec1"},
+    {file = "aiohttp_socks-0.11.0.tar.gz", hash = "sha256:0afe51638527c79077e4bd6e57052c87c4824233d6e20bb061c53766421b10f0"},
+]
+
+[package.dependencies]
+aiohttp = ">=3.10.0"
+python-socks = {version = ">=2.4.3,<3.0.0", extras = ["asyncio"]}
+
+[[package]]
 name = "aiosignal"
 version = "1.4.0"
 description = "aiosignal: a list of registered asynchronous callbacks"
@@ -1194,6 +1210,19 @@ files = [
 typing-extensions = ">=4.14.1"
 
 [[package]]
+name = "pysocks"
+version = "1.7.1"
+description = "A Python SOCKS client module. See https://github.com/Anorov/PySocks for more information."
+optional = false
+python-versions = ">=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*"
+groups = ["main"]
+files = [
+    {file = "PySocks-1.7.1-py27-none-any.whl", hash = "sha256:08e69f092cc6dbe92a0fdd16eeb9b9ffbc13cadfe5ca4c7bd92ffb078b293299"},
+    {file = "PySocks-1.7.1-py3-none-any.whl", hash = "sha256:2725bd0a9925919b9b51739eea5f9e2bae91e83288108a9ad338b2e3a4435ee5"},
+    {file = "PySocks-1.7.1.tar.gz", hash = "sha256:3f8804571ebe159c380ac6de37643bb4685970655d3bba243530d6558b799aa0"},
+]
+
+[[package]]
 name = "python-dotenv"
 version = "1.2.1"
 description = "Read key-value pairs from a .env file and set them as environment variables"
@@ -1207,6 +1236,24 @@ files = [
 
 [package.extras]
 cli = ["click (>=5.0)"]
+
+[[package]]
+name = "python-socks"
+version = "2.8.0"
+description = "Proxy (SOCKS4, SOCKS5, HTTP CONNECT) client for Python"
+optional = false
+python-versions = ">=3.8.0"
+groups = ["main"]
+files = [
+    {file = "python_socks-2.8.0-py3-none-any.whl", hash = "sha256:57c24b416569ccea493a101d38b0c82ed54be603aa50b6afbe64c46e4a4e4315"},
+    {file = "python_socks-2.8.0.tar.gz", hash = "sha256:340f82778b20a290bdd538ee47492978d603dff7826aaf2ce362d21ad9ee6f1b"},
+]
+
+[package.extras]
+anyio = ["anyio (>=3.3.4,<5.0.0)"]
+asyncio = ["async-timeout (>=4.0) ; python_version < \"3.11\""]
+curio = ["curio (>=1.4)"]
+trio = ["trio (>=0.24)"]
 
 [[package]]
 name = "pytokens"
@@ -1603,4 +1650,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.15"
-content-hash = "7ebd4caaaf3786702e63ab65980a3974590ea974b1e9fa8f123b4fd0d9edc47e"
+content-hash = "f5decd2aaff45d94de371b754acd62eb1dc29d52fe6cdfc293fefe1e42e8d51d"

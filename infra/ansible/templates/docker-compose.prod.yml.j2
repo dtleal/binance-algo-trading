@@ -5,6 +5,8 @@ services:
     container_name: binance-bot-{{ bot.name }}
     command: ["python", "-m", "trader", "bot", "--symbol", "{{ bot.symbol }}", "--leverage", "{{ bot.leverage }}"]
     env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./logs:/app/logs
     restart: unless-stopped
