@@ -84,6 +84,7 @@ class MomShortBot:
                 api_key=BINANCE_API_KEY,
                 api_secret=BINANCE_SECRET_KEY,
                 proxy=self._proxy,
+                timeout=5000,
             )
             self._ws_url = DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL
             self._client = DerivativesTradingUsdsFutures(config_rest_api=rest_config)
