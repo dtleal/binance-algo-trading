@@ -47,11 +47,12 @@ def load(csv_file: str) -> pd.DataFrame:
     df["date"]   = df.index.date
     df["minute"] = df.index.hour * 60 + df.index.minute
 
-    # Rolling VWAP — sliding window of VWAP_WINDOW_DAYS days
+    # Rolling VWAP — sliding window of VWAP_WINDOW_DAYS complete days
     vwap_tracker = VWAPRollingTracker(window_days=VWAP_WINDOW_DAYS)
     vwap_vals = []
     for _, row in df.iterrows():
-        vwap = vwap_tracker.update(row["high"], row["low"], row["close"], row["volume"])
+        day_ordinal = int(row.name.timestamp()) // 86400  # Day number from timestamp
+        vwap = vwap_tracker.update(row["high"], row["low"], row["close"], row["volume"], day_ordinal)
         vwap_vals.append(vwap)
     df["vwap"] = vwap_vals
 

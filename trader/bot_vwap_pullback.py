@@ -330,8 +330,8 @@ class VWAPPullbackBot:
             self._ema.update(c)
             seeded += 1
 
-            # Rolling VWAP — feed ALL historical candles
-            self._vwap.update(h, l, c, v)
+            # Rolling VWAP — feed ALL historical candles with day_ordinal
+            self._vwap.update(h, l, c, v, day_ordinal)
             if self._current_day == -1:
                 self._current_day = day_ordinal
 
@@ -549,7 +549,7 @@ class VWAPPullbackBot:
         ts = datetime.fromtimestamp(candle_open_ms / 1000, tz=timezone.utc).strftime("%H:%M")
 
         self._check_daily_reset(day_ordinal)
-        vwap = self._vwap.update(h, l, c, v)
+        vwap = self._vwap.update(h, l, c, v, day_ordinal)
 
         # EMA trend
         ema = self._ema.update(c)

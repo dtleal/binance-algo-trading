@@ -38,33 +38,43 @@ class VWAPTracker:
 
 
 class VWAPRollingTracker:
-    """Rolling VWAP over N days (N * 1440 candles for 1-minute data).
+    """Rolling VWAP over N complete days, matching Rust sweep logic.
 
     Unlike VWAPTracker, this does NOT reset daily. It maintains a sliding
-    window of the last N days worth of candles, matching the Rust sweep logic.
+    window of N COMPLETE DAYS (day boundaries), not a fixed number of candles.
     """
 
     def __init__(self, window_days: int = 10):
         """Initialize rolling VWAP tracker.
 
         Args:
-            window_days: Number of days to include in VWAP calculation (default 10).
+            window_days: Number of complete days to include in VWAP calculation (default 10).
         """
-        from collections import deque
         self.window_days = window_days
-        self.window_size = window_days * 1440  # 1440 minutes per day
-        self._history: deque = deque(maxlen=self.window_size)
+        self._candles: list = []  # (day, pv, volume)
         self.value = 0.0
 
-    def update(self, high: float, low: float, close: float, volume: float) -> float:
-        """Feed one closed candle. Returns current rolling VWAP."""
+    def update(self, high: float, low: float, close: float, volume: float, day_ordinal: int) -> float:
+        """Feed one closed candle. Returns current rolling VWAP.
+
+        Args:
+            day_ordinal: Day number (e.g., timestamp_ms // 86_400_000) to track day boundaries.
+        """
         tp = (high + low + close) / 3.0
         pv = tp * volume
-        self._history.append((pv, volume))
+        self._candles.append((day_ordinal, pv, volume))
 
-        # Calculate VWAP from rolling window
-        total_pv = sum(h[0] for h in self._history)
-        total_vol = sum(h[1] for h in self._history)
+        # Calculate start_day (N complete days back from current day)
+        current_day = day_ordinal
+        start_day = max(0, current_day - self.window_days + 1)
+
+        # Remove candles before start_day (prune old days)
+        while self._candles and self._candles[0][0] < start_day:
+            self._candles.pop(0)
+
+        # Calculate VWAP from remaining candles
+        total_pv = sum(c[1] for c in self._candles)
+        total_vol = sum(c[2] for c in self._candles)
         self.value = total_pv / total_vol if total_vol > 0 else close
         return self.value
 
