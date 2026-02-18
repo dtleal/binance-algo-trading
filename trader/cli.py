@@ -56,6 +56,34 @@ def main():
         help="Number of days to look back (default: 7, max: 180)",
     )
 
+    # --- pullback ---
+    pb_parser = subparsers.add_parser(
+        "pullback", help="Run VWAPPullback bot (bidirectional, any symbol)"
+    )
+    pb_parser.add_argument(
+        "--symbol", required=True,
+        help="Futures trading pair (e.g. btcusdt, ethusdt, solusdt)",
+    )
+    pb_parser.add_argument(
+        "--leverage", type=int, default=DEFAULT_LEVERAGE,
+        help=f"Leverage multiplier (default: {DEFAULT_LEVERAGE}x)",
+    )
+    pb_parser.add_argument(
+        "--capital", type=float, default=None,
+        help="Trading capital in USDT (default: auto-detect from account)",
+    )
+    pb_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Run without placing orders (log signals only)",
+    )
+    pb_parser.add_argument("--tp", type=float, default=5.0, help="Take-profit %% (default: 5.0)")
+    pb_parser.add_argument("--sl", type=float, default=2.5, help="Stop-loss %% (default: 2.5)")
+    pb_parser.add_argument("--min-bars", type=int, default=3, help="Min consolidation bars (default: 3)")
+    pb_parser.add_argument("--confirm-bars", type=int, default=2, help="Confirmation bars (default: 2)")
+    pb_parser.add_argument("--vwap-prox", type=float, default=0.005, help="VWAP proximity threshold (default: 0.005)")
+    pb_parser.add_argument("--pos-size", type=float, default=0.20, help="Position size as fraction of capital (default: 0.20)")
+    pb_parser.add_argument("--ema-period", type=int, default=200, help="EMA period for trend detection (default: 200)")
+
     # --- bot ---
     bot_parser = subparsers.add_parser("bot", help="Run MomShort automated trading bot")
     bot_parser.add_argument(
@@ -108,6 +136,23 @@ def main():
             parser.error("--days must be between 1 and 180")
         from trader.short import FuturesShort
         _run_async(FuturesShort.history(days=args.days))
+
+    elif args.command == "pullback":
+        from trader.bot_vwap_pullback import VWAPPullbackBot
+        bot = VWAPPullbackBot(
+            symbol=args.symbol,
+            leverage=args.leverage,
+            capital=args.capital,
+            dry_run=args.dry_run,
+            tp_pct=args.tp,
+            sl_pct=args.sl,
+            min_bars=args.min_bars,
+            confirm_bars=args.confirm_bars,
+            vwap_prox=args.vwap_prox,
+            pos_size_pct=args.pos_size,
+            ema_period=args.ema_period,
+        )
+        _run_async(bot.run())
 
     elif args.command == "bot":
         from trader.bot import MomShortBot
