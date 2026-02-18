@@ -56,6 +56,15 @@ def main():
         help="Number of days to look back (default: 7, max: 180)",
     )
 
+    # --- plot ---
+    plot_parser = subparsers.add_parser("plot", help="Show daily P&L and cumulative charts")
+    plot_parser.add_argument(
+        "--days",
+        type=int,
+        default=30,
+        help="Number of days to look back (default: 30, max: 180)",
+    )
+
     # --- bot ---
     bot_parser = subparsers.add_parser("bot", help="Run MomShort automated trading bot")
     bot_parser.add_argument(
@@ -108,6 +117,12 @@ def main():
             parser.error("--days must be between 1 and 180")
         from trader.short import FuturesShort
         _run_async(FuturesShort.history(days=args.days))
+
+    elif args.command == "plot":
+        if args.days < 1 or args.days > 180:
+            parser.error("--days must be between 1 and 180")
+        from trader.plot import plot_pnl
+        plot_pnl(days=args.days)
 
     elif args.command == "bot":
         from trader.bot import MomShortBot
