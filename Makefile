@@ -1,4 +1,4 @@
-.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data backtest-sweep backtest-detail backtest-detail-pullback build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana
+.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data fetch-btc fetch-eth backtest-sweep backtest-detail backtest-detail-pullback build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -73,6 +73,20 @@ clean: ## Remove log files
 fetch-data: ## Download historical kline data (edit fetch_klines.py first)
 	poetry run python fetch_klines.py
 
+fetch-btc: ## Download 1 year of BTCUSDT 1m klines
+	@echo "📥 Downloading BTCUSDT data (1 year)..."
+	@sed -i '' 's/SYMBOL = ".*"/SYMBOL = "BTCUSDT"/' fetch_klines.py
+	@sed -i '' 's/CSV_FILE = ".*"/CSV_FILE = "btcusdt_1m_klines.csv"/' fetch_klines.py
+	@poetry run python fetch_klines.py
+	@echo "✅ BTCUSDT data saved to btcusdt_1m_klines.csv"
+
+fetch-eth: ## Download 1 year of ETHUSDT 1m klines
+	@echo "📥 Downloading ETHUSDT data (1 year)..."
+	@sed -i '' 's/SYMBOL = ".*"/SYMBOL = "ETHUSDT"/' fetch_klines.py
+	@sed -i '' 's/CSV_FILE = ".*"/CSV_FILE = "ethusdt_1m_klines.csv"/' fetch_klines.py
+	@poetry run python fetch_klines.py
+	@echo "✅ ETHUSDT data saved to ethusdt_1m_klines.csv"
+
 backtest-sweep: ## Run MomShort parameter sweep (edit backtest_sweep.py first)
 	poetry run python backtest_sweep.py
 
@@ -105,6 +119,12 @@ sweep-rust-gala: ## Run Rust sweep for GALAUSDT (all 5 strategies)
 sweep-rust-mana: ## Run Rust sweep for MANAUSDT (all 5 strategies)
 	@$(MAKE) sweep-rust SYMBOL=manausdt
 
+sweep-rust-btc: ## Run Rust sweep for BTCUSDT (all 5 strategies)
+	@$(MAKE) sweep-rust SYMBOL=btcusdt
+
+sweep-rust-eth: ## Run Rust sweep for ETHUSDT (all 5 strategies)
+	@$(MAKE) sweep-rust SYMBOL=ethusdt
+
 # Analyze sweep results
 analyze-sweep: ## Show top 5 VWAPPullback configs from Rust sweep
 	poetry run python analyze_sweep.py --top 5
@@ -133,3 +153,20 @@ pullback-best-gala: ## Run VWAPPullback bot for GALAUSDT with BEST parameters
 
 pullback-best-mana: ## Run VWAPPullback bot for MANAUSDT with BEST parameters
 	poetry run python -m trader pullback --symbol manausdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+# BTC/ETH - Use these after running sweep to find best params
+pullback-btc: ## Run VWAPPullback bot for BTCUSDT (run sweep-rust-btc first!)
+	@echo "⚠️  Make sure to run 'make sweep-rust-btc' first to find best params!"
+	poetry run python -m trader pullback --symbol btcusdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+pullback-btc-dry: ## Run VWAPPullback bot for BTCUSDT in DRY-RUN mode
+	@echo "⚠️  Using default params. Run 'make sweep-rust-btc' to optimize."
+	poetry run python -m trader pullback --symbol btcusdt --dry-run --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+pullback-eth: ## Run VWAPPullback bot for ETHUSDT (run sweep-rust-eth first!)
+	@echo "⚠️  Make sure to run 'make sweep-rust-eth' first to find best params!"
+	poetry run python -m trader pullback --symbol ethusdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+pullback-eth-dry: ## Run VWAPPullback bot for ETHUSDT in DRY-RUN mode
+	@echo "⚠️  Using default params. Run 'make sweep-rust-eth' to optimize."
+	poetry run python -m trader pullback --symbol ethusdt --dry-run --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)

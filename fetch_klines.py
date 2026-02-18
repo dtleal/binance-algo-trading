@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from urllib.request import urlopen, Request
 import json
 
-SYMBOL = "GALAUSDT"
+SYMBOL = "ETHUSDT"
 INTERVAL = "1m"
 LIMIT = 1000  # max per request
 BASE_URL = "https://api.binance.com/api/v3/klines"
@@ -15,7 +15,7 @@ BASE_URL = "https://api.binance.com/api/v3/klines"
 end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 start_ms = end_ms - (365 * 24 * 60 * 60 * 1000)
 
-CSV_FILE = "galausdt_1m_klines.csv"
+CSV_FILE = "ethusdt_1m_klines.csv"
 HEADERS = [
     "open_time", "open", "high", "low", "close", "volume",
     "close_time", "quote_volume", "trades", "taker_buy_base_vol",
