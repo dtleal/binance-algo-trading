@@ -1,4 +1,4 @@
-.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data backtest-sweep backtest-detail backtest-detail-pullback build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana
+.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data backtest-sweep backtest-detail backtest-detail-pullback build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana analyze-sweep analyze-best
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -104,3 +104,10 @@ sweep-rust-gala: ## Run Rust sweep for GALAUSDT (all 5 strategies)
 
 sweep-rust-mana: ## Run Rust sweep for MANAUSDT (all 5 strategies)
 	@$(MAKE) sweep-rust SYMBOL=manausdt
+
+# Analyze sweep results
+analyze-sweep: ## Show top 5 VWAPPullback configs from Rust sweep
+	poetry run python analyze_sweep.py --top 5
+
+analyze-best: ## Auto-run detailed backtest on BEST VWAPPullback config
+	poetry run python analyze_sweep.py --run-best
