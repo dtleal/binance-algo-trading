@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # ── Configuration ────────────────────────────────────────────────────────────
-CSV_FILE      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "axsusdc_1m_klines.csv")
+CSV_FILE      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "axsusdt_1m_klines.csv")
 EMA_PERIOD    = 200       # bars — trend filter (does NOT reset daily)
 TP_PCT        = 0.05      # 5% take-profit
 SL_PCT        = 0.025     # 2.5% stop-loss
@@ -39,6 +39,7 @@ INITIAL_CAP   = 1000.0
 
 
 def load(csv_file: str) -> pd.DataFrame:
+    """Load CSV and precompute VWAP, EMA using the same trackers as the bot."""
     from trader.strategy import VWAPRollingTracker
     from trader.strategy_vwap_pullback import EMATracker
 
@@ -72,278 +73,148 @@ def load(csv_file: str) -> pd.DataFrame:
 
 
 def run_backtest(df: pd.DataFrame):
+    """Run backtest using VWAPPullbackSignal — same logic as the live bot."""
+    from trader.strategy_vwap_pullback import VWAPPullbackSignal
+
     trades = []
     capital = INITIAL_CAP
     equity_curve = []
 
-    for day, day_df in df.groupby("date"):
-        counter = 0
-        confirming = False
-        confirm_count = 0
-        pending_dir = None   # "long" or "short"
-        trades_today = 0
+    # Initialize signal generator (same as bot uses)
+    signal = VWAPPullbackSignal(
+        min_bars=MIN_BARS,
+        confirm_bars=CONFIRM_BARS,
+        vwap_prox=VWAP_PROX,
+        entry_start_min=ENTRY_START,
+        entry_cutoff_min=ENTRY_CUTOFF,
+        max_trades_per_day=MAX_TRADES_PER_DAY,
+    )
 
+    for day, day_df in df.groupby("date"):
+        signal.reset_daily()  # Reset signal state for new day
         rows = list(day_df.itertuples())
 
         i = 0
         while i < len(rows):
             r = rows[i]
 
-            if MAX_TRADES_PER_DAY > 0 and trades_today >= MAX_TRADES_PER_DAY:
-                break
-
-            m = r.minute
-
-            if m < ENTRY_START:
-                counter = 0
-                i += 1
-                continue
-
-            if m >= ENTRY_CUTOFF:
-                i += 1
-                continue
-
-            # Skip candles where EMA is not yet established
-            if r.ema is None or (hasattr(r.ema, '__class__') and str(r.ema) == 'nan'):
-                i += 1
-                continue
-            try:
-                ema_val = float(r.ema)
-            except (TypeError, ValueError):
-                i += 1
-                continue
-            if ema_val != ema_val:  # NaN check
-                i += 1
-                continue
-
-            trend = "up" if r.close > ema_val else "down"
-
-            pct = (r.close - r.vwap) / r.vwap if r.vwap > 0 else 0.0
-
-            # ── Confirmation phase ───────────────────────────────────────────
-            if confirming:
-                confirmed = (
-                    (pending_dir == "long"  and r.close > r.vwap) or
-                    (pending_dir == "short" and r.close < r.vwap)
-                )
-                if confirmed:
-                    confirm_count += 1
-                    if confirm_count >= CONFIRM_BARS:
-                        # Signal confirmed — execute trade
-                        direction   = pending_dir
-                        entry_price = r.close
-                        entry_time  = r.Index
-                        entry_min   = r.minute
-
-                        if direction == "long":
-                            tp_price = entry_price * (1 + TP_PCT)
-                            sl_price = entry_price * (1 - SL_PCT)
-                        else:
-                            tp_price = entry_price * (1 - TP_PCT)
-                            sl_price = entry_price * (1 + SL_PCT)
-
-                        # Scan for exit
-                        exit_price = rows[-1].close
-                        exit_time  = rows[-1].Index
-                        reason     = "EOD"
-                        exit_idx   = len(rows) - 1
-
-                        for j in range(i + 1, len(rows)):
-                            rr = rows[j]
-                            if rr.minute >= END_OF_DAY:
-                                exit_price = rr.close
-                                exit_time  = rr.Index
-                                reason     = "EOD"
-                                exit_idx   = j
-                                break
-                            if direction == "long":
-                                if rr.low <= sl_price:
-                                    exit_price = sl_price
-                                    exit_time  = rr.Index
-                                    reason     = "SL"
-                                    exit_idx   = j
-                                    break
-                                if rr.high >= tp_price:
-                                    exit_price = tp_price
-                                    exit_time  = rr.Index
-                                    reason     = "TP"
-                                    exit_idx   = j
-                                    break
-                            else:  # short
-                                if rr.high >= sl_price:
-                                    exit_price = sl_price
-                                    exit_time  = rr.Index
-                                    reason     = "SL"
-                                    exit_idx   = j
-                                    break
-                                if rr.low <= tp_price:
-                                    exit_price = tp_price
-                                    exit_time  = rr.Index
-                                    reason     = "TP"
-                                    exit_idx   = j
-                                    break
-
-                        if direction == "long":
-                            pnl_pct = (exit_price - entry_price) / entry_price
-                        else:
-                            pnl_pct = (entry_price - exit_price) / entry_price
-
-                        size  = capital * POS_SIZE
-                        gross = size * pnl_pct
-                        fees  = size * FEE_PCT * 2
-                        net   = gross - fees
-                        capital += net
-
-                        trades.append({
-                            "date":          day,
-                            "direction":     direction,
-                            "trend_at_entry": trend,
-                            "entry_time":    entry_time,
-                            "exit_time":     exit_time,
-                            "entry_price":   round(entry_price, 6),
-                            "exit_price":    round(exit_price, 6),
-                            "tp_price":      round(tp_price, 6),
-                            "sl_price":      round(sl_price, 6),
-                            "vwap_at_entry": round(r.vwap, 6),
-                            "ema_at_entry":  round(ema_val, 6),
-                            "pnl_pct":       round(pnl_pct * 100, 4),
-                            "net_pnl":       round(net, 4),
-                            "reason":        reason,
-                            "capital":       round(capital, 2),
-                            "hold_mins":     int((exit_time - entry_time).total_seconds() / 60),
-                        })
-                        equity_curve.append({"time": exit_time, "capital": capital})
-                        trades_today += 1
-                        counter = 0
-                        confirming = False
-                        confirm_count = 0
-                        pending_dir = None
-                        i = exit_idx + 1
-                        continue
-                else:
-                    # Confirmation failed
-                    confirming    = False
-                    confirm_count = 0
-                    pending_dir   = None
-                    counter       = 0
-                i += 1
-                continue
-
-            # ── Consolidation / breakout detection ───────────────────────────
-            if abs(pct) <= VWAP_PROX:
-                counter += 1
-            elif counter >= MIN_BARS:
-                breakout_long  = trend == "up"   and pct >  VWAP_PROX
-                breakout_short = trend == "down" and pct < -VWAP_PROX
-
-                if breakout_long or breakout_short:
-                    counter     = 0
-                    pending_dir = "long" if breakout_long else "short"
-
-                    if CONFIRM_BARS == 0:
-                        # Fire immediately on breakout candle
-                        direction   = pending_dir
-                        entry_price = r.close
-                        entry_time  = r.Index
-
-                        if direction == "long":
-                            tp_price = entry_price * (1 + TP_PCT)
-                            sl_price = entry_price * (1 - SL_PCT)
-                        else:
-                            tp_price = entry_price * (1 - TP_PCT)
-                            sl_price = entry_price * (1 + SL_PCT)
-
-                        exit_price = rows[-1].close
-                        exit_time  = rows[-1].Index
-                        reason     = "EOD"
-                        exit_idx   = len(rows) - 1
-
-                        for j in range(i + 1, len(rows)):
-                            rr = rows[j]
-                            if rr.minute >= END_OF_DAY:
-                                exit_price = rr.close
-                                exit_time  = rr.Index
-                                reason     = "EOD"
-                                exit_idx   = j
-                                break
-                            if direction == "long":
-                                if rr.low <= sl_price:
-                                    exit_price = sl_price
-                                    exit_time  = rr.Index
-                                    reason     = "SL"
-                                    exit_idx   = j
-                                    break
-                                if rr.high >= tp_price:
-                                    exit_price = tp_price
-                                    exit_time  = rr.Index
-                                    reason     = "TP"
-                                    exit_idx   = j
-                                    break
-                            else:
-                                if rr.high >= sl_price:
-                                    exit_price = sl_price
-                                    exit_time  = rr.Index
-                                    reason     = "SL"
-                                    exit_idx   = j
-                                    break
-                                if rr.low <= tp_price:
-                                    exit_price = tp_price
-                                    exit_time  = rr.Index
-                                    reason     = "TP"
-                                    exit_idx   = j
-                                    break
-
-                        if direction == "long":
-                            pnl_pct = (exit_price - entry_price) / entry_price
-                        else:
-                            pnl_pct = (entry_price - exit_price) / entry_price
-
-                        size  = capital * POS_SIZE
-                        gross = size * pnl_pct
-                        fees  = size * FEE_PCT * 2
-                        net   = gross - fees
-                        capital += net
-
-                        trades.append({
-                            "date":          day,
-                            "direction":     direction,
-                            "trend_at_entry": trend,
-                            "entry_time":    entry_time,
-                            "exit_time":     exit_time,
-                            "entry_price":   round(entry_price, 6),
-                            "exit_price":    round(exit_price, 6),
-                            "tp_price":      round(tp_price, 6),
-                            "sl_price":      round(sl_price, 6),
-                            "vwap_at_entry": round(r.vwap, 6),
-                            "ema_at_entry":  round(ema_val, 6),
-                            "pnl_pct":       round(pnl_pct * 100, 4),
-                            "net_pnl":       round(net, 4),
-                            "reason":        reason,
-                            "capital":       round(capital, 2),
-                            "hold_mins":     int((exit_time - entry_time).total_seconds() / 60),
-                        })
-                        equity_curve.append({"time": exit_time, "capital": capital})
-                        trades_today += 1
-                        counter = 0
-                        confirming = False
-                        confirm_count = 0
-                        pending_dir = None
-                        i = exit_idx + 1
-                        continue
-                    else:
-                        confirming    = True
-                        confirm_count = 0
-                else:
-                    counter = 0
+            # Determine trend from EMA (same as bot does)
+            if r.ema is None or (isinstance(r.ema, float) and r.ema != r.ema):
+                trend = None
             else:
-                counter = 0
+                trend = "up" if r.close > r.ema else "down"
 
-            i += 1
+            # Feed candle to signal generator (SAME AS BOT)
+            sig = signal.on_candle(
+                close=r.close,
+                vwap=r.vwap,
+                minute_of_day=r.minute,
+                trend=trend,
+                volume=r.volume,
+                vol_sma20=r.vol_sma20 if not pd.isna(r.vol_sma20) else 0.0,
+            )
+
+            # No signal, move to next candle
+            if sig is None:
+                i += 1
+                continue
+
+            # Signal fired! Execute trade
+            direction = "long" if sig == "ENTER_LONG" else "short"
+            entry_price = r.close
+            entry_time = r.Index
+
+            if direction == "long":
+                tp_price = entry_price * (1 + TP_PCT)
+                sl_price = entry_price * (1 - SL_PCT)
+            else:
+                tp_price = entry_price * (1 - TP_PCT)
+                sl_price = entry_price * (1 + SL_PCT)
+
+            # Scan for exit (TP/SL/EOD)
+            exit_price = rows[-1].close
+            exit_time = rows[-1].Index
+            reason = "EOD"
+            exit_idx = len(rows) - 1
+
+            for j in range(i + 1, len(rows)):
+                rr = rows[j]
+                if rr.minute >= END_OF_DAY:
+                    exit_price = rr.close
+                    exit_time = rr.Index
+                    reason = "EOD"
+                    exit_idx = j
+                    break
+                if direction == "long":
+                    if rr.low <= sl_price:
+                        exit_price = sl_price
+                        exit_time = rr.Index
+                        reason = "SL"
+                        exit_idx = j
+                        break
+                    if rr.high >= tp_price:
+                        exit_price = tp_price
+                        exit_time = rr.Index
+                        reason = "TP"
+                        exit_idx = j
+                        break
+                else:  # short
+                    if rr.high >= sl_price:
+                        exit_price = sl_price
+                        exit_time = rr.Index
+                        reason = "SL"
+                        exit_idx = j
+                        break
+                    if rr.low <= tp_price:
+                        exit_price = tp_price
+                        exit_time = rr.Index
+                        reason = "TP"
+                        exit_idx = j
+                        break
+
+            # Calculate P&L
+            if direction == "long":
+                pnl_pct = (exit_price - entry_price) / entry_price
+            else:
+                pnl_pct = (entry_price - exit_price) / entry_price
+
+            size = capital * POS_SIZE
+            gross = size * pnl_pct
+            fees = size * FEE_PCT * 2
+            net = gross - fees
+            capital += net
+
+            trades.append({
+                "date": day,
+                "direction": direction,
+                "trend_at_entry": trend if trend else "N/A",
+                "entry_time": entry_time,
+                "exit_time": exit_time,
+                "entry_price": round(entry_price, 6),
+                "exit_price": round(exit_price, 6),
+                "tp_price": round(tp_price, 6),
+                "sl_price": round(sl_price, 6),
+                "vwap_at_entry": round(r.vwap, 6),
+                "ema_at_entry": round(r.ema, 6) if r.ema and r.ema == r.ema else 0,
+                "pnl_pct": round(pnl_pct * 100, 4),
+                "net_pnl": round(net, 4),
+                "reason": reason,
+                "capital": round(capital, 2),
+                "hold_mins": int((exit_time - entry_time).total_seconds() / 60),
+            })
+            equity_curve.append({"time": exit_time, "capital": capital})
+
+            # Reset signal state after trade closes (allows next setup)
+            signal.reset_signal()
+
+            # Jump to after exit
+            i = exit_idx + 1
 
     return pd.DataFrame(trades), equity_curve
 
 
 def analyze(tdf: pd.DataFrame):
+    """Analyze trades and print detailed statistics."""
     symbol = os.path.basename(CSV_FILE).replace("_1m_klines.csv", "").upper()
 
     print("=" * 80)
@@ -451,6 +322,7 @@ def analyze(tdf: pd.DataFrame):
 
 
 def plot_equity(tdf: pd.DataFrame, equity: list):
+    """Generate interactive Plotly chart with equity curve, P&L, and drawdown."""
     if tdf.empty:
         return
 
