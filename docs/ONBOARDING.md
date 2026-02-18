@@ -228,7 +228,7 @@ info = client.rest_api.exchange_information()
 
 ---
 
-## Quick Checklist
+## Quick Checklist — MomShort
 
 ```
 [ ] 1. Download data         python fetch_klines.py
@@ -244,15 +244,89 @@ info = client.rest_api.exchange_information()
 
 ---
 
+## VWAPPullback Strategy — Onboarding a New Asset
+
+The **VWAPPullback** bot (`trader pullback`) is bidirectional: it goes long in uptrends
+and short in downtrends, both triggered by a VWAP pullback pattern. It works for any
+USDT-M futures symbol without pre-configuration.
+
+### Quick Checklist — VWAPPullback
+
+```
+[ ] 1. Download data         python fetch_klines.py  (same as above)
+[ ] 2. Detailed backtest     python backtest_detail_pullback.py
+[ ] 3. Validate results      All months profitable? DD < 10%? Long/short balanced?
+[ ] 4. Tune parameters       Edit constants at top of backtest_detail_pullback.py
+[ ] 5. Document              docs/STRATEGY_TOKEN.md
+[ ] 6. Exchange precision    Fetched automatically at startup (or check manually)
+[ ] 7. Paper trade           Run with --dry-run for 1-2 weeks first
+```
+
+### Step 2: Run the VWAPPullback Backtest
+
+Edit `backtest_detail_pullback.py` — update the CSV path and parameters:
+
+```python
+CSV_FILE     = "newtoken_1m_klines.csv"
+EMA_PERIOD   = 200      # trend filter period (try 100, 200, 500)
+TP_PCT       = 0.05     # 5% take-profit
+SL_PCT       = 0.025    # 2.5% stop-loss
+MIN_BARS     = 3        # consolidation bars near VWAP
+CONFIRM_BARS = 2        # confirmation bars after breakout
+VWAP_PROX    = 0.005    # 0.5% proximity threshold
+POS_SIZE     = 0.20     # 20% of capital per trade
+```
+
+Run it:
+
+```bash
+python backtest_detail_pullback.py
+```
+
+**What to look for:**
+
+1. **Direction breakdown** — are both LONG and SHORT profitable, or only one direction?
+   If only one direction works, consider using the MomShort bot instead.
+
+2. **EOD exits** — should dominate (> 60%). High TP/SL hit rate means parameters need tuning.
+
+3. **Monthly breakdown** — most months should be profitable.
+
+4. **EMA period sensitivity** — try 100, 200, 500. Shorter EMA = more reactive to trend
+   changes (more trades, more whipsaws). Longer = slower but more stable.
+
+**Red flags (tune or skip):**
+- Win rate < 35% with R:R < 1.5
+- Max drawdown > 15%
+- Only one direction (long or short) has positive average P&L
+- Best month > 3× worst month (unstable edge)
+
+### Step 7: Run in Paper Trade Mode
+
+```bash
+# Watch live signals without placing orders
+poetry run python -m trader pullback --symbol NEWUSDT --dry-run \
+  --tp 5.0 --sl 2.5 --ema-period 200 --min-bars 3 --confirm-bars 2
+
+# After validation, go live
+poetry run python -m trader pullback --symbol NEWUSDT \
+  --leverage 3 --tp 5.0 --sl 2.5 --pos-size 0.20
+```
+
+---
+
 ## File Reference
 
 | File | Purpose |
 |------|---------|
 | `fetch_klines.py` | Download 1m candle data from Binance |
-| `backtest_sweep/src/main.rs` | Rust parameter sweep engine (~4.8M combos) |
-| `backtest_detail.py` | Detailed trade-by-trade analysis + charts |
+| `backtest_sweep/src/main.rs` | Rust parameter sweep engine (~4.8M combos) — MomShort/Long |
+| `backtest_detail.py` | Detailed backtest for MomShort strategy |
+| `backtest_detail_pullback.py` | Detailed backtest for VWAPPullback (bidirectional + EMA) |
 | `backtest_sweep.csv` | Full sweep results |
-| `champion_trades.csv` | Trade log from detailed backtest |
-| `champion_analysis.html` | Interactive equity/P&L/drawdown chart |
+| `champion_trades.csv` | Trade log from MomShort detailed backtest |
+| `champion_analysis.html` | Interactive chart from MomShort detailed backtest |
+| `pullback_trades.csv` | Trade log from VWAPPullback detailed backtest |
+| `pullback_analysis.html` | Interactive chart from VWAPPullback detailed backtest |
 | `docs/STRATEGY_*.md` | Per-token strategy documentation |
-| `trader/config.py` | Live trading configuration |
+| `trader/config.py` | Live trading configuration (MomShort symbols) |
