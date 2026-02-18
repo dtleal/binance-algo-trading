@@ -3,6 +3,9 @@
 Bidirectional VWAP pullback with EMA trend filter:
   - Uptrend (close > EMA):   consolidate near VWAP → break above → ENTER_LONG
   - Downtrend (close < EMA): consolidate near VWAP → break below → ENTER_SHORT
+
+Supports multiple trades per day via max_trades_per_day (default 4).
+After each trade fires the signal resets so the next setup can be detected.
 """
 
 
@@ -31,12 +34,15 @@ class VWAPPullbackSignal:
 
     Logic (same structure as MomShortSignal, bidirectional):
 
-    States: IDLE → CONSOLIDATING → CONFIRMING → signal fired
+    States: IDLE → CONSOLIDATING → CONFIRMING → signal fired → reset → IDLE…
 
     Consolidation: |pct_from_vwap| <= vwap_prox  for min_bars candles
     Breakout:
       - Uptrend   → pct > +vwap_prox  → confirm confirm_bars candles above VWAP
       - Downtrend → pct < -vwap_prox  → confirm confirm_bars candles below VWAP
+
+    After each signal fires the intraday pattern state resets so the next
+    setup can be detected, up to max_trades_per_day per UTC day.
     """
 
     def __init__(
@@ -46,6 +52,7 @@ class VWAPPullbackSignal:
         vwap_prox: float,
         entry_start_min: int,
         entry_cutoff_min: int,
+        max_trades_per_day: int = 4,
         vol_filter: bool = False,
     ):
         self.min_bars = min_bars
@@ -53,24 +60,39 @@ class VWAPPullbackSignal:
         self.vwap_prox = vwap_prox
         self.entry_start_min = entry_start_min
         self.entry_cutoff_min = entry_cutoff_min
+        self.max_trades_per_day = max_trades_per_day
         self.vol_filter = vol_filter
 
         self.counter = 0
         self.confirming = False
         self.confirm_count = 0
         self._pending_direction: str | None = None  # "long" or "short"
-        self.traded_today = False
+        self.trades_today = 0
+
+    @property
+    def traded_today(self) -> bool:
+        """True when the daily trade limit has been reached."""
+        return self.trades_today >= self.max_trades_per_day
 
     def reset_daily(self):
-        """Reset intraday state for a new UTC day."""
+        """Reset all intraday state for a new UTC day."""
         self.counter = 0
         self.confirming = False
         self.confirm_count = 0
         self._pending_direction = None
-        self.traded_today = False
+        self.trades_today = 0
+
+    def reset_signal(self):
+        """Reset pattern state after a trade, allowing the next setup.
+        Called by the bot when a position closes mid-day."""
+        self.counter = 0
+        self.confirming = False
+        self.confirm_count = 0
+        self._pending_direction = None
 
     def mark_traded(self):
-        self.traded_today = True
+        """Mark one trade as consumed (e.g. resuming with an existing position)."""
+        self.trades_today += 1
 
     def on_candle(
         self,
@@ -111,7 +133,7 @@ class VWAPPullbackSignal:
                 self.confirm_count += 1
                 if self.confirm_count >= self.confirm_bars:
                     self.confirming = False
-                    self.traded_today = True
+                    self.trades_today += 1
                     return "ENTER_LONG" if direction == "long" else "ENTER_SHORT"
             else:
                 # Confirmation failed — reset
@@ -136,7 +158,7 @@ class VWAPPullbackSignal:
                     return None
 
                 if self.confirm_bars == 0:
-                    self.traded_today = True
+                    self.trades_today += 1
                     return "ENTER_LONG" if direction == "long" else "ENTER_SHORT"
 
                 self.confirming = True

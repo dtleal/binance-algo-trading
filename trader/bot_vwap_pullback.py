@@ -87,6 +87,7 @@ class VWAPPullbackBot:
         eod_min: int = 1430,
         pos_size_pct: float = 0.20,
         ema_period: int = 200,
+        max_trades_per_day: int = 4,
         vol_filter: bool = False,
     ):
         self.symbol = symbol.upper()
@@ -149,6 +150,7 @@ class VWAPPullbackBot:
             vwap_prox=vwap_prox,
             entry_start_min=entry_start_min,
             entry_cutoff_min=entry_cutoff_min,
+            max_trades_per_day=max_trades_per_day,
             vol_filter=vol_filter,
         )
         self._vol_history: collections.deque[float] = collections.deque(maxlen=20)
@@ -454,7 +456,8 @@ class VWAPPullbackBot:
             f"Leverage: {self.leverage}x | "
             f"TP: {self.tp_pct}% | SL: {self.sl_pct}% | "
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
-            f"EMA period: {self._ema.period}"
+            f"EMA period: {self._ema.period} | "
+            f"Max trades/day: {self._signal.max_trades_per_day}"
         )
         logger.info("-" * 60)
 
@@ -772,7 +775,7 @@ class VWAPPullbackBot:
 
         except Exception as e:
             logger.info(f"{RED}Entry failed: {e}{RESET}")
-            self._signal.traded_today = False
+            self._signal.trades_today = max(0, self._signal.trades_today - 1)
             self._direction = None
             self._state = _State.SCANNING
 
@@ -794,10 +797,15 @@ class VWAPPullbackBot:
                     continue
                 if pos is None or pos["position_amt"] == 0:
                     logger.info(
-                        f"{YELLOW}{prefix}Position closed (SL/TP filled){RESET}"
+                        f"{YELLOW}{prefix}Position closed (SL/TP filled) | "
+                        f"trades today: {self._signal.trades_today}/{self._signal.max_trades_per_day}{RESET}"
                     )
-                    self._state = _State.COOLDOWN
                     self._direction = None
+                    if self._signal.traded_today:
+                        self._state = _State.COOLDOWN
+                    else:
+                        self._signal.reset_signal()
+                        self._state = _State.SCANNING
                     return
         except asyncio.CancelledError:
             pass

@@ -27,11 +27,12 @@ SL_PCT        = 0.025     # 2.5% stop-loss
 MIN_BARS      = 3         # min consolidation bars near VWAP
 CONFIRM_BARS  = 2         # confirmation bars after breakout
 VWAP_PROX     = 0.005     # 0.5% proximity threshold
-ENTRY_START   = 60        # 01:00 UTC (minutes from midnight)
-ENTRY_CUTOFF  = 1320      # 22:00 UTC
-END_OF_DAY    = 1430      # 23:50 UTC
-POS_SIZE      = 0.20      # 20% of capital per trade
-FEE_PCT       = 0.0004    # 0.04% taker fee per side
+ENTRY_START        = 60    # 01:00 UTC (minutes from midnight)
+ENTRY_CUTOFF       = 1320  # 22:00 UTC
+END_OF_DAY         = 1430  # 23:50 UTC
+POS_SIZE           = 0.20  # 20% of capital per trade
+MAX_TRADES_PER_DAY = 4     # max entries per UTC day (0 = unlimited)
+FEE_PCT            = 0.0004  # 0.04% taker fee per side
 INITIAL_CAP   = 1000.0
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -78,7 +79,7 @@ def run_backtest(df: pd.DataFrame):
         confirming = False
         confirm_count = 0
         pending_dir = None   # "long" or "short"
-        traded = False
+        trades_today = 0
 
         rows = list(day_df.itertuples())
 
@@ -86,7 +87,7 @@ def run_backtest(df: pd.DataFrame):
         while i < len(rows):
             r = rows[i]
 
-            if traded:
+            if MAX_TRADES_PER_DAY > 0 and trades_today >= MAX_TRADES_PER_DAY:
                 break
 
             m = r.minute
@@ -143,6 +144,7 @@ def run_backtest(df: pd.DataFrame):
                         exit_price = rows[-1].close
                         exit_time  = rows[-1].Index
                         reason     = "EOD"
+                        exit_idx   = len(rows) - 1
 
                         for j in range(i + 1, len(rows)):
                             rr = rows[j]
@@ -150,28 +152,33 @@ def run_backtest(df: pd.DataFrame):
                                 exit_price = rr.close
                                 exit_time  = rr.Index
                                 reason     = "EOD"
+                                exit_idx   = j
                                 break
                             if direction == "long":
                                 if rr.low <= sl_price:
                                     exit_price = sl_price
                                     exit_time  = rr.Index
                                     reason     = "SL"
+                                    exit_idx   = j
                                     break
                                 if rr.high >= tp_price:
                                     exit_price = tp_price
                                     exit_time  = rr.Index
                                     reason     = "TP"
+                                    exit_idx   = j
                                     break
                             else:  # short
                                 if rr.high >= sl_price:
                                     exit_price = sl_price
                                     exit_time  = rr.Index
                                     reason     = "SL"
+                                    exit_idx   = j
                                     break
                                 if rr.low <= tp_price:
                                     exit_price = tp_price
                                     exit_time  = rr.Index
                                     reason     = "TP"
+                                    exit_idx   = j
                                     break
 
                         if direction == "long":
@@ -204,8 +211,13 @@ def run_backtest(df: pd.DataFrame):
                             "hold_mins":     int((exit_time - entry_time).total_seconds() / 60),
                         })
                         equity_curve.append({"time": exit_time, "capital": capital})
-                        traded = True
-                        break
+                        trades_today += 1
+                        counter = 0
+                        confirming = False
+                        confirm_count = 0
+                        pending_dir = None
+                        i = exit_idx + 1
+                        continue
                 else:
                     # Confirmation failed
                     confirming    = False
@@ -242,6 +254,7 @@ def run_backtest(df: pd.DataFrame):
                         exit_price = rows[-1].close
                         exit_time  = rows[-1].Index
                         reason     = "EOD"
+                        exit_idx   = len(rows) - 1
 
                         for j in range(i + 1, len(rows)):
                             rr = rows[j]
@@ -249,28 +262,33 @@ def run_backtest(df: pd.DataFrame):
                                 exit_price = rr.close
                                 exit_time  = rr.Index
                                 reason     = "EOD"
+                                exit_idx   = j
                                 break
                             if direction == "long":
                                 if rr.low <= sl_price:
                                     exit_price = sl_price
                                     exit_time  = rr.Index
                                     reason     = "SL"
+                                    exit_idx   = j
                                     break
                                 if rr.high >= tp_price:
                                     exit_price = tp_price
                                     exit_time  = rr.Index
                                     reason     = "TP"
+                                    exit_idx   = j
                                     break
                             else:
                                 if rr.high >= sl_price:
                                     exit_price = sl_price
                                     exit_time  = rr.Index
                                     reason     = "SL"
+                                    exit_idx   = j
                                     break
                                 if rr.low <= tp_price:
                                     exit_price = tp_price
                                     exit_time  = rr.Index
                                     reason     = "TP"
+                                    exit_idx   = j
                                     break
 
                         if direction == "long":
@@ -303,8 +321,13 @@ def run_backtest(df: pd.DataFrame):
                             "hold_mins":     int((exit_time - entry_time).total_seconds() / 60),
                         })
                         equity_curve.append({"time": exit_time, "capital": capital})
-                        traded = True
-                        break
+                        trades_today += 1
+                        counter = 0
+                        confirming = False
+                        confirm_count = 0
+                        pending_dir = None
+                        i = exit_idx + 1
+                        continue
                     else:
                         confirming    = True
                         confirm_count = 0
