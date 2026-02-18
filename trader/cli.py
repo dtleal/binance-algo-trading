@@ -81,6 +81,7 @@ def main():
     pb_parser.add_argument("--min-bars", type=int, default=3, help="Min consolidation bars (default: 3)")
     pb_parser.add_argument("--confirm-bars", type=int, default=2, help="Confirmation bars (default: 2)")
     pb_parser.add_argument("--vwap-prox", type=float, default=0.005, help="VWAP proximity threshold (default: 0.005)")
+    pb_parser.add_argument("--vwap-window-days", type=int, default=10, help="VWAP rolling window in days (default: 10)")
     pb_parser.add_argument("--pos-size", type=float, default=0.20, help="Position size as fraction of capital (default: 0.20)")
     pb_parser.add_argument("--ema-period", type=int, default=200, help="EMA period for trend detection (default: 200)")
     pb_parser.add_argument("--max-trades", type=int, default=4, help="Max trades per UTC day (default: 4)")
@@ -159,6 +160,7 @@ def main():
             min_bars=args.min_bars,
             confirm_bars=args.confirm_bars,
             vwap_prox=args.vwap_prox,
+            vwap_window_days=args.vwap_window_days,
             pos_size_pct=args.pos_size,
             ema_period=args.ema_period,
             max_trades_per_day=args.max_trades,

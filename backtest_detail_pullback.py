@@ -40,6 +40,7 @@ INITIAL_CAP   = 1000.0
 
 def load(csv_file: str) -> pd.DataFrame:
     from trader.strategy import VWAPRollingTracker
+    from trader.strategy_vwap_pullback import EMATracker
 
     df = pd.read_csv(csv_file)
     df["time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
@@ -47,27 +48,24 @@ def load(csv_file: str) -> pd.DataFrame:
     df["date"]   = df.index.date
     df["minute"] = df.index.hour * 60 + df.index.minute
 
-    # Rolling VWAP — sliding window of VWAP_WINDOW_DAYS complete days
+    # Rolling VWAP — using the same tracker as the bot
     vwap_tracker = VWAPRollingTracker(window_days=VWAP_WINDOW_DAYS)
     vwap_vals = []
     for _, row in df.iterrows():
-        day_ordinal = int(row.name.timestamp()) // 86400  # Day number from timestamp
+        day_ordinal = int(row.name.timestamp()) // 86400
         vwap = vwap_tracker.update(row["high"], row["low"], row["close"], row["volume"], day_ordinal)
         vwap_vals.append(vwap)
     df["vwap"] = vwap_vals
 
-    # Volume SMA(20) for optional vol filter
+    # Volume SMA(20)
     df["vol_sma20"] = df["volume"].rolling(20).mean()
 
-    # EMA — sequential across ALL rows, never resets (multi-day trend indicator)
-    k = 2.0 / (EMA_PERIOD + 1)
+    # EMA — using the same tracker as the bot
+    ema_tracker = EMATracker(period=EMA_PERIOD)
     ema_vals = []
-    ema = None
-    count = 0
     for c in df["close"]:
-        count += 1
-        ema = c if ema is None else c * k + ema * (1 - k)
-        ema_vals.append(ema if count >= EMA_PERIOD else None)
+        ema = ema_tracker.update(c)
+        ema_vals.append(ema)
     df["ema"] = ema_vals
 
     return df
