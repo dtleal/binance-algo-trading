@@ -1,8 +1,8 @@
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::time::Instant;
+use std::env;
 
-const CSV_FILE: &str = "../axsusdt_1m_klines.csv";
 const FEE_PCT: f64 = 0.0004;
 const INITIAL_CAPITAL: f64 = 1000.0;
 const END_OF_DAY: u16 = 1430; // 23:50
@@ -489,9 +489,16 @@ fn evaluate(entries: &[Entry], candles: &[Candle], tp_pct: f64, sl_pct: f64, pos
 }
 
 fn main() {
+    let args: Vec<String> = env::args().collect();
+    let csv_file = if args.len() > 1 {
+        &args[1]
+    } else {
+        "../axsusdt_1m_klines.csv"
+    };
+
     let t0 = Instant::now();
-    println!("Loading {}...", CSV_FILE);
-    let mut candles = load_csv(CSV_FILE);
+    println!("Loading {}...", csv_file);
+    let mut candles = load_csv(csv_file);
     println!("  {} candles", candles.len());
     precompute(&mut candles);
     let days = group_by_day(&candles);

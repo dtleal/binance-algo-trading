@@ -1,4 +1,4 @@
-.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data backtest-sweep backtest-detail backtest-sweep-pullback backtest-detail-pullback
+.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data backtest-sweep backtest-detail backtest-detail-pullback build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -79,8 +79,28 @@ backtest-sweep: ## Run MomShort parameter sweep (edit backtest_sweep.py first)
 backtest-detail: ## Run detailed MomShort backtest (edit backtest_detail.py first)
 	poetry run python backtest_detail.py
 
-backtest-sweep-pullback: ## Run VWAPPullback parameter sweep (edit backtest_sweep_pullback.py first)
-	poetry run python backtest_sweep_pullback.py
-
 backtest-detail-pullback: ## Run detailed VWAPPullback backtest (edit backtest_detail_pullback.py first)
 	poetry run python backtest_detail_pullback.py
+
+# Rust sweep (240x faster!)
+build-sweep: ## Build Rust sweep (release mode)
+	cd backtest_sweep && cargo build --release
+
+sweep-rust: ## Run Rust sweep for all strategies (SYMBOL=axsusdt)
+	@if [ ! -f "$(SYMBOL)_1m_klines.csv" ]; then \
+		echo "Error: $(SYMBOL)_1m_klines.csv not found. Run 'make fetch-data SYMBOL=$(SYMBOL)' first"; \
+		exit 1; \
+	fi
+	./backtest_sweep/target/release/backtest_sweep $(SYMBOL)_1m_klines.csv
+
+sweep-rust-axs: ## Run Rust sweep for AXSUSDT (all 5 strategies)
+	@$(MAKE) sweep-rust SYMBOL=axsusdt
+
+sweep-rust-sand: ## Run Rust sweep for SANDUSDT (all 5 strategies)
+	@$(MAKE) sweep-rust SYMBOL=sandusdt
+
+sweep-rust-gala: ## Run Rust sweep for GALAUSDT (all 5 strategies)
+	@$(MAKE) sweep-rust SYMBOL=galausdt
+
+sweep-rust-mana: ## Run Rust sweep for MANAUSDT (all 5 strategies)
+	@$(MAKE) sweep-rust SYMBOL=manausdt
