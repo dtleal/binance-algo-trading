@@ -1,4 +1,4 @@
-.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history plot bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry monitor-remote logs clean help
+.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data backtest-sweep backtest-detail backtest-sweep-pullback backtest-detail-pullback
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -39,9 +39,6 @@ close: ## Close futures short position
 history: ## Show trade history with P&L (DAYS=7)
 	poetry run python -m trader history --days $(DAYS)
 
-plot: ## Show daily P&L and cumulative charts (DAYS=30)
-	poetry run python -m trader plot --days $(DAYS)
-
 bot: ## Run MomShort trading bot for AXSUSDT (LEVERAGE=5)
 	poetry run python -m trader bot --leverage $(LEVERAGE)
 
@@ -66,11 +63,24 @@ bot-gala: ## Run MomShort trading bot for GALAUSDT
 bot-gala-dry: ## Run GALAUSDT bot in dry-run mode
 	poetry run python -m trader bot --symbol galausdt --dry-run --leverage $(LEVERAGE)
 
-monitor-remote: ## Live-stream remote bot logs (BOT=axs|sand for single bot)
-	./infra/scripts/monitor_remote.sh $(BOT)
-
 logs: ## Tail the latest log file
 	@ls -t logs/*.log 2>/dev/null | head -1 | xargs -r tail -f || echo "No log files found"
 
 clean: ## Remove log files
 	rm -rf logs/*.log
+
+# Backtest commands
+fetch-data: ## Download historical kline data (edit fetch_klines.py first)
+	poetry run python fetch_klines.py
+
+backtest-sweep: ## Run MomShort parameter sweep (edit backtest_sweep.py first)
+	poetry run python backtest_sweep.py
+
+backtest-detail: ## Run detailed MomShort backtest (edit backtest_detail.py first)
+	poetry run python backtest_detail.py
+
+backtest-sweep-pullback: ## Run VWAPPullback parameter sweep (edit backtest_sweep_pullback.py first)
+	poetry run python backtest_sweep_pullback.py
+
+backtest-detail-pullback: ## Run detailed VWAPPullback backtest (edit backtest_detail_pullback.py first)
+	poetry run python backtest_detail_pullback.py

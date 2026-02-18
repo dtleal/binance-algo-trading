@@ -9,7 +9,9 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "aiohttp-socks>=0.9.0",
     "PySocks>=1.7.0",
-    "matplotlib>=3.9.0",
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "plotly>=5.0.0",
 ]
 
 [build-system]
