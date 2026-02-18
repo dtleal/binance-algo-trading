@@ -21,8 +21,18 @@ def show_config(row, strategy):
 
     # Strategy-specific parameters
     if strategy == "VWAPPullback":
-        ema = int(row['ema_period']) if pd.notna(row['ema_period']) and row['ema_period'] > 0 else 'N/A'
-        max_t = int(row['max_trades_per_day']) if pd.notna(row['max_trades_per_day']) and row['max_trades_per_day'] > 0 else 'N/A'
+        # Handle EMA (can be int or string like "-")
+        try:
+            ema = int(float(row['ema_period'])) if pd.notna(row['ema_period']) and str(row['ema_period']) != '-' else 'N/A'
+        except (ValueError, TypeError):
+            ema = 'N/A'
+
+        # Handle max_trades_per_day (can be int or string like "-")
+        try:
+            max_t = int(float(row['max_trades_per_day'])) if pd.notna(row['max_trades_per_day']) and str(row['max_trades_per_day']) != '-' else 'N/A'
+        except (ValueError, TypeError):
+            max_t = 'N/A'
+
         print(f"EMA={ema}  max_trades={max_t}")
     else:
         # Other strategies don't use EMA/max_trades
