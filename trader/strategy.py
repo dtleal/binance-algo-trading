@@ -37,6 +37,38 @@ class VWAPTracker:
         return self.value
 
 
+class VWAPRollingTracker:
+    """Rolling VWAP over N days (N * 1440 candles for 1-minute data).
+
+    Unlike VWAPTracker, this does NOT reset daily. It maintains a sliding
+    window of the last N days worth of candles, matching the Rust sweep logic.
+    """
+
+    def __init__(self, window_days: int = 10):
+        """Initialize rolling VWAP tracker.
+
+        Args:
+            window_days: Number of days to include in VWAP calculation (default 10).
+        """
+        from collections import deque
+        self.window_days = window_days
+        self.window_size = window_days * 1440  # 1440 minutes per day
+        self._history: deque = deque(maxlen=self.window_size)
+        self.value = 0.0
+
+    def update(self, high: float, low: float, close: float, volume: float) -> float:
+        """Feed one closed candle. Returns current rolling VWAP."""
+        tp = (high + low + close) / 3.0
+        pv = tp * volume
+        self._history.append((pv, volume))
+
+        # Calculate VWAP from rolling window
+        total_pv = sum(h[0] for h in self._history)
+        total_vol = sum(h[1] for h in self._history)
+        self.value = total_pv / total_vol if total_vol > 0 else close
+        return self.value
+
+
 class MomShortSignal:
     """State machine that emits 'ENTER_SHORT' when the MomShort pattern completes.
 

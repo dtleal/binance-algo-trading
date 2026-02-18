@@ -106,8 +106,12 @@ def main():
             print(f"   Use 'make analyze-best' or specify '--strategy VWAPPullback'")
             sys.exit(1)
 
+        # Parse vwap_window (can be "10d" or 10)
+        vwap_window_str = str(best['vwap_window']).rstrip('d')
+        vwap_window = int(vwap_window_str)
+
         print(f"\n🚀 Running detailed backtest with best VWAPPullback config...")
-        print(f"   Parameters: TP={best['tp_pct']:.1f}% SL={best['sl_pct']:.1f}% EMA={int(best['ema_period'])}")
+        print(f"   Parameters: TP={best['tp_pct']:.1f}% SL={best['sl_pct']:.1f}% EMA={int(best['ema_period'])} VWAP={vwap_window}d")
 
         # Create a temporary detailed backtest script with these params
         script_content = f"""
@@ -125,6 +129,7 @@ SL_PCT = {best['sl_pct'] / 100}
 MIN_BARS = {int(best['min_bars'])}
 CONFIRM_BARS = {int(best['confirm_bars'])}
 VWAP_PROX = {best['vwap_prox'] / 100}
+VWAP_WINDOW_DAYS = {vwap_window}
 MAX_TRADES_PER_DAY = {int(best['max_trades_per_day'])}
 POS_SIZE = {best['pos_size_pct'] / 100}
 ENTRY_START = 60
@@ -142,6 +147,7 @@ module.SL_PCT = SL_PCT
 module.MIN_BARS = MIN_BARS
 module.CONFIRM_BARS = CONFIRM_BARS
 module.VWAP_PROX = VWAP_PROX
+module.VWAP_WINDOW_DAYS = VWAP_WINDOW_DAYS
 module.MAX_TRADES_PER_DAY = MAX_TRADES_PER_DAY
 module.POS_SIZE = POS_SIZE
 module.ENTRY_START = ENTRY_START

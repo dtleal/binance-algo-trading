@@ -26,7 +26,7 @@ from trader.config import (
     LOG_DIR,
     SYMBOL_CONFIGS,
 )
-from trader.strategy import VWAPTracker
+from trader.strategy import VWAPRollingTracker
 from trader.strategy_vwap_pullback import EMATracker, VWAPPullbackSignal
 
 
@@ -82,6 +82,7 @@ class VWAPPullbackBot:
         min_bars: int = 3,
         confirm_bars: int = 2,
         vwap_prox: float = 0.005,
+        vwap_window_days: int = 10,
         entry_start_min: int = 60,
         entry_cutoff_min: int = 1320,
         eod_min: int = 1430,
@@ -142,7 +143,7 @@ class VWAPPullbackBot:
         else:
             self._ws_url = None
 
-        self._vwap = VWAPTracker()
+        self._vwap = VWAPRollingTracker(window_days=vwap_window_days)
         self._ema = EMATracker(period=ema_period)
         self._signal = VWAPPullbackSignal(
             min_bars=min_bars,
@@ -282,7 +283,7 @@ class VWAPPullbackBot:
 
         Fetches from the public Binance Futures REST endpoint (no auth required).
         Uses ema_period + 50 candles so the EMA is fully established on startup.
-        Only today's candles (UTC) are fed into the VWAP tracker.
+        VWAP rolling tracker is fed ALL historical candles (not just today).
         """
         import json
         import urllib.request
@@ -309,9 +310,6 @@ class VWAPPullbackBot:
 
         now_utc = datetime.now(timezone.utc)
         now_ms = int(now_utc.timestamp() * 1000)
-        today_start_ms = int(
-            now_utc.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000
-        )
 
         seeded = 0
         for k in klines:
@@ -332,11 +330,10 @@ class VWAPPullbackBot:
             self._ema.update(c)
             seeded += 1
 
-            # VWAP is intraday — only today's candles
-            if open_time_ms >= today_start_ms:
-                self._vwap.update(h, l, c, v, day_ordinal)
-                if self._current_day == -1:
-                    self._current_day = day_ordinal
+            # Rolling VWAP — feed ALL historical candles
+            self._vwap.update(h, l, c, v)
+            if self._current_day == -1:
+                self._current_day = day_ordinal
 
             # vol_history: rolling window, keep feeding all candles
             self._vol_history.append(v)
@@ -357,8 +354,8 @@ class VWAPPullbackBot:
 
         if self._vwap.value > 0:
             logger.info(
-                f"VWAP seeded: {self._vwap.value:.{self._price_decimals}f} "
-                f"(from today's candles)"
+                f"VWAP({self._vwap.window_days}d) ready: {self._vwap.value:.{self._price_decimals}f} "
+                f"(rolling window seeded)"
             )
 
     # ------------------------------------------------------------------
@@ -552,7 +549,7 @@ class VWAPPullbackBot:
         ts = datetime.fromtimestamp(candle_open_ms / 1000, tz=timezone.utc).strftime("%H:%M")
 
         self._check_daily_reset(day_ordinal)
-        vwap = self._vwap.update(h, l, c, v, day_ordinal)
+        vwap = self._vwap.update(h, l, c, v)
 
         # EMA trend
         ema = self._ema.update(c)
@@ -624,8 +621,8 @@ class VWAPPullbackBot:
         self._current_day = day_ordinal
         if first_candle:
             return
-        logger.info(f"{BOLD}--- New UTC day (ordinal {day_ordinal}) — resetting ---{RESET}")
-        self._vwap.reset()
+        logger.info(f"{BOLD}--- New UTC day (ordinal {day_ordinal}) — resetting signal ---{RESET}")
+        # VWAP rolling tracker does not reset (it's a rolling window)
         self._signal.reset_daily()
         self._vol_history.clear()
         if self._state == _State.COOLDOWN:

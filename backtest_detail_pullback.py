@@ -27,6 +27,7 @@ SL_PCT        = 0.025     # 2.5% stop-loss
 MIN_BARS      = 3         # min consolidation bars near VWAP
 CONFIRM_BARS  = 2         # confirmation bars after breakout
 VWAP_PROX     = 0.005     # 0.5% proximity threshold
+VWAP_WINDOW_DAYS = 10     # rolling VWAP window in days (1, 5, 10, 20, 30)
 ENTRY_START        = 60    # 01:00 UTC (minutes from midnight)
 ENTRY_CUTOFF       = 1320  # 22:00 UTC
 END_OF_DAY         = 1430  # 23:50 UTC
@@ -38,19 +39,21 @@ INITIAL_CAP   = 1000.0
 
 
 def load(csv_file: str) -> pd.DataFrame:
+    from trader.strategy import VWAPRollingTracker
+
     df = pd.read_csv(csv_file)
     df["time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
     df.set_index("time", inplace=True)
     df["date"]   = df.index.date
     df["minute"] = df.index.hour * 60 + df.index.minute
 
-    # Intraday VWAP — resets at UTC midnight each day
-    tp = (df["high"] + df["low"] + df["close"]) / 3
-    pv = tp * df["volume"]
-    df["vwap"] = (
-        pv.groupby(df["date"]).cumsum()
-        / df["volume"].groupby(df["date"]).cumsum()
-    )
+    # Rolling VWAP — sliding window of VWAP_WINDOW_DAYS days
+    vwap_tracker = VWAPRollingTracker(window_days=VWAP_WINDOW_DAYS)
+    vwap_vals = []
+    for _, row in df.iterrows():
+        vwap = vwap_tracker.update(row["high"], row["low"], row["close"], row["volume"])
+        vwap_vals.append(vwap)
+    df["vwap"] = vwap_vals
 
     # Volume SMA(20) for optional vol filter
     df["vol_sma20"] = df["volume"].rolling(20).mean()
