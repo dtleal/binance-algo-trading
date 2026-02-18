@@ -1,12 +1,12 @@
 FROM alpine:3.21
 
-RUN apk add --no-cache openssh-client autossh
+RUN apk add --no-cache openssh-client autossh build-base git && \
+    git clone --depth 1 https://github.com/rofl0r/microsocks.git /tmp/microsocks && \
+    cd /tmp/microsocks && make && cp microsocks /usr/local/bin/ && \
+    rm -rf /tmp/microsocks && \
+    apk del build-base git
 
-ENTRYPOINT ["autossh", "-M", "0", "-N", \
-    "-R", "0.0.0.0:1081", \
-    "-o", "ServerAliveInterval=30", \
-    "-o", "ServerAliveCountMax=3", \
-    "-o", "ExitOnForwardFailure=yes", \
-    "-o", "StrictHostKeyChecking=accept-new", \
-    "-o", "UserKnownHostsFile=/root/.ssh/known_hosts", \
-    "-i", "/root/.ssh/id_rsa"]
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
