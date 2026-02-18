@@ -1,4 +1,4 @@
-.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data backtest-sweep backtest-detail backtest-detail-pullback build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana analyze-sweep analyze-best
+.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data backtest-sweep backtest-detail backtest-detail-pullback build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -111,3 +111,25 @@ analyze-sweep: ## Show top 5 VWAPPullback configs from Rust sweep
 
 analyze-best: ## Auto-run detailed backtest on BEST VWAPPullback config
 	poetry run python analyze_sweep.py --run-best
+
+# VWAPPullback bot with OPTIMIZED parameters from sweep
+# Best config: TP=10% SL=5% EMA=200 bars=5 cfm=1 vwap_prox=0.5% vwap_window=10d max_trades=1
+PULLBACK_BEST_PARAMS = --tp 10.0 --sl 5.0 --min-bars 5 --confirm-bars 1 --vwap-prox 0.005 --vwap-window-days 10 --ema-period 200 --pos-size 0.20 --max-trades 1
+
+pullback-best: ## Run VWAPPullback bot for AXSUSDT with BEST parameters (LEVERAGE=5)
+	poetry run python -m trader pullback --symbol axsusdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+pullback-best-dry: ## Run VWAPPullback bot for AXSUSDT in DRY-RUN mode with BEST parameters
+	poetry run python -m trader pullback --symbol axsusdt --dry-run --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+pullback-best-axs: ## Run VWAPPullback bot for AXSUSDT with BEST parameters
+	poetry run python -m trader pullback --symbol axsusdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+pullback-best-sand: ## Run VWAPPullback bot for SANDUSDT with BEST parameters
+	poetry run python -m trader pullback --symbol sandusdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+pullback-best-gala: ## Run VWAPPullback bot for GALAUSDT with BEST parameters
+	poetry run python -m trader pullback --symbol galausdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+
+pullback-best-mana: ## Run VWAPPullback bot for MANAUSDT with BEST parameters
+	poetry run python -m trader pullback --symbol manausdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
