@@ -272,6 +272,94 @@ class VWAPPullbackBot:
             logger.info(f"{YELLOW}Could not fetch exchange precision: {e} — using defaults{RESET}")
 
     # ------------------------------------------------------------------
+    # Indicator seeding from historical klines
+    # ------------------------------------------------------------------
+
+    def _seed_indicators(self):
+        """Pre-populate EMA, VWAP and vol_history from historical 1m klines.
+
+        Fetches from the public Binance Futures REST endpoint (no auth required).
+        Uses ema_period + 50 candles so the EMA is fully established on startup.
+        Only today's candles (UTC) are fed into the VWAP tracker.
+        """
+        import json
+        import urllib.request
+
+        limit = min(self._ema.period + 50, 1500)  # Binance max is 1500
+        url = (
+            f"https://fapi.binance.com/fapi/v1/klines"
+            f"?symbol={self.symbol}&interval=1m&limit={limit}"
+        )
+        logger.info(f"Seeding indicators from last {limit} historical 1m candles...")
+
+        try:
+            with urllib.request.urlopen(url, timeout=10) as resp:
+                klines = json.loads(resp.read())
+        except Exception as e:
+            logger.info(
+                f"{YELLOW}Could not fetch historical klines: {e} "
+                f"— EMA will warm up from live candles{RESET}"
+            )
+            return
+
+        if not klines:
+            return
+
+        now_utc = datetime.now(timezone.utc)
+        now_ms = int(now_utc.timestamp() * 1000)
+        today_start_ms = int(
+            now_utc.replace(hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000
+        )
+
+        seeded = 0
+        for k in klines:
+            open_time_ms = int(k[0])
+            close_time_ms = int(k[6])
+
+            # Skip the current open (not yet closed) candle
+            if close_time_ms > now_ms:
+                continue
+
+            h = float(k[2])
+            l = float(k[3])
+            c = float(k[4])
+            v = float(k[5])
+            day_ordinal = open_time_ms // 86_400_000
+
+            # EMA spans multiple days — always update
+            self._ema.update(c)
+            seeded += 1
+
+            # VWAP is intraday — only today's candles
+            if open_time_ms >= today_start_ms:
+                self._vwap.update(h, l, c, v, day_ordinal)
+                if self._current_day == -1:
+                    self._current_day = day_ordinal
+
+            # vol_history: rolling window, keep feeding all candles
+            self._vol_history.append(v)
+
+        ema_ready = self._ema._count >= self._ema.period
+        if ema_ready and self._ema.value is not None:
+            logger.info(
+                f"EMA({self._ema.period}) ready: "
+                f"{self._ema.value:.{self._price_decimals}f} "
+                f"(seeded from {seeded} candles)"
+            )
+        else:
+            remaining = self._ema.period - self._ema._count
+            logger.info(
+                f"{YELLOW}EMA({self._ema.period}) partially seeded ({seeded} candles). "
+                f"Needs {remaining} more live candles before trading.{RESET}"
+            )
+
+        if self._vwap.value > 0:
+            logger.info(
+                f"VWAP seeded: {self._vwap.value:.{self._price_decimals}f} "
+                f"(from today's candles)"
+            )
+
+    # ------------------------------------------------------------------
     # Startup checks
     # ------------------------------------------------------------------
 
@@ -373,6 +461,7 @@ class VWAPPullbackBot:
         if not self.dry_run:
             self._fetch_exchange_precision()
 
+        self._seed_indicators()
         self._check_startup_position()
         self._resolve_capital()
 
@@ -385,7 +474,6 @@ class VWAPPullbackBot:
                 f"notional ${self.min_notional:.2f} for {self.symbol}. "
                 f"Minimum --capital is ${min_cap:.2f}."
             )
-        logger.info(f"{YELLOW}Waiting for EMA({self._ema.period}) to establish trend...{RESET}")
         logger.info("-" * 60)
 
         self._schedule_eod()
@@ -467,7 +555,7 @@ class VWAPPullbackBot:
         ema = self._ema.update(c)
         if ema is None:
             trend = None
-            trend_label = f"EMA warming up ({self._ema._count}/{self._ema.period})"
+            trend_label = f"{YELLOW}EMA warming up ({self._ema._count}/{self._ema.period}){RESET}"
         elif c > ema:
             trend = "up"
             trend_label = f"UP  EMA={ema:.{self._price_decimals}f}"
