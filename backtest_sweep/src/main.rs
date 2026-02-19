@@ -628,7 +628,7 @@ fn main() {
 
     // Write CSV (only combos with trades)
     {
-        let mut w = csv::Writer::from_path("../backtest_sweep.csv").unwrap();
+        let mut w = csv::Writer::from_path("backtest_sweep.csv").unwrap();
         w.write_record(["strategy","tp_pct","sl_pct","rr_ratio","min_bars","vol_filter",
             "confirm_bars","trend_filter","entry_window","vwap_prox","vwap_window",
             "ema_period","max_trades_per_day","max_hold","pos_size_pct","trades","wins","losses","eods",

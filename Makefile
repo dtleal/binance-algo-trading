@@ -1,4 +1,4 @@
-.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data fetch-btc fetch-eth backtest-sweep backtest-detail backtest-detail-pullback build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
+.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry logs clean help fetch-data fetch-btc fetch-eth fetch-eth-5m backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -87,6 +87,11 @@ fetch-eth: ## Download 1 year of ETHUSDT 1m klines
 	@poetry run python fetch_klines.py
 	@echo "✅ ETHUSDT data saved to ethusdt_1m_klines.csv"
 
+fetch-eth-5m: ## Download 1 year of ETHUSDT 5-minute klines (official, for ETH VWAPPullback strategy)
+	@echo "📥 Downloading ETHUSDT 5-minute candles (1 year)..."
+	@poetry run python fetch_eth_5m_official.py
+	@echo "✅ ETHUSDT 5m data saved to ethusdt_5m_klines_official.csv"
+
 backtest-sweep: ## Run MomShort parameter sweep (edit backtest_sweep.py first)
 	poetry run python backtest_sweep.py
 
@@ -95,6 +100,10 @@ backtest-detail: ## Run detailed MomShort backtest (edit backtest_detail.py firs
 
 backtest-detail-pullback: ## Run detailed VWAPPullback backtest (edit backtest_detail_pullback.py first)
 	poetry run python backtest_detail_pullback.py
+
+backtest-eth-5m: ## Run ETH 5min VWAPPullback backtest with optimized params (+31.38% return)
+	@echo "📊 Running ETH 5min VWAPPullback backtest..."
+	@poetry run python backtest_eth_5m_FINAL.py
 
 # Rust sweep (240x faster!)
 build-sweep: ## Build Rust sweep (release mode)
@@ -133,8 +142,12 @@ analyze-best: ## Auto-run detailed backtest on BEST VWAPPullback config
 	poetry run python analyze_sweep.py --run-best
 
 # VWAPPullback bot with OPTIMIZED parameters from sweep
-# Best config: TP=10% SL=5% EMA=200 bars=5 cfm=1 vwap_prox=0.5% vwap_window=10d max_trades=1
+# Best config for AXS/SAND/GALA/MANA (1min candles): TP=10% SL=5% EMA=200 bars=5 cfm=1 vwap_prox=0.5% vwap_window=10d max_trades=1
 PULLBACK_BEST_PARAMS = --tp 10.0 --sl 5.0 --min-bars 5 --confirm-bars 1 --vwap-prox 0.005 --vwap-window-days 10 --ema-period 200 --pos-size 0.20 --max-trades 1
+
+# ETH 5min optimized params: +31.38% return, 281 trades, 49.8% win rate, 6.47% max DD
+# ⚠️  IMPORTANT: ETH strategy uses 5-minute candles (not 1min)!
+PULLBACK_ETH_5M_PARAMS = --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --vwap-window-days 1 --ema-period 100 --pos-size 0.20 --max-trades 2
 
 pullback-best: ## Run VWAPPullback bot for AXSUSDT with BEST parameters (LEVERAGE=5)
 	poetry run python -m trader pullback --symbol axsusdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
@@ -163,10 +176,17 @@ pullback-btc-dry: ## Run VWAPPullback bot for BTCUSDT in DRY-RUN mode
 	@echo "⚠️  Using default params. Run 'make sweep-rust-btc' to optimize."
 	poetry run python -m trader pullback --symbol btcusdt --dry-run --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
 
-pullback-eth: ## Run VWAPPullback bot for ETHUSDT (run sweep-rust-eth first!)
-	@echo "⚠️  Make sure to run 'make sweep-rust-eth' first to find best params!"
-	poetry run python -m trader pullback --symbol ethusdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+pullback-eth: ## Run VWAPPullback bot for ETHUSDT with optimized 5min params (LEVERAGE=5, default 20%)
+	@echo "🚀 Starting ETHUSDT VWAPPullback bot (5min candles)"
+	@echo "📊 Optimized params: TP=10% SL=5% EMA=100 bars=20 cfm=0 max_trades=2"
+	@echo "💰 Expected: +31.38% annual return | Win rate: 49.8% | Max DD: 6.47%"
+	@echo "⚙️  Leverage: $(LEVERAGE)x | Position size: 20% per trade"
+	@echo ""
+	poetry run python -m trader pullback --symbol ethusdt --leverage $(LEVERAGE) $(PULLBACK_ETH_5M_PARAMS)
 
-pullback-eth-dry: ## Run VWAPPullback bot for ETHUSDT in DRY-RUN mode
-	@echo "⚠️  Using default params. Run 'make sweep-rust-eth' to optimize."
-	poetry run python -m trader pullback --symbol ethusdt --dry-run --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
+pullback-eth-dry: ## Run VWAPPullback bot for ETHUSDT in DRY-RUN mode (5min optimized params)
+	@echo "🧪 DRY-RUN mode: ETHUSDT VWAPPullback (5min candles)"
+	@echo "📊 Params: TP=10% SL=5% EMA=100 bars=20 cfm=0 max_trades=2"
+	@echo "💰 Backtest result: +31.38% return | 49.8% win rate | 6.47% max DD"
+	@echo ""
+	poetry run python -m trader pullback --symbol ethusdt --dry-run --leverage $(LEVERAGE) $(PULLBACK_ETH_5M_PARAMS)
