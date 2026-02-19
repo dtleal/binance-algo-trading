@@ -95,6 +95,25 @@ def main():
         help="Number of days to look back (default: 30, max: 180)",
     )
 
+    # --- serve ---
+    serve_parser = subparsers.add_parser(
+        "serve", help="Start the web dashboard (FastAPI + WebSocket feed)"
+    )
+    serve_parser.add_argument("--port", type=int, default=8080, help="HTTP port (default: 8080)")
+    serve_parser.add_argument("--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)")
+    serve_parser.add_argument(
+        "--with-pullback",
+        dest="pullback_symbols",
+        metavar="SYMBOL",
+        action="append",
+        default=[],
+        help="Also start VWAPPullback bot for SYMBOL (repeatable). E.g. --with-pullback axsusdt",
+    )
+    serve_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Start co-located bots in dry-run mode",
+    )
+
     # --- bot ---
     bot_parser = subparsers.add_parser("bot", help="Run MomShort automated trading bot")
     bot_parser.add_argument(
@@ -148,6 +167,9 @@ def main():
         from trader.short import FuturesShort
         _run_async(FuturesShort.history(days=args.days))
 
+    elif args.command == "serve":
+        _run_async(_serve(args))
+
     elif args.command == "pullback":
         from trader.bot_vwap_pullback import VWAPPullbackBot
         bot = VWAPPullbackBot(
@@ -187,6 +209,26 @@ def main():
 
     else:
         parser.print_help()
+
+
+async def _serve(args):
+    """Start FastAPI dashboard, optionally co-located with bots."""
+    import uvicorn
+    from trader.api import app
+
+    tasks = []
+
+    for sym in args.pullback_symbols:
+        from trader.bot_vwap_pullback import VWAPPullbackBot
+        bot = VWAPPullbackBot(symbol=sym, dry_run=args.dry_run)
+        tasks.append(asyncio.create_task(bot.run()))
+
+    config = uvicorn.Config(app, host=args.host, port=args.port, loop="none")
+    server = uvicorn.Server(config)
+    tasks.append(asyncio.create_task(server.serve()))
+
+    print(f"Dashboard: http://{args.host if args.host != '0.0.0.0' else 'localhost'}:{args.port}")
+    await asyncio.gather(*tasks)
 
 
 async def _status_all():

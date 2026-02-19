@@ -28,6 +28,7 @@ from trader.config import (
 )
 from trader.strategy import VWAPRollingTracker
 from trader.strategy_vwap_pullback import EMATracker, VWAPPullbackSignal
+from trader import events as _events, bot_registry as _registry
 
 
 def _parse_proxy(url: str) -> dict | None:
@@ -168,6 +169,16 @@ class VWAPPullbackBot:
         # Background tasks
         self._eod_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
+
+        # Dashboard integration
+        self._reg_key = f"{self.symbol}:pullback"
+
+    def _emit(self, event: dict) -> None:
+        """Fire-and-forget event publish to the dashboard WebSocket bus."""
+        try:
+            asyncio.get_event_loop().create_task(_events.publish(event))
+        except RuntimeError:
+            pass
 
     # ------------------------------------------------------------------
     # Logging setup
@@ -577,6 +588,24 @@ class VWAPPullbackBot:
                 if not self._signal.confirming
                 else f"confirm={self._signal.confirm_count}/{self._signal.confirm_bars}"
             )
+            _registry.update(self._reg_key, {
+                "symbol": self.symbol, "strategy": "pullback",
+                "state": self._state.name, "price": c, "vwap": vwap,
+                "ema": self._ema.value, "trend": trend,
+                "counter": self._signal.counter,
+                "confirming": self._signal.confirming,
+                "trades_today": self._signal.trades_today,
+                "max_trades_per_day": self._signal.max_trades_per_day,
+                "dry_run": self.dry_run,
+            })
+            self._emit({
+                "type": "candle", "symbol": self.symbol, "strategy": "pullback",
+                "ts": ts, "price": c, "vwap": vwap,
+                "ema": self._ema.value, "trend": trend,
+                "state": self._state.name,
+                "counter": self._signal.counter,
+                "confirming": self._signal.confirming,
+            })
             logger.info(
                 f"{prefix}[{ts}] C={c:.{self._price_decimals}f} "
                 f"VWAP={vwap:.{self._price_decimals}f} | "
@@ -584,9 +613,13 @@ class VWAPPullbackBot:
             )
             if signal == "ENTER_LONG":
                 logger.info(f"{BOLD}{GREEN}{prefix}SIGNAL: ENTER_LONG @ {c:.{self._price_decimals}f}{RESET}")
+                self._emit({"type": "signal", "symbol": self.symbol, "strategy": "pullback",
+                            "direction": "long", "price": c, "ts": ts})
                 asyncio.get_event_loop().create_task(self._enter_position("long", c))
             elif signal == "ENTER_SHORT":
                 logger.info(f"{BOLD}{RED}{prefix}SIGNAL: ENTER_SHORT @ {c:.{self._price_decimals}f}{RESET}")
+                self._emit({"type": "signal", "symbol": self.symbol, "strategy": "pullback",
+                            "direction": "short", "price": c, "ts": ts})
                 asyncio.get_event_loop().create_task(self._enter_position("short", c))
 
         elif self._state == _State.IN_POSITION:
@@ -597,6 +630,18 @@ class VWAPPullbackBot:
                 pnl = (self._entry_price - c) * self._position_qty
                 pnl_pct = ((self._entry_price - c) / self._entry_price) * 100
             color = GREEN if pnl >= 0 else RED
+            _registry.update(self._reg_key, {
+                "state": self._state.name, "price": c, "vwap": vwap,
+                "unrealized_pnl": round(pnl, 4), "unrealized_pnl_pct": round(pnl_pct, 4),
+                "direction": self._direction,
+                "entry_price": self._entry_price, "sl_price": self._sl_price,
+                "tp_price": self._tp_price, "position_qty": self._position_qty,
+            })
+            self._emit({
+                "type": "candle", "symbol": self.symbol, "strategy": "pullback",
+                "ts": ts, "price": c, "vwap": vwap, "state": self._state.name,
+                "unrealized_pnl": round(pnl, 4), "unrealized_pnl_pct": round(pnl_pct, 4),
+            })
             logger.info(
                 f"{prefix}[{ts}] C={c:.{self._price_decimals}f} "
                 f"VWAP={vwap:.{self._price_decimals}f} | "
@@ -701,6 +746,15 @@ class VWAPPullbackBot:
                 f"Entry: ${self._entry_price:.{self._price_decimals}f} | "
                 f"SL: ${self._sl_price} | TP: ${self._tp_price}{RESET}"
             )
+            self._emit({"type": "order", "symbol": self.symbol, "strategy": "pullback",
+                        "direction": direction, "entry_price": entry_price,
+                        "qty": qty, "sl_price": sl_price, "tp_price": tp_price,
+                        "dry_run": True})
+            _registry.update(self._reg_key, {
+                "state": self._state.name, "direction": direction,
+                "entry_price": entry_price, "sl_price": sl_price, "tp_price": tp_price,
+                "position_qty": qty,
+            })
             return
 
         try:
@@ -808,12 +862,19 @@ class VWAPPullbackBot:
                         f"{YELLOW}{prefix}Position closed (SL/TP filled) | "
                         f"trades today: {self._signal.trades_today}/{self._signal.max_trades_per_day}{RESET}"
                     )
+                    self._emit({"type": "position_closed", "symbol": self.symbol,
+                                "strategy": "pullback", "reason": "SL/TP"})
                     self._direction = None
                     if self._signal.traded_today:
                         self._state = _State.COOLDOWN
                     else:
                         self._signal.reset_signal()
                         self._state = _State.SCANNING
+                    _registry.update(self._reg_key, {
+                        "state": self._state.name, "direction": None,
+                        "entry_price": None, "sl_price": None, "tp_price": None,
+                        "position_qty": 0, "unrealized_pnl": 0,
+                    })
                     return
         except asyncio.CancelledError:
             pass
