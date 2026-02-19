@@ -101,7 +101,7 @@ MANA_CONFIG = SymbolConfig(
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
-    pos_size_pct=0.20,
+    pos_size_pct=0.30,  # 30% → $73 × 0.30 = $21.90/trade ✅
     price_decimals=4,
     qty_decimals=0,
 )
@@ -123,11 +123,63 @@ GALA_CONFIG = SymbolConfig(
     qty_decimals=0,
 )
 
+DOGE_CONFIG = SymbolConfig(
+    symbol="DOGEUSDT",
+    asset="DOGE",
+    tp_pct=10.0,
+    sl_pct=5.0,
+    min_bars=3,
+    confirm_bars=2,
+    vwap_prox=0.005,
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.20,
+    price_decimals=5,
+    qty_decimals=0,
+)
+
+SHIB_CONFIG = SymbolConfig(
+    symbol="1000SHIBUSDT",
+    asset="SHIB",
+    tp_pct=10.0,
+    sl_pct=5.0,
+    min_bars=3,
+    confirm_bars=2,
+    vwap_prox=0.005,
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.20,
+    price_decimals=6,
+    qty_decimals=0,
+)
+
+ETH_CONFIG = SymbolConfig(
+    symbol="ETHUSDT",
+    asset="ETH",
+    tp_pct=10.0,
+    sl_pct=5.0,
+    min_bars=20,
+    confirm_bars=0,
+    vwap_prox=0.005,
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.30,  # 30% per trade ($68 × 0.30 = $20.40 ✅)
+    price_decimals=2,
+    qty_decimals=3,
+    min_notional=20.0,
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
     "MANAUSDT": MANA_CONFIG,
     "GALAUSDT": GALA_CONFIG,
+    "DOGEUSDT": DOGE_CONFIG,
+    "1000SHIBUSDT": SHIB_CONFIG,
+    "ETHUSDT": ETH_CONFIG,
 }
 
 

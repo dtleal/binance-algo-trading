@@ -660,6 +660,17 @@ class VWAPPullbackBot:
             logger.info(f"{RED}Calculated quantity is 0 — skipping entry{RESET}")
             return
 
+        # Check minimum notional (Binance requires min $20 per order)
+        notional = qty * entry_price
+        if notional < self.min_notional:
+            logger.info(
+                f"{RED}Order notional ${notional:.2f} < min ${self.min_notional:.2f} — skipping entry{RESET}"
+            )
+            logger.info(
+                f"{YELLOW}💡 Increase capital or position size to meet minimum${RESET}"
+            )
+            return
+
         side = "BUY" if direction == "long" else "SELL"
         sl_price = (
             self._round_price(entry_price * (1 - self.sl_pct / 100))
