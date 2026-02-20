@@ -1,21 +1,16 @@
-"""Fetch 1-minute AXSUSDC klines from Binance public API and save as CSV."""
+"""Fetch 1-minute klines from Binance public API and save as CSV."""
 
+import argparse
 import csv
 import time
 from datetime import datetime, timezone
 from urllib.request import urlopen, Request
 import json
 
-SYMBOL = "ETHUSDT"
 INTERVAL = "1m"
 LIMIT = 1000  # max per request
 BASE_URL = "https://api.binance.com/api/v3/klines"
 
-# 1 year ago from now
-end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-start_ms = end_ms - (365 * 24 * 60 * 60 * 1000)
-
-CSV_FILE = "ethusdt_1m_klines.csv"
 HEADERS = [
     "open_time", "open", "high", "low", "close", "volume",
     "close_time", "quote_volume", "trades", "taker_buy_base_vol",
@@ -31,13 +26,28 @@ def fetch_klines(symbol: str, interval: str, start: int, end: int, limit: int = 
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Download historical kline data from Binance")
+    parser.add_argument("symbol", help="Trading pair symbol (e.g., DOGEUSDT, 1000SHIBUSDT)")
+    parser.add_argument("-o", "--output", help="Output CSV file (default: <symbol_lower>_1m_klines.csv)")
+    parser.add_argument("-d", "--days", type=int, default=365, help="Number of days to fetch (default: 365)")
+    parser.add_argument("-i", "--interval", default="1m", help="Candle interval (default: 1m)")
+
+    args = parser.parse_args()
+
+    symbol = args.symbol.upper()
+    output_file = args.output or f"{symbol.lower()}_1m_klines.csv"
+
+    # Calculate time range
+    end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    start_ms = end_ms - (args.days * 24 * 60 * 60 * 1000)
+
     all_klines = []
     current_start = start_ms
     total_expected = (end_ms - start_ms) // 60_000
-    print(f"Fetching ~{total_expected:,} candles for {SYMBOL} ({INTERVAL})...")
+    print(f"Fetching ~{total_expected:,} candles for {symbol} ({args.interval})...")
 
     while current_start < end_ms:
-        data = fetch_klines(SYMBOL, INTERVAL, current_start, end_ms)
+        data = fetch_klines(symbol, args.interval, current_start, end_ms)
         if not data:
             break
 
@@ -50,17 +60,35 @@ def main():
         if len(data) < LIMIT:
             break
 
-        time.sleep(0.25)  # respect rate limits
+        time.sleep(0.25)  # rate limit ~4 req/sec
 
-    # Write CSV
-    with open(CSV_FILE, "w", newline="") as f:
+    print(f"\nWriting {len(all_klines):,} candles to {output_file}...")
+    with open(output_file, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(HEADERS)
         for k in all_klines:
-            # k[11] is an "ignore" field — skip it
-            writer.writerow(k[:11])
+            writer.writerow([
+                k[0],  # open_time
+                k[1],  # open
+                k[2],  # high
+                k[3],  # low
+                k[4],  # close
+                k[5],  # volume
+                k[6],  # close_time
+                k[7],  # quote_volume
+                k[8],  # trades
+                k[9],  # taker_buy_base_vol
+                k[10], # taker_buy_quote_vol
+            ])
 
-    print(f"\nDone! Saved {len(all_klines):,} candles to {CSV_FILE}")
+    print(f"✓ Done! {len(all_klines):,} candles saved to {output_file}")
+
+    # Print data summary
+    if all_klines:
+        first_time = datetime.fromtimestamp(all_klines[0][0] / 1000, tz=timezone.utc)
+        last_time = datetime.fromtimestamp(all_klines[-1][0] / 1000, tz=timezone.utc)
+        days = (last_time - first_time).days
+        print(f"  Data range: {first_time.strftime('%Y-%m-%d')} to {last_time.strftime('%Y-%m-%d')} ({days} days)")
 
 
 if __name__ == "__main__":

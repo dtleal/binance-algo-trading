@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -260,6 +260,44 @@ fetch-eth-5m: ## Download 1 year of ETHUSDT 5-minute klines (official, for ETH V
 	@echo "📥 Downloading ETHUSDT 5-minute candles (1 year)..."
 	@poetry run python fetch_eth_5m_official.py
 	@echo "✅ ETHUSDT 5m data saved to ethusdt_5m_klines_official.csv"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 📚 ONBOARDING - Automated new asset validation
+# ══════════════════════════════════════════════════════════════════════════════
+
+onboarding: ## Run complete onboarding for new asset (ATIVO=DOGEUSDT)
+ifndef ATIVO
+	@echo "$(RED)❌ Error: ATIVO not specified$(NC)"
+	@echo ""
+	@echo "$(YELLOW)Usage:$(NC)"
+	@echo "  make onboarding ATIVO=DOGEUSDT"
+	@echo "  make onboarding ATIVO=1000SHIBUSDT"
+	@echo "  make onboarding ATIVO=ETHUSDT STRATEGY=pullback"
+	@echo ""
+	@echo "$(YELLOW)Options:$(NC)"
+	@echo "  ATIVO     - Trading pair symbol (required)"
+	@echo "  STRATEGY  - Strategy type: momshort | pullback (default: momshort)"
+	@echo "  DAYS      - Days of historical data (default: 365)"
+	@echo ""
+	@exit 1
+endif
+	@echo "$(GREEN)╔════════════════════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║           Starting Onboarding: $(ATIVO)                    ║$(NC)"
+	@echo "$(GREEN)╚════════════════════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@poetry run python onboarding.py $(ATIVO) $(if $(STRATEGY),--strategy $(STRATEGY),) $(if $(DAYS),--days $(DAYS),)
+
+onboarding-download: ## Download historical data only (ATIVO=DOGEUSDT DAYS=365)
+ifndef ATIVO
+	@echo "$(RED)❌ Error: ATIVO not specified. Usage: make onboarding-download ATIVO=DOGEUSDT$(NC)"
+	@exit 1
+endif
+	@echo "$(YELLOW)📥 Downloading $(or $(DAYS),365) days of $(ATIVO) data...$(NC)"
+	@poetry run python fetch_klines.py $(ATIVO) $(if $(DAYS),-d $(DAYS),)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🧪 BACKTESTING
+# ══════════════════════════════════════════════════════════════════════════════
 
 backtest-sweep: ## Run MomShort parameter sweep (edit backtest_sweep.py first)
 	poetry run python backtest_sweep.py
