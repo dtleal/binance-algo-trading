@@ -9,7 +9,8 @@ import json
 
 INTERVAL = "1m"
 LIMIT = 1000  # max per request
-BASE_URL = "https://api.binance.com/api/v3/klines"
+SPOT_BASE_URL = "https://api.binance.com/api/v3/klines"
+FUTURES_BASE_URL = "https://fapi.binance.com/fapi/v1/klines"
 
 HEADERS = [
     "open_time", "open", "high", "low", "close", "volume",
@@ -18,8 +19,9 @@ HEADERS = [
 ]
 
 
-def fetch_klines(symbol: str, interval: str, start: int, end: int, limit: int = LIMIT) -> list:
-    url = f"{BASE_URL}?symbol={symbol}&interval={interval}&startTime={start}&endTime={end}&limit={limit}"
+def fetch_klines(symbol: str, interval: str, start: int, end: int, limit: int = LIMIT, use_futures: bool = False) -> list:
+    base_url = FUTURES_BASE_URL if use_futures else SPOT_BASE_URL
+    url = f"{base_url}?symbol={symbol}&interval={interval}&startTime={start}&endTime={end}&limit={limit}"
     req = Request(url, headers={"User-Agent": "Python"})
     with urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
@@ -31,11 +33,16 @@ def main():
     parser.add_argument("-o", "--output", help="Output CSV file (default: <symbol_lower>_1m_klines.csv)")
     parser.add_argument("-d", "--days", type=int, default=365, help="Number of days to fetch (default: 365)")
     parser.add_argument("-i", "--interval", default="1m", help="Candle interval (default: 1m)")
+    parser.add_argument("-f", "--futures", action="store_true", help="Use Futures API (for symbols like 1000SHIBUSDT)")
 
     args = parser.parse_args()
 
     symbol = args.symbol.upper()
     output_file = args.output or f"{symbol.lower()}_1m_klines.csv"
+
+    # Auto-detect Futures symbols (start with digits like 1000SHIBUSDT)
+    use_futures = args.futures or symbol[0].isdigit()
+    api_type = "Futures" if use_futures else "Spot"
 
     # Calculate time range
     end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -44,10 +51,10 @@ def main():
     all_klines = []
     current_start = start_ms
     total_expected = (end_ms - start_ms) // 60_000
-    print(f"Fetching ~{total_expected:,} candles for {symbol} ({args.interval})...")
+    print(f"Fetching ~{total_expected:,} candles for {symbol} ({args.interval}) from {api_type} API...")
 
     while current_start < end_ms:
-        data = fetch_klines(symbol, args.interval, current_start, end_ms)
+        data = fetch_klines(symbol, args.interval, current_start, end_ms, use_futures=use_futures)
         if not data:
             break
 
