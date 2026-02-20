@@ -6,6 +6,7 @@ import {
 import { useAccountSummary, useTrades, usePerformance, usePositions, useBotStates } from "../hooks/useApi";
 import { useFilter } from "../contexts/FilterContext";
 import PerformanceMetrics from "../components/PerformanceMetrics";
+import PerformanceRankings from "../components/PerformanceRankings";
 
 function Card({
   label, value, sub, color = "text-white",
@@ -274,6 +275,9 @@ export default function Overview() {
 
       {/* Performance Report */}
       <PerformanceMetrics trades={filteredTrades} startCapital={1000} />
+
+      {/* Performance Rankings */}
+      <PerformanceRankings trades={filteredTrades} />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
