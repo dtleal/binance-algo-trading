@@ -484,6 +484,12 @@ class MomShortBot:
             logger.info(
                 f"{prefix}[{ts}] C={c:.4f} VWAP={vwap:.4f} | COOLDOWN"
             )
+            # Heartbeat: publish state so bot appears in UI even when idle
+            _registry.update(self._reg_key, {
+                "state": "COOLDOWN",
+                "price": c,
+                "vwap": vwap,
+            })
 
     # ------------------------------------------------------------------
     # Daily reset
