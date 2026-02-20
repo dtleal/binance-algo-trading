@@ -50,8 +50,12 @@ function BotCard({
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-base font-bold text-white">{state.symbol}</p>
-          <p className="text-xs text-gray-500 capitalize">{state.strategy}</p>
+          <p className="text-base font-bold text-white">
+            {state.symbol}
+            <span className="ml-2 text-xs font-normal text-emerald-400 bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-700/50">
+              {state.strategy}
+            </span>
+          </p>
         </div>
         <div className="flex items-center gap-2">
           {state.dry_run && (
