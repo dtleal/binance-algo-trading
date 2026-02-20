@@ -56,6 +56,41 @@ SECRET_KEY=your_secret_key
 
 ## Usage
 
+### Quick Start (Recommended)
+
+```bash
+# Start everything: 10 bots + dashboard
+make start
+
+# Stop everything
+make stop
+
+# Check status
+make status-all
+```
+
+### Dashboard
+
+The web dashboard provides real-time monitoring of all running bots:
+
+```bash
+# Start dashboard only
+make dashboard
+
+# Or manually
+poetry run python -m trader serve --port 8080
+```
+
+Access at http://localhost:8080
+
+**Features:**
+- Real-time bot status (all 10 bots always visible, even in COOLDOWN)
+- Live price, VWAP, and P&L tracking
+- Position monitoring and trade history
+- WebSocket updates with heartbeat (bots publish state every candle)
+
+### Individual Bot Commands
+
 ```bash
 # Run the bot live
 poetry run python -m trader bot --symbol axsusdt --leverage 5
@@ -82,12 +117,16 @@ A Makefile provides shortcuts for common commands — run `make help` to see all
 
 ```
 trader/
-├── config.py      # .env loading, SymbolConfig dataclass, per-symbol registries
-├── strategy.py    # VWAPTracker + MomShortSignal (pure logic, no I/O)
-├── bot.py         # MomShortBot: WS kline stream → strategy → order execution
-├── short.py       # FuturesShort: manual one-off USDT-M futures short
-├── monitor.py     # WebSocket market data monitor (Spot)
-└── cli.py         # Argparse CLI entry point
+├── config.py           # .env loading, SymbolConfig dataclass, per-symbol registries
+├── strategy.py         # VWAPTracker + MomShortSignal (pure logic, no I/O)
+├── bot.py              # MomShortBot: WS kline stream → strategy → order execution
+├── bot_vwap_pullback.py # VWAPPullbackBot: bidirectional VWAP pullback strategy
+├── short.py            # FuturesShort: manual one-off USDT-M futures short
+├── monitor.py          # WebSocket market data monitor (Spot)
+├── cli.py              # Argparse CLI entry point
+├── api.py              # FastAPI dashboard backend
+├── bot_registry.py     # Redis-based bot state registry (heartbeat, real-time updates)
+└── events.py           # WebSocket event bus for live dashboard updates
 ```
 
 ## Backtesting
