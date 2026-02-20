@@ -5,6 +5,7 @@ import {
 } from "recharts";
 import { useAccountSummary, useTrades, usePerformance, usePositions, useBotStates } from "../hooks/useApi";
 import { useFilter } from "../contexts/FilterContext";
+import PerformanceMetrics from "../components/PerformanceMetrics";
 
 function Card({
   label, value, sub, color = "text-white",
@@ -270,6 +271,9 @@ export default function Overview() {
           </div>
         )}
       </div>
+
+      {/* Performance Report */}
+      <PerformanceMetrics trades={filteredTrades} startCapital={1000} />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
 
