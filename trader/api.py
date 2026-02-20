@@ -443,6 +443,40 @@ async def ws_feed(websocket: WebSocket):
         events.unsubscribe(q)
 
 
+@app.websocket("/ws/logs/{bot_key}")
+async def ws_logs(websocket: WebSocket, bot_key: str):
+    """Stream real-time logs for a specific bot (e.g., 'BTCUSDT:momshort')."""
+    await websocket.accept()
+
+    # Get Redis client
+    import os
+    import redis.asyncio as aioredis
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    redis_client = await aioredis.from_url(redis_url, decode_responses=True)
+
+    try:
+        # Send recent log history first
+        from trader.log_publisher import get_log_history
+        history = await get_log_history(redis_client, bot_key, limit=100)
+        for log_entry in reversed(history):  # Send oldest first
+            await websocket.send_json(log_entry)
+
+        # Subscribe to real-time logs
+        pubsub = redis_client.pubsub()
+        await pubsub.subscribe(f"logs:{bot_key}")
+
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                log_entry = json.loads(message["data"])
+                await websocket.send_json(log_entry)
+
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        await pubsub.unsubscribe(f"logs:{bot_key}")
+        await redis_client.close()
+
+
 # ── Serve built frontend (production) ─────────────────────────────────────────
 
 _dist = Path(__file__).parent.parent / "frontend" / "dist"

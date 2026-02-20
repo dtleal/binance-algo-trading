@@ -162,6 +162,22 @@ class MomShortBot:
             bot_logger.addHandler(file_handler)
             bot_logger.addHandler(console_handler)
 
+            # Add Redis log publisher for real-time streaming to UI
+            try:
+                import os
+                import redis
+                from trader.log_publisher import RedisLogHandler
+
+                redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+                redis_client = redis.from_url(redis_url, decode_responses=True)
+                redis_handler = RedisLogHandler(redis_client, self._reg_key, max_logs=500)
+                redis_handler.setLevel(logging.INFO)
+                redis_handler.setFormatter(logging.Formatter("%(message)s"))
+                bot_logger.addHandler(redis_handler)
+            except Exception:
+                # Graceful degradation if Redis is unavailable
+                pass
+
         logger = bot_logger
 
     # ------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useBotStates } from "../hooks/useApi";
 import { WsEvent, BotState } from "../types";
+import BotLogsModal from "../components/BotLogsModal";
 
 const STATE_STYLE: Record<string, string> = {
   SCANNING:    "bg-blue-900/40 text-blue-300 border border-blue-700/50",
@@ -19,7 +20,15 @@ function fmtPrice(n: number | undefined, decimals = 4) {
   return n.toFixed(decimals);
 }
 
-function BotCard({ state, liveEvents }: { state: BotState; liveEvents: WsEvent[] }) {
+function BotCard({
+  state,
+  liveEvents,
+  onClick
+}: {
+  state: BotState;
+  liveEvents: WsEvent[];
+  onClick: () => void;
+}) {
   // Overlay the last candle event for this bot to get freshest price
   const lastCandle = [...liveEvents]
     .filter((e) => e.type === "candle" && e.symbol === state.symbol) as Extract<WsEvent, { type: "candle" }>[];
@@ -34,7 +43,10 @@ function BotCard({ state, liveEvents }: { state: BotState; liveEvents: WsEvent[]
   const decimals = price && price > 100 ? 2 : price && price > 1 ? 4 : 6;
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 space-y-4">
+    <div
+      onClick={onClick}
+      className="bg-gray-800 border border-gray-700 rounded-xl p-5 space-y-4 cursor-pointer hover:border-emerald-600 transition-colors"
+    >
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
@@ -221,6 +233,7 @@ function BotCard({ state, liveEvents }: { state: BotState; liveEvents: WsEvent[]
 export default function Bots({ events }: { events: WsEvent[] }) {
   const { bots } = useBotStates();
   const [log, setLog] = useState<{ ts: string; msg: string; color: string }[]>([]);
+  const [selectedBot, setSelectedBot] = useState<{ key: string; symbol: string } | null>(null);
 
   // Append signal/order/closed events to the activity log
   useEffect(() => {
@@ -270,9 +283,23 @@ export default function Bots({ events }: { events: WsEvent[] }) {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
           {botList.map((b) => (
-            <BotCard key={`${b.symbol}:${b.strategy}`} state={b} liveEvents={events} />
+            <BotCard
+              key={`${b.symbol}:${b.strategy}`}
+              state={b}
+              liveEvents={events}
+              onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
+            />
           ))}
         </div>
+      )}
+
+      {/* Bot Logs Modal */}
+      {selectedBot && (
+        <BotLogsModal
+          botKey={selectedBot.key}
+          symbol={selectedBot.symbol}
+          onClose={() => setSelectedBot(null)}
+        />
       )}
 
       {/* Activity log */}
