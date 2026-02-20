@@ -63,7 +63,7 @@ function CandleChart({ symbol, entryPrice, slPrice, tpPrice }: {
 
   // Live updates from Binance WS
   useBinanceKlineStream(symbol, (c) => {
-    candleRef.current?.update(c as CandlestickData<Time>);
+    candleRef.current?.update({ ...c, time: c.time as Time });
   });
 
   return <div ref={containerRef} className="w-full rounded-lg overflow-hidden" />;

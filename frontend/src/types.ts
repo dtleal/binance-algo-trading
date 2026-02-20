@@ -49,6 +49,21 @@ export interface BotState {
   unrealized_pnl?: number;
   unrealized_pnl_pct?: number;
   dry_run?: boolean;
+  config?: {
+    leverage?: number;
+    tp_pct?: number;
+    sl_pct?: number;
+    pos_size_pct?: number;
+    min_notional?: number;
+    capital?: number;
+    per_trade?: number;
+    ema_period?: number;
+    min_bars?: number;
+    confirm_bars?: number;
+    vwap_prox?: number;
+    vwap_window_days?: number;
+    max_trades_per_day?: number;
+  };
 }
 
 export type WsEvent =

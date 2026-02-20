@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell,
 } from "recharts";
-import { useTrades } from "../hooks/useApi";
+import { useTrades, useBotStates, usePositions } from "../hooks/useApi";
 import { Trade } from "../types";
 
 type Days = 7 | 30 | 90;
@@ -54,6 +54,11 @@ export default function History() {
   });
 
   const { trades, isLoading } = useTrades(days);
+  const { bots } = useBotStates();
+  const { positions } = usePositions();
+
+  const activeBots = Object.values(bots).length;
+  const openPositions = positions.length;
 
   const filtered = useMemo(() => {
     const q = filter.toLowerCase();
@@ -223,8 +228,22 @@ export default function History() {
                 ))}
                 {sorted.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-gray-600 text-sm">
-                      No trades found
+                    <td colSpan={7} className="px-4 py-12 text-center">
+                      <div className="flex flex-col items-center space-y-3">
+                        <p className="text-sm font-semibold text-gray-400">
+                          🤖 {activeBots} Bot{activeBots !== 1 ? "s" : ""} Active
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          {openPositions > 0
+                            ? `${openPositions} position${openPositions !== 1 ? "s" : ""} open • Waiting for trades to close`
+                            : "Bots are scanning for entry signals"}
+                        </p>
+                        <div className="bg-gray-900/50 rounded-lg px-4 py-2 mt-2">
+                          <p className="text-xs text-gray-400">
+                            Trade history will appear here once positions are closed
+                          </p>
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 )}

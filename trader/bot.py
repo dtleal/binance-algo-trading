@@ -19,6 +19,7 @@ from trader.config import (
     SymbolConfig,
 )
 from trader.strategy import VWAPTracker, MomShortSignal
+from trader import events as _events, bot_registry as _registry
 
 def _parse_proxy(url: str) -> dict | None:
     """Parse 'socks5://host:port' into the SDK proxy dict format."""
@@ -115,6 +116,16 @@ class MomShortBot:
         # Background tasks
         self._eod_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
+
+        # Dashboard integration
+        self._reg_key = f"{self.symbol}:momshort"
+
+    def _emit(self, event: dict) -> None:
+        """Fire-and-forget event publish to the dashboard WebSocket bus."""
+        try:
+            asyncio.get_event_loop().create_task(_events.publish(event))
+        except RuntimeError:
+            pass
 
     # ------------------------------------------------------------------
     # Logging setup
@@ -283,6 +294,22 @@ class MomShortBot:
             )
         logger.info("-" * 60)
 
+        # Publish bot configuration to registry
+        _registry.update(self._reg_key, {
+            "symbol": self.symbol,
+            "strategy": "momshort",
+            "config": {
+                "leverage": self.leverage,
+                "tp_pct": self.cfg.tp_pct,
+                "sl_pct": self.cfg.sl_pct,
+                "pos_size_pct": self.cfg.pos_size_pct,
+                "min_notional": self.cfg.min_notional,
+                "capital": self.capital,
+                "per_trade": per_trade,
+            },
+            "dry_run": self.dry_run,
+        })
+
         # Schedule EOD timer
         self._schedule_eod()
 
@@ -390,10 +417,26 @@ class MomShortBot:
                 f"{prefix}[{ts}] C={c:.4f} VWAP={vwap:.4f} | "
                 f"{state_info} | {self._state.name}"
             )
+            # Update dashboard
+            _registry.update(self._reg_key, {
+                "symbol": self.symbol, "strategy": "momshort",
+                "state": self._state.name, "price": c, "vwap": vwap,
+                "signal_state": state_info,
+            })
+            # Publish candle event for real-time frontend updates
+            self._emit({
+                "type": "candle", "symbol": self.symbol, "strategy": "momshort",
+                "ts": ts, "price": c, "vwap": vwap, "ema": None, "trend": "",
+                "state": self._state.name, "counter": self._signal.counter,
+                "confirming": self._signal.confirming,
+            })
             if signal == "ENTER_SHORT":
                 logger.info(
                     f"{BOLD}{GREEN}{prefix}SIGNAL: ENTER_SHORT @ {c:.4f}{RESET}"
                 )
+                self._emit({"type": "signal", "symbol": self.symbol,
+                           "strategy": "momshort", "direction": "SHORT",
+                           "price": c, "timestamp": ts})
                 asyncio.get_event_loop().create_task(self._enter_short(c))
 
         elif self._state == _State.IN_POSITION:
@@ -406,6 +449,20 @@ class MomShortBot:
                 f"P&L: {color}${total_pnl:+.2f} ({pnl_pct:+.2f}%){RESET} | "
                 f"IN_POSITION"
             )
+            # Update dashboard with position P&L
+            _registry.update(self._reg_key, {
+                "state": self._state.name, "price": c, "vwap": vwap,
+                "unrealized_pnl": round(total_pnl, 4), "unrealized_pnl_pct": round(pnl_pct, 4),
+                "entry_price": self._entry_price, "sl_price": self._sl_price, "tp_price": self._tp_price,
+            })
+            # Publish candle event with live P&L
+            self._emit({
+                "type": "candle", "symbol": self.symbol, "strategy": "momshort",
+                "ts": ts, "price": c, "vwap": vwap, "ema": None, "trend": "",
+                "state": self._state.name,
+                "unrealized_pnl": round(total_pnl, 4),
+                "unrealized_pnl_pct": round(pnl_pct, 4),
+            })
 
         elif self._state == _State.COOLDOWN:
             logger.info(
@@ -481,6 +538,14 @@ class MomShortBot:
                 f"Entry: ${self._entry_price:.4f} | "
                 f"SL: ${self._sl_price} | TP: ${self._tp_price}{RESET}"
             )
+            # Update dashboard
+            self._emit({"type": "order", "symbol": self.symbol, "side": "SHORT",
+                       "qty": qty, "sl_price": self._sl_price, "tp_price": self._tp_price,
+                       "dry_run": True})
+            _registry.update(self._reg_key, {
+                "state": self._state.name, "direction": "SHORT",
+                "entry_price": entry_price, "sl_price": self._sl_price, "tp_price": self._tp_price,
+            })
             return
 
         try:
@@ -547,6 +612,15 @@ class MomShortBot:
                 f"SL: ${self._sl_price} | TP: ${self._tp_price}{RESET}"
             )
 
+            # Update dashboard
+            self._emit({"type": "order", "symbol": self.symbol, "side": "SHORT",
+                       "qty": executed_qty, "price": avg_price,
+                       "sl_price": self._sl_price, "tp_price": self._tp_price})
+            _registry.update(self._reg_key, {
+                "state": self._state.name, "direction": "SHORT",
+                "entry_price": avg_price, "sl_price": self._sl_price, "tp_price": self._tp_price,
+            })
+
             # Start position monitor
             self._monitor_task = asyncio.get_event_loop().create_task(
                 self._monitor_position_fill()
@@ -592,7 +666,13 @@ class MomShortBot:
                     logger.info(
                         f"{YELLOW}{prefix}Position closed (SL/TP filled){pnl_info}{RESET}"
                     )
+                    self._emit({"type": "position_closed", "symbol": self.symbol,
+                               "reason": "SL/TP", "pnl_info": pnl_info})
                     self._state = _State.COOLDOWN
+                    _registry.update(self._reg_key, {
+                        "state": self._state.name, "direction": None,
+                        "entry_price": None, "sl_price": None, "tp_price": None,
+                    })
                     return
         except asyncio.CancelledError:
             pass
@@ -613,7 +693,13 @@ class MomShortBot:
 
         if self.dry_run:
             logger.info(f"{prefix}Simulating EOD close of {self._position_qty} {self.asset}")
+            self._emit({"type": "position_closed", "symbol": self.symbol,
+                       "reason": "EOD", "dry_run": True})
             self._state = _State.COOLDOWN
+            _registry.update(self._reg_key, {
+                "state": self._state.name, "direction": None,
+                "entry_price": None, "sl_price": None, "tp_price": None,
+            })
             return
 
         from binance_common.errors import BadRequestError
@@ -656,6 +742,8 @@ class MomShortBot:
                 f"{color}EOD closed {qty} {self.asset} @ ${avg_price:.4f} | "
                 f"P&L: ${pnl:+.2f}{RESET}"
             )
+            self._emit({"type": "position_closed", "symbol": self.symbol,
+                       "reason": "EOD", "pnl": pnl})
         except BadRequestError as e:
             # Position was already closed by SL/TP fill
             logger.info(f"{YELLOW}EOD close: position already closed ({e}){RESET}")
@@ -663,6 +751,10 @@ class MomShortBot:
             logger.info(f"{RED}EOD close error: {e}{RESET}")
 
         self._state = _State.COOLDOWN
+        _registry.update(self._reg_key, {
+            "state": self._state.name, "direction": None,
+            "entry_price": None, "sl_price": None, "tp_price": None,
+        })
 
         # Cancel monitor task
         if self._monitor_task and not self._monitor_task.done():

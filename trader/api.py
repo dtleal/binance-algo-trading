@@ -117,23 +117,70 @@ async def get_positions():
     return {"positions": positions}
 
 
+@app.get("/api/test_trades")
+async def test_trades_endpoint():
+    """Test endpoint to verify what symbols have trades"""
+    import asyncio
+    from datetime import datetime, timezone
+
+    client = await get_client()
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    start_ms = now_ms - 90 * 86_400_000  # 90 days
+
+    result = {"symbols_tested": [], "total_trades": 0}
+
+    # Test each configured symbol (no time filter to get all trades)
+    for sym in SYMBOL_CONFIGS.keys():
+        try:
+            resp = await asyncio.to_thread(
+                lambda s=sym: client.rest_api.account_trade_list(
+                    symbol=s, limit=500
+                )
+            )
+            trades_data = resp.data()
+            count = len(trades_data)
+            sample = None
+            if count > 0:
+                # Get first trade details
+                t = trades_data[0]
+                sample = {
+                    "time": int(t.time),
+                    "date": datetime.fromtimestamp(int(t.time)/1000, tz=timezone.utc).isoformat(),
+                    "side": t.side,
+                    "price": _safe_float(t.price),
+                    "qty": _safe_float(t.qty),
+                    "pnl": _safe_float(t.realized_pnl),
+                }
+            result["symbols_tested"].append({"symbol": sym, "count": count, "sample": sample})
+            result["total_trades"] += count
+        except Exception as e:
+            result["symbols_tested"].append({"symbol": sym, "error": str(e)})
+
+    return result
+
 @app.get("/api/trades")
 async def get_trades(symbol: str | None = None, days: int = 7):
     client = await get_client()
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    start_ms = now_ms - days * 86_400_000
+    cutoff_ms = now_ms - days * 86_400_000
 
     symbols = [symbol.upper()] if symbol else list(SYMBOL_CONFIGS.keys())
 
     all_trades: list[dict] = []
     for sym in symbols:
         try:
+            # Fetch all trades (no time filter) since Binance API limits to 7 days max
             resp = await asyncio.to_thread(
                 lambda s=sym: client.rest_api.account_trade_list(
-                    symbol=s, start_time=start_ms, limit=500
+                    symbol=s, limit=500
                 )
             )
-            for t in resp.data():
+            trades = resp.data()
+            for t in trades:
+                trade_time = int(t.time)
+                # Filter by time in Python instead
+                if trade_time < cutoff_ms:
+                    continue
                 all_trades.append({
                     "symbol":          t.symbol,
                     "side":            t.side,
@@ -147,7 +194,7 @@ async def get_trades(symbol: str | None = None, days: int = 7):
                     "buyer":           t.buyer,
                 })
         except Exception:
-            pass
+            pass  # Skip symbols with errors
 
     all_trades.sort(key=lambda x: x["time"], reverse=True)
     return {"trades": all_trades}
@@ -214,12 +261,180 @@ async def get_bot_states():
     return {"bots": bot_registry.get_states()}
 
 
+@app.get("/api/account_summary")
+async def get_account_summary():
+    """
+    Comprehensive account metrics combining:
+    - Balance (total, available, in positions)
+    - All open positions with unrealized P&L
+    - Total equity (balance + unrealized P&L)
+    - 24h change metrics
+    """
+    try:
+        client = await get_client()
+
+        # Get balance
+        balance_resp = await asyncio.to_thread(client.rest_api.futures_account_balance_v3)
+        usdt_balance = next(
+            (b for b in balance_resp.data() if b.asset == "USDT"), None
+        )
+        total_balance = _safe_float(usdt_balance.balance) if usdt_balance else 0
+        available_balance = _safe_float(usdt_balance.available_balance) if usdt_balance else 0
+
+        # Get positions
+        pos_resp = await asyncio.to_thread(client.rest_api.position_information_v3)
+        total_unrealized_pnl = 0
+        total_position_margin = 0
+        open_positions = 0
+
+        for p in pos_resp.data():
+            pos_amt = abs(_safe_float(p.position_amt))
+            if pos_amt > 0:
+                open_positions += 1
+                total_unrealized_pnl += _safe_float(p.un_realized_profit)
+                entry_price = _safe_float(p.entry_price)
+                leverage = int(_safe_float(getattr(p, "leverage", 1)))
+                total_position_margin += (pos_amt * entry_price) / leverage if leverage else 0
+
+        # Calculate total equity
+        total_equity = total_balance + total_unrealized_pnl
+
+        # Get 24h account metrics (from income history)
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        day_ago_ms = now_ms - 86_400_000
+
+        try:
+            income_resp = await asyncio.to_thread(
+                lambda: client.rest_api.income_history(
+                    start_time=day_ago_ms,
+                    limit=1000
+                )
+            )
+            pnl_24h = sum(
+                _safe_float(i.income)
+                for i in income_resp.data()
+                if i.income_type in ("REALIZED_PNL", "FUNDING_FEE")
+            )
+        except Exception:
+            pnl_24h = 0
+
+        return {
+            "total_balance": round(total_balance, 2),
+            "available_balance": round(available_balance, 2),
+            "total_equity": round(total_equity, 2),
+            "unrealized_pnl": round(total_unrealized_pnl, 2),
+            "position_margin": round(total_position_margin, 2),
+            "open_positions": open_positions,
+            "pnl_24h": round(pnl_24h, 2),
+            "equity_change_24h_pct": round((pnl_24h / (total_equity - pnl_24h) * 100), 2) if (total_equity - pnl_24h) > 0 else 0,
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "total_balance": 0,
+            "available_balance": 0,
+            "total_equity": 0,
+            "unrealized_pnl": 0,
+            "position_margin": 0,
+            "open_positions": 0,
+            "pnl_24h": 0,
+            "equity_change_24h_pct": 0,
+        }
+
+
+@app.get("/api/market_data")
+async def get_market_data():
+    """
+    Get 24h market statistics for all trading symbols.
+    Includes: price change %, volume, high/low, last price
+    """
+    try:
+        # Get 24h ticker data for all symbols
+        url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+        raw = await asyncio.to_thread(
+            lambda: urllib.request.urlopen(url, timeout=10).read()
+        )
+        all_tickers = json.loads(raw)
+
+        # Filter to only symbols we're trading
+        trading_symbols = set(cfg.symbol for cfg in SYMBOL_CONFIGS.values())
+
+        market_data = {}
+        for ticker in all_tickers:
+            symbol = ticker["symbol"]
+            if symbol in trading_symbols:
+                market_data[symbol] = {
+                    "symbol": symbol,
+                    "last_price": float(ticker["lastPrice"]),
+                    "price_change_pct": float(ticker["priceChangePercent"]),
+                    "high_24h": float(ticker["highPrice"]),
+                    "low_24h": float(ticker["lowPrice"]),
+                    "volume_24h": float(ticker["volume"]),
+                    "quote_volume_24h": float(ticker["quoteVolume"]),
+                    "trades_24h": int(ticker["count"]),
+                }
+
+        return {"market_data": market_data}
+    except Exception as e:
+        return {"error": str(e), "market_data": {}}
+
+
+@app.get("/api/performance")
+async def get_performance():
+    """
+    Bot performance metrics calculated from bot states and trade history.
+    Shows per-bot statistics and overall portfolio performance.
+    """
+    bot_states = bot_registry.get_states()
+    trades_data = await get_trades(days=30)
+
+    # Calculate per-bot metrics from trades
+    bot_metrics = {}
+    for bot_key, bot_state in bot_states.items():
+        symbol = bot_state.get("symbol", "")
+        strategy = bot_state.get("strategy", "")
+
+        # Filter trades for this symbol
+        symbol_trades = [t for t in trades_data["trades"] if t["symbol"] == symbol]
+
+        total_trades = len(symbol_trades)
+        winning_trades = sum(1 for t in symbol_trades if t["realized_pnl"] > 0)
+        total_pnl = sum(t["realized_pnl"] for t in symbol_trades)
+        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+
+        bot_metrics[bot_key] = {
+            "symbol": symbol,
+            "strategy": strategy,
+            "state": bot_state.get("state", "UNKNOWN"),
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "win_rate": round(win_rate, 1),
+            "total_pnl": round(total_pnl, 2),
+            "unrealized_pnl": round(bot_state.get("unrealized_pnl", 0), 2),
+        }
+
+    # Overall portfolio stats
+    total_trades_all = len(trades_data["trades"])
+    winning_trades_all = sum(1 for t in trades_data["trades"] if t["realized_pnl"] > 0)
+    total_pnl_all = sum(t["realized_pnl"] for t in trades_data["trades"])
+
+    return {
+        "bots": bot_metrics,
+        "portfolio": {
+            "total_trades": total_trades_all,
+            "winning_trades": winning_trades_all,
+            "win_rate": round((winning_trades_all / total_trades_all * 100), 1) if total_trades_all > 0 else 0,
+            "total_pnl": round(total_pnl_all, 2),
+        }
+    }
+
+
 # ── WebSocket feed ─────────────────────────────────────────────────────────────
 
 @app.websocket("/ws/feed")
 async def ws_feed(websocket: WebSocket):
     await websocket.accept()
-    q = events.subscribe()
+    q = await events.subscribe()
     try:
         while True:
             event = await q.get()
@@ -239,5 +454,9 @@ if _dist.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def spa(full_path: str):
+        # Don't serve SPA for API or WebSocket paths
+        if full_path.startswith("api/") or full_path.startswith("ws/"):
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Not found")
         index = _dist / "index.html"
         return FileResponse(str(index))

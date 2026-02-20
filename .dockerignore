@@ -1,25 +1,29 @@
-.git
-.gitignore
-.env
-.venv
 __pycache__
 *.pyc
-
-# Data files
-*.csv
-*.html
-*.png
-
-# Directories
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+.env
+.venv
+venv/
 logs/
-docs/
-infra/
+*.log
+.git
+.gitignore
+README.md
+*.csv
+*.json
 backtest_sweep/
-images/
-
-# IDE
-.vscode/
-.idea/
-
-# CI
-.github/
+fetch_*.py
+backtest_*.py
+analyze_*.py
+.claude/
+node_modules/
+frontend/node_modules/
+frontend/.vite/
+.DS_Store

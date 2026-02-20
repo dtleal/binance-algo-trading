@@ -110,6 +110,20 @@ def main():
         help="Also start VWAPPullback bot for SYMBOL (repeatable). E.g. --with-pullback axsusdt",
     )
     serve_parser.add_argument(
+        "--with-momshort",
+        dest="momshort_symbols",
+        metavar="SYMBOL",
+        action="append",
+        default=[],
+        help="Also start MomShort bot for SYMBOL (repeatable). E.g. --with-momshort dogeusdt",
+    )
+    serve_parser.add_argument(
+        "--leverage",
+        type=int,
+        default=DEFAULT_LEVERAGE,
+        help=f"Leverage for co-located bots (default: {DEFAULT_LEVERAGE}x)",
+    )
+    serve_parser.add_argument(
         "--dry-run", action="store_true",
         help="Start co-located bots in dry-run mode",
     )
@@ -218,9 +232,18 @@ async def _serve(args):
 
     tasks = []
 
+    # Start VWAPPullback bots
     for sym in args.pullback_symbols:
         from trader.bot_vwap_pullback import VWAPPullbackBot
-        bot = VWAPPullbackBot(symbol=sym, dry_run=args.dry_run)
+        bot = VWAPPullbackBot(symbol=sym, leverage=args.leverage, dry_run=args.dry_run)
+        tasks.append(asyncio.create_task(bot.run()))
+
+    # Start MomShort bots
+    for sym in args.momshort_symbols:
+        from trader.bot import MomShortBot
+        from trader.config import get_symbol_config
+        cfg = get_symbol_config(sym)
+        bot = MomShortBot(cfg=cfg, leverage=args.leverage, dry_run=args.dry_run)
         tasks.append(asyncio.create_task(bot.run()))
 
     config = uvicorn.Config(app, host=args.host, port=args.port, loop="none")

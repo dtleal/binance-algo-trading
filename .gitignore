@@ -7,6 +7,13 @@ logs/
 *.html
 *.png
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+frontend/src/**/*.js
+frontend/src/**/*.js.map
+
 # Ansible
 infra/ansible/ansible.log
 infra/ansible/*.retry

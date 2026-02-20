@@ -487,6 +487,27 @@ class VWAPPullbackBot:
             )
         logger.info("-" * 60)
 
+        # Publish bot configuration to registry
+        _registry.update(self._reg_key, {
+            "symbol": self.symbol,
+            "strategy": "pullback",
+            "config": {
+                "leverage": self.leverage,
+                "tp_pct": self.tp_pct,
+                "sl_pct": self.sl_pct,
+                "pos_size_pct": self.pos_size_pct,
+                "ema_period": self._ema.period,
+                "min_bars": self._signal.min_bars,
+                "confirm_bars": self._signal.confirm_bars,
+                "vwap_prox": self._signal.vwap_prox,
+                "vwap_window_days": self._vwap.window_days,
+                "max_trades_per_day": self._signal.max_trades_per_day,
+                "capital": self.capital,
+                "per_trade": per_trade,
+            },
+            "dry_run": self.dry_run,
+        })
+
         self._schedule_eod()
 
         if self.dry_run:

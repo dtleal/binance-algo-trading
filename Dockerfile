@@ -1,15 +1,29 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
-COPY pyproject.toml poetry.lock ./
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir poetry && \
-    poetry config virtualenvs.create false && \
-    poetry install --only main --no-root --no-interaction --no-ansi
+# Install Poetry
+RUN pip install poetry==1.8.2
 
+# Copy dependency files
+COPY pyproject.toml ./
+COPY poetry.lock* ./
+
+# Install dependencies (no dev dependencies in production)
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-dev --no-interaction --no-ansi
+
+# Copy application code
 COPY trader/ ./trader/
+COPY frontend/dist/ ./frontend/dist/
 
-RUN mkdir -p /app/logs
+# Expose port
+EXPOSE 8080
 
-CMD ["python", "-m", "trader", "bot", "--symbol", "axsusdt", "--leverage", "5"]
+# Run dashboard by default
+CMD ["python", "-m", "trader", "serve", "--host", "0.0.0.0", "--port", "8080"]

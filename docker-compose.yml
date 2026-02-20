@@ -1,18 +1,49 @@
-services:
-  bot-axs:
-    build: .
-    container_name: binance-bot-axs
-    command: ["python", "-m", "trader", "bot", "--symbol", "axsusdt", "--leverage", "5"]
-    env_file: .env
-    volumes:
-      - ./logs:/app/logs
-    restart: unless-stopped
+version: '3.8'
 
-  bot-sand:
-    build: .
-    container_name: binance-bot-sand
-    command: ["python", "-m", "trader", "bot", "--symbol", "sandusdt", "--leverage", "5", "--capital", "30"]
-    env_file: .env
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: binance-trader-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - trader-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: binance-trader-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_SECRET_KEY=${BINANCE_SECRET_KEY}
+      - SOCKS_PROXY=${SOCKS_PROXY:-}
     volumes:
       - ./logs:/app/logs
+      - ./.env:/app/.env:ro
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
+    networks:
+      - trader-network
+
+volumes:
+  redis-data:
+    driver: local
+
+networks:
+  trader-network:
+    driver: bridge

@@ -122,6 +122,95 @@ function BotCard({ state, liveEvents }: { state: BotState; liveEvents: WsEvent[]
           </div>
         </div>
       )}
+
+      {/* Bot Configuration */}
+      {state.config && (
+        <details className="bg-gray-900/50 rounded-lg">
+          <summary className="px-3 py-2 text-xs text-gray-400 cursor-pointer hover:text-gray-300 select-none">
+            Configuration
+          </summary>
+          <div className="px-3 pb-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[10px]">
+            {state.config.leverage && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Leverage:</span>
+                <span className="text-gray-300 font-medium">{state.config.leverage}x</span>
+              </div>
+            )}
+            {state.config.tp_pct != null && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">TP:</span>
+                <span className="text-emerald-400 font-medium">{state.config.tp_pct}%</span>
+              </div>
+            )}
+            {state.config.sl_pct != null && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">SL:</span>
+                <span className="text-red-400 font-medium">{state.config.sl_pct}%</span>
+              </div>
+            )}
+            {state.config.pos_size_pct != null && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Position Size:</span>
+                <span className="text-gray-300 font-medium">{(state.config.pos_size_pct * 100).toFixed(0)}%</span>
+              </div>
+            )}
+            {state.config.capital != null && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Capital:</span>
+                <span className="text-gray-300 font-medium">${state.config.capital.toFixed(2)}</span>
+              </div>
+            )}
+            {state.config.per_trade != null && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Per Trade:</span>
+                <span className="text-gray-300 font-medium">${state.config.per_trade.toFixed(2)}</span>
+              </div>
+            )}
+            {state.config.ema_period && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">EMA Period:</span>
+                <span className="text-gray-300 font-medium">{state.config.ema_period}</span>
+              </div>
+            )}
+            {state.config.min_bars && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Min Bars:</span>
+                <span className="text-gray-300 font-medium">{state.config.min_bars}</span>
+              </div>
+            )}
+            {state.config.confirm_bars && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Confirm Bars:</span>
+                <span className="text-gray-300 font-medium">{state.config.confirm_bars}</span>
+              </div>
+            )}
+            {state.config.vwap_prox != null && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">VWAP Proximity:</span>
+                <span className="text-gray-300 font-medium">{(state.config.vwap_prox * 100).toFixed(1)}%</span>
+              </div>
+            )}
+            {state.config.vwap_window_days && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">VWAP Window:</span>
+                <span className="text-gray-300 font-medium">{state.config.vwap_window_days}d</span>
+              </div>
+            )}
+            {state.config.max_trades_per_day && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Max Trades/Day:</span>
+                <span className="text-gray-300 font-medium">{state.config.max_trades_per_day}</span>
+              </div>
+            )}
+            {state.config.min_notional != null && (
+              <div className="flex justify-between">
+                <span className="text-gray-500">Min Notional:</span>
+                <span className="text-gray-300 font-medium">${state.config.min_notional.toFixed(2)}</span>
+              </div>
+            )}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

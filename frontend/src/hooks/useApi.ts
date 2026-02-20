@@ -52,3 +52,61 @@ export function useBotStates() {
   );
   return { bots: data?.bots ?? {}, error };
 }
+
+export function useAccountSummary() {
+  const { data, error, isLoading } = useSWR<{
+    total_balance: number;
+    available_balance: number;
+    total_equity: number;
+    unrealized_pnl: number;
+    position_margin: number;
+    open_positions: number;
+    pnl_24h: number;
+    equity_change_24h_pct: number;
+  }>("/api/account_summary", fetcher, {
+    refreshInterval: 10_000,
+  });
+  return { summary: data ?? null, error, isLoading };
+}
+
+export function useMarketData() {
+  const { data, error, isLoading } = useSWR<{
+    market_data: Record<string, {
+      symbol: string;
+      last_price: number;
+      price_change_pct: number;
+      high_24h: number;
+      low_24h: number;
+      volume_24h: number;
+      quote_volume_24h: number;
+      trades_24h: number;
+    }>;
+  }>("/api/market_data", fetcher, {
+    refreshInterval: 30_000,
+  });
+  return { marketData: data?.market_data ?? {}, error, isLoading };
+}
+
+export function usePerformance() {
+  const { data, error, isLoading } = useSWR<{
+    bots: Record<string, {
+      symbol: string;
+      strategy: string;
+      state: string;
+      total_trades: number;
+      winning_trades: number;
+      win_rate: number;
+      total_pnl: number;
+      unrealized_pnl: number;
+    }>;
+    portfolio: {
+      total_trades: number;
+      winning_trades: number;
+      win_rate: number;
+      total_pnl: number;
+    };
+  }>("/api/performance", fetcher, {
+    refreshInterval: 60_000,
+  });
+  return { performance: data ?? null, error, isLoading };
+}

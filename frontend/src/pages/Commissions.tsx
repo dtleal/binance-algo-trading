@@ -29,21 +29,21 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 
 export default function Commissions() {
   const [days, setDays] = useState<Days>(30);
-  const { data, isLoading } = useCommissions(days);
+  const { commissions, isLoading } = useCommissions(days);
 
   const dailyChart = useMemo(() => {
-    if (!data?.daily) return [];
-    return Object.entries(data.daily)
+    if (!commissions?.daily) return [];
+    return Object.entries(commissions.daily)
       .sort()
       .map(([date, usdt]) => ({
         date: date.slice(5),
         usdt: parseFloat((usdt as number).toFixed(4)),
       }));
-  }, [data]);
+  }, [commissions]);
 
-  const byAsset = data?.by_asset ?? {};
-  const bySymbol = data?.by_symbol ?? {};
-  const totalUsdt = data?.total_usdt ?? 0;
+  const byAsset = commissions?.by_asset ?? {};
+  const bySymbol = commissions?.by_symbol ?? {};
+  const totalUsdt = commissions?.total_usdt ?? 0;
 
   // Avg daily commission
   const avgDaily =
