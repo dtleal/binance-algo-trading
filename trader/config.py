@@ -73,6 +73,7 @@ AXS_CONFIG = SymbolConfig(
     pos_size_pct=0.95,
     price_decimals=3,
     qty_decimals=0,
+    interval="1m",
 )
 
 SAND_CONFIG = SymbolConfig(
@@ -198,6 +199,7 @@ SOL_CONFIG = SymbolConfig(
     qty_decimals=2,
     min_notional=5.0,
     vol_filter=True,    # Volume filter enabled for MomShort
+    interval="1m",
 )
 
 AVAX_CONFIG = SymbolConfig(
@@ -215,6 +217,7 @@ AVAX_CONFIG = SymbolConfig(
     price_decimals=2,
     qty_decimals=2,
     min_notional=5.0,
+    interval="1m",
 )
 
 XRP_CONFIG = SymbolConfig(
