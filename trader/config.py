@@ -175,11 +175,11 @@ ETH_CONFIG = SymbolConfig(
 SOL_CONFIG = SymbolConfig(
     symbol="SOLUSDT",
     asset="SOL",
-    tp_pct=7.0,         # Champion: 5m RejShort, +28.55% return
+    tp_pct=7.0,         # Champion: 1m MomShort, +28.13% return (302 trades, 53.3% WR)
     sl_pct=5.0,
-    min_bars=5,
+    min_bars=8,
     confirm_bars=0,
-    vwap_prox=0.000,    # 0% - RejShort doesn't use VWAP proximity
+    vwap_prox=0.002,    # 0.2%
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
@@ -187,6 +187,7 @@ SOL_CONFIG = SymbolConfig(
     price_decimals=2,
     qty_decimals=2,
     min_notional=5.0,
+    vol_filter=True,    # Volume filter enabled for MomShort
 )
 
 AVAX_CONFIG = SymbolConfig(
@@ -214,7 +215,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "DOGEUSDT": DOGE_CONFIG,
     "1000SHIBUSDT": SHIB_CONFIG,
     "ETHUSDT": ETH_CONFIG,
-    # "SOLUSDT": SOL_CONFIG,  # Removed: RejShort strategy not implemented (champion was +28.55%)
+    "SOLUSDT": SOL_CONFIG,
     "AVAXUSDT": AVAX_CONFIG,
 }
 
