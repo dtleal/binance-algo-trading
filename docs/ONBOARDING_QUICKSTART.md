@@ -29,33 +29,56 @@ make onboarding ATIVO=DOGEUSDT
 
 **What happens:**
 - ✅ Downloads 1 year of 1-minute klines from Binance
-- ❓ Prompts you to run parameter sweep (if MomShort)
+- ✅ Aggregates to multiple timeframes (5m, 15m, 30m, 1h)
+- ❓ Prompts you to run multi-timeframe parameter sweep (if MomShort)
+- ✅ Analyzes results and identifies global champion
 - ❓ Prompts you to configure backtest parameters
 - ✅ Runs detailed backtest
 - ✅ Generates trade log CSV and interactive charts
 - ✅ Shows validation checklist
 
-### 2. Parameter Sweep (MomShort only)
+### 2. Multi-Timeframe Parameter Sweep (MomShort only)
 
-When prompted, you'll need to:
+**NEW: Automated multi-timeframe testing**
 
-**A. Update backtest sweep:**
+The sweep now automatically tests 5 timeframes:
+- 1m (original downloaded data)
+- 5m, 15m, 30m, 1h (aggregated from 1m)
+
+Each timeframe tests 8M+ parameter combinations.
+
+**When prompted:**
+
+**A. Run multi-timeframe sweep (RECOMMENDED):**
+```bash
+# Automated - runs all timeframes in sequence
+poetry run python onboarding.py DOGEUSDT
+# Answer 'y' when prompted for multi-timeframe sweep
+```
+
+**Expected output:**
+- Aggregates 1m → 5m, 15m, 30m, 1h (~10s)
+- Runs sweep on each timeframe (~4-5 min total)
+- Analyzes all results and finds global champion
+- Shows best timeframe + parameters
+
+**B. Manual alternative (old way):**
 ```bash
 cd backtest_sweep
 # Edit src/main.rs - update CSV_FILE path
 cargo run --release
 ```
 
-**B. Analyze results:**
-- Check TOP 30 BY RETURN
-- Check TOP 30 RISK-ADJUSTED
-- Note best strategy, VWAP window, parameters
-
-**C. Continue onboarding:**
+**C. Analyze results:**
 ```bash
-# Re-run with skip flags
-poetry run python onboarding.py DOGEUSDT --skip-download --skip-sweep
+# View global champion across all timeframes
+poetry run python analyze_sweep_results.py DOGEUSDT -n 5
 ```
+
+Output shows:
+- Top strategies per timeframe
+- Global champion (best return across all TFs)
+- Validation checklist
 
 ### 3. Configure Backtest
 

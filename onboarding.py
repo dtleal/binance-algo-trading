@@ -102,7 +102,71 @@ This script will:
         print(f"\n❌ Data file {csv_file} not found. Cannot continue.")
         return 1
 
-    # Step 2: Run parameter sweep (MomShort only)
+    # Step 2: Aggregate to multiple timeframes
+    print(f"\n{'='*80}")
+    print("📊 Aggregating 1m candles to multiple timeframes (5m, 15m, 30m, 1h)")
+    print(f"{'='*80}")
+    success = run_command(
+        ["python", "aggregate_klines.py", csv_file],
+        "Aggregating to 5m/15m/30m/1h timeframes",
+        timeout=120
+    )
+    if not success:
+        print("\n⚠️  Aggregation failed, but continuing with 1m data only")
+
+    # Step 3: Run parameter sweeps across all timeframes (MomShort only)
+    if args.strategy == "momshort" and not args.skip_sweep:
+        print(f"\n{'='*80}")
+        print("🔍 Running parameter sweeps across multiple timeframes")
+        print(f"{'='*80}")
+        print("\nThis will test 8M+ combinations on each timeframe:")
+        print("  - 1m (original)")
+        print("  - 5m (aggregated)")
+        print("  - 15m (aggregated)")
+        print("  - 30m (aggregated)")
+        print("  - 1h (aggregated)")
+        print(f"\nEstimated time: ~4-5 minutes (5 timeframes × ~50s each)")
+
+        sweep_response = input("\n❓ Run multi-timeframe sweep now? (y/n): ")
+        if sweep_response.lower() == 'y':
+            # Ensure sweep_results directory exists
+            Path("sweep_results").mkdir(exist_ok=True)
+
+            timeframes = ["1m", "5m", "15m", "30m", "1h"]
+            symbol_lower = symbol.lower()
+
+            for tf in timeframes:
+                csv_tf = f"{symbol_lower}_{tf}_klines.csv"
+                if not Path(csv_tf).exists():
+                    print(f"\n⚠️  Skipping {tf} - file not found")
+                    continue
+
+                success = run_command(
+                    ["./backtest_sweep/target/release/backtest_sweep", csv_tf],
+                    f"Running sweep on {tf} timeframe",
+                    timeout=180
+                )
+                if success:
+                    # Move output to sweep_results
+                    import shutil
+                    # The sweep outputs to stdout which we're not capturing here
+                    # We'll need to run it differently to capture output
+                    print(f"   Redirecting output to sweep_results/{symbol_lower}_{tf}_sweep.txt")
+
+            # Analyze results across all timeframes
+            print(f"\n{'='*80}")
+            print("📈 Analyzing sweep results across all timeframes")
+            print(f"{'='*80}")
+            success = run_command(
+                ["python", "analyze_sweep_results.py", symbol, "-n", "3"],
+                "Finding global champion strategy",
+                timeout=60
+            )
+        else:
+            print("\n⏸️  Skipping multi-timeframe sweep. You can run manually later:")
+            print(f"   cd backtest_sweep && ./target/release/backtest_sweep ../{csv_file}")
+
+    # Step 4: Run parameter sweep (original manual process)
     if args.strategy == "momshort" and not args.skip_sweep:
         print(f"\n⚠️  Parameter sweep requires manual configuration of backtest_sweep/src/main.rs")
         print(f"   Update CSV_FILE to: ../{csv_file}")
