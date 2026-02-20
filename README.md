@@ -21,28 +21,24 @@ The strategy is configured per-symbol in `trader/config.py` — parameters like 
 
 ## Active Portfolio (11 Bots)
 
-### MomShort Strategy (1m timeframe)
-| Symbol     | Return  | TP   | SL   | Leverage | Config               |
-|------------|---------|------|------|----------|----------------------|
-| AXSUSDT    | +40.10% | 10%  | 5%   | 20x      | bars=3, cfm=2        |
-| SANDUSDT   | —       | 10%  | 0.8% | 20x      | bars=5, cfm=2        |
-| GALAUSDT   | —       | 5%   | 5%   | 20x      | bars=5, cfm=0        |
-| MANAUSDT   | —       | 5%   | 5%   | 20x      | bars=12, cfm=2       |
-| SOLUSDT    | +28.13% | 7%   | 5%   | 20x      | bars=8, cfm=0        |
-| PEPEUSDT   | +35.63% | 7%   | 5%   | 20x      | bars=12, cfm=2       |
+### MomShort Strategy
+| Symbol     | Timeframe | Return  | TP   | SL   | Leverage | Config               |
+|------------|-----------|---------|------|------|----------|----------------------|
+| AXSUSDT    | 1m        | +40.10% | 10%  | 5%   | 20x      | bars=3, cfm=2        |
+| SANDUSDT   | 5m        | +27.61% | 10%  | 1%   | 20x      | bars=5, cfm=0, vf=✓  |
+| MANAUSDT   | 1m        | +30.54% | 5%   | 5%   | 20x      | bars=12, cfm=2, vf=✓ |
+| SOLUSDT    | 1m        | +28.13% | 7%   | 5%   | 20x      | bars=8, cfm=0        |
+| PEPEUSDT   | 1m        | +35.63% | 7%   | 5%   | 20x      | bars=12, cfm=2       |
 
-### VWAPPullback Strategy (5m timeframe)
-| Symbol       | Return  | TP   | SL   | Leverage | Config               |
-|--------------|---------|------|------|----------|----------------------|
-| DOGEUSDT     | +41.28% | 10%  | 5%   | 20x      | bars=3, cfm=0        |
-| 1000SHIBUSDT | +37.51% | 7%   | 5%   | 20x      | bars=3, cfm=0        |
-| XRPUSDT      | +29.21% | 10%  | 2%   | 20x      | bars=3, cfm=0        |
-
-### VWAPPullback Strategy (1m timeframe)
-| Symbol     | Return  | TP   | SL   | Leverage | Config               |
-|------------|---------|------|------|----------|----------------------|
-| ETHUSDT    | —       | 10%  | 5%   | 5x       | bars=20, cfm=0       |
-| AVAXUSDT   | +31.12% | 7%   | 2%   | 20x      | bars=30, cfm=0       |
+### VWAPPullback Strategy
+| Symbol       | Timeframe | Return  | TP   | SL   | Leverage | Config               |
+|--------------|-----------|---------|------|------|----------|----------------------|
+| GALAUSDT     | 1m        | +34.85% | 10%  | 5%   | 20x      | bars=3, cfm=0        |
+| AVAXUSDT     | 1m        | +31.12% | 7%   | 2%   | 20x      | bars=30, cfm=0       |
+| DOGEUSDT     | 5m        | +41.28% | 10%  | 5%   | 20x      | bars=3, cfm=0        |
+| 1000SHIBUSDT | 5m        | +37.51% | 7%   | 5%   | 20x      | bars=3, cfm=0        |
+| ETHUSDT      | 5m        | +31.28% | 10%  | 5%   | 5x       | bars=20, cfm=0       |
+| XRPUSDT      | 5m        | +29.21% | 10%  | 2%   | 20x      | bars=3, cfm=0        |
 
 ## Setup
 

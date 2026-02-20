@@ -80,7 +80,7 @@ bots: redis ## Start all validated bots with optimal configurations
 	@export REDIS_URL=redis://localhost:6379 && \
 		(poetry run python -m trader bot --symbol axsusdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader bot --symbol sandusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader bot --symbol galausdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader pullback --symbol galausdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader bot --symbol manausdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader bot --symbol solusdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader bot --symbol pepeusdt --leverage 20 > /dev/null 2>&1 &) && \
@@ -93,15 +93,14 @@ bots: redis ## Start all validated bots with optimal configurations
 	@echo "$(GREEN)✅ All bots started!$(NC)"
 	@echo ""
 	@echo "$(BLUE)Active Strategies:$(NC)"
-	@echo "  📊 MomShort (1m timeframe, 20x leverage):"
-	@echo "     • AXSUSDT (+40.10%), SANDUSDT, GALAUSDT"
-	@echo "     • MANAUSDT, SOLUSDT (+28.13%), PEPEUSDT (+35.63%)"
+	@echo "  📊 MomShort (20x leverage):"
+	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
+	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%), PEPEUSDT (1m, +35.63%)"
 	@echo ""
-	@echo "  📊 VWAPPullback (5m timeframe, 20x leverage):"
-	@echo "     • DOGEUSDT (+41.28%), 1000SHIBUSDT (+37.51%), XRPUSDT (+29.21%)"
-	@echo ""
-	@echo "  📊 VWAPPullback (1m timeframe):"
-	@echo "     • ETHUSDT (5x), AVAXUSDT (20x, +31.12%)"
+	@echo "  📊 VWAPPullback (20x leverage):"
+	@echo "     • GALAUSDT (1m, +34.85%), AVAXUSDT (1m, +31.12%)"
+	@echo "     • DOGEUSDT (5m, +41.28%), 1000SHIBUSDT (5m, +37.51%)"
+	@echo "     • XRPUSDT (5m, +29.21%), ETHUSDT (5m, 5x, +31.28%)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -125,8 +124,8 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
 	@echo "$(BLUE)🤖 Active Bots:$(NC) 11 total"
-	@echo "   • 6 MomShort bots (1m, 20x leverage)"
-	@echo "   • 5 VWAP Pullback bots (3x 5m + 2x 1m, 5x-20x leverage)"
+	@echo "   • 5 MomShort bots (4x 1m + 1x 5m, 20x leverage)"
+	@echo "   • 6 VWAP Pullback bots (4x 5m + 2x 1m, 5x-20x leverage)"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
 	@echo "   • $(YELLOW)make status-all$(NC)  - Check all processes"
@@ -215,23 +214,23 @@ bot-mana: ## Run MomShort trading bot for MANAUSDT
 bot-mana-dry: ## Run MANAUSDT bot in dry-run mode
 	poetry run python -m trader bot --symbol manausdt --dry-run --leverage $(LEVERAGE)
 
-bot-gala: ## Run MomShort trading bot for GALAUSDT
-	poetry run python -m trader bot --symbol galausdt --leverage $(LEVERAGE)
+bot-gala: ## Run VWAPPullback trading bot for GALAUSDT
+	poetry run python -m trader pullback --symbol galausdt --leverage $(LEVERAGE)
 
 bot-gala-dry: ## Run GALAUSDT bot in dry-run mode
-	poetry run python -m trader bot --symbol galausdt --dry-run --leverage $(LEVERAGE)
+	poetry run python -m trader pullback --symbol galausdt --dry-run --leverage $(LEVERAGE)
 
-bot-doge: ## Run MomShort trading bot for DOGEUSDT
-	poetry run python -m trader bot --symbol dogeusdt --leverage $(LEVERAGE)
+bot-doge: ## Run VWAPPullback trading bot for DOGEUSDT
+	poetry run python -m trader pullback --symbol dogeusdt --leverage $(LEVERAGE)
 
 bot-doge-dry: ## Run DOGEUSDT bot in dry-run mode
-	poetry run python -m trader bot --symbol dogeusdt --dry-run --leverage $(LEVERAGE)
+	poetry run python -m trader pullback --symbol dogeusdt --dry-run --leverage $(LEVERAGE)
 
-bot-shib: ## Run MomShort trading bot for 1000SHIBUSDT
-	poetry run python -m trader bot --symbol 1000shibusdt --leverage $(LEVERAGE)
+bot-shib: ## Run VWAPPullback trading bot for 1000SHIBUSDT
+	poetry run python -m trader pullback --symbol 1000shibusdt --leverage $(LEVERAGE)
 
 bot-shib-dry: ## Run 1000SHIBUSDT bot in dry-run mode
-	poetry run python -m trader bot --symbol 1000shibusdt --dry-run --leverage $(LEVERAGE)
+	poetry run python -m trader pullback --symbol 1000shibusdt --dry-run --leverage $(LEVERAGE)
 
 logs: ## Tail the latest log file
 	@ls -t logs/*.log 2>/dev/null | head -1 | xargs -r tail -f || echo "No log files found"

@@ -78,50 +78,55 @@ AXS_CONFIG = SymbolConfig(
 SAND_CONFIG = SymbolConfig(
     symbol="SANDUSDT",
     asset="SAND",
-    tp_pct=10.0,
-    sl_pct=0.8,
+    tp_pct=10.0,        # Champion: 5m MomShort, +27.61% return (250 trades, 34.0% WR)
+    sl_pct=1.0,
     min_bars=5,
-    confirm_bars=2,
-    vwap_prox=0.002,
+    confirm_bars=0,
+    vwap_prox=0.005,    # 0.5%
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
     pos_size_pct=0.20,
     price_decimals=5,
     qty_decimals=0,
+    vol_filter=True,
+    interval="5m",
 )
 
 MANA_CONFIG = SymbolConfig(
     symbol="MANAUSDT",
     asset="MANA",
-    tp_pct=5.0,
+    tp_pct=5.0,         # Champion: 1m MomShort, +30.54% return (295 trades, 52.9% WR)
     sl_pct=5.0,
     min_bars=12,
     confirm_bars=2,
-    vwap_prox=0.005,
+    vwap_prox=0.005,    # 0.5%
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
-    pos_size_pct=0.30,  # 30% → $73 × 0.30 = $21.90/trade ✅
+    pos_size_pct=0.30,  # 30% per trade
     price_decimals=4,
     qty_decimals=0,
+    vol_filter=True,
+    interval="1m",
 )
 
 GALA_CONFIG = SymbolConfig(
     symbol="GALAUSDT",
     asset="GALA",
-    tp_pct=5.0,
+    tp_pct=10.0,        # Champion: 1m VWAPPullback, +34.85% return (357 trades, 52.1% WR)
     sl_pct=5.0,
-    min_bars=5,
+    min_bars=3,
     confirm_bars=0,
-    vwap_prox=0.002,
+    vwap_prox=0.002,    # 0.2%
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
     pos_size_pct=0.20,
-    vol_filter=True,
+    vol_filter=False,
     price_decimals=5,
     qty_decimals=0,
+    interval="1m",
 )
 
 DOGE_CONFIG = SymbolConfig(
@@ -161,18 +166,20 @@ SHIB_CONFIG = SymbolConfig(
 ETH_CONFIG = SymbolConfig(
     symbol="ETHUSDT",
     asset="ETH",
-    tp_pct=10.0,
+    tp_pct=10.0,        # Champion: 5m VWAPPullback, +31.28% return (251 trades, 51.0% WR)
     sl_pct=5.0,
     min_bars=20,
     confirm_bars=0,
-    vwap_prox=0.005,
+    vwap_prox=0.005,    # 0.5%
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
-    pos_size_pct=0.30,  # 30% per trade ($68 × 0.30 = $20.40 ✅)
+    pos_size_pct=0.30,  # 30% per trade
     price_decimals=2,
     qty_decimals=3,
     min_notional=20.0,
+    vol_filter=False,
+    interval="5m",
 )
 
 SOL_CONFIG = SymbolConfig(
