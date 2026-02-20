@@ -84,13 +84,14 @@ bots: redis ## Start all validated bots with optimal configurations
 		(poetry run python -m trader bot --symbol 1000shibusdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader bot --symbol galausdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader bot --symbol manausdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader bot --symbol solusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader bot --symbol avaxusdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader pullback --symbol ethusdt --leverage 5 --tp 10.0 --sl 5.0 \
 			--min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --vwap-window-days 1 \
 			--ema-period 100 --pos-size 0.30 --max-trades 2 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader pullback --symbol axsusdt --leverage 20 --tp 10.0 --sl 5.0 \
 			--min-bars 5 --confirm-bars 1 --vwap-prox 0.005 --vwap-window-days 10 \
+			--ema-period 200 --pos-size 0.20 --max-trades 1 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader pullback --symbol avaxusdt --leverage 20 --tp 7.0 --sl 2.0 \
+			--min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --vwap-window-days 10 \
 			--ema-period 200 --pos-size 0.20 --max-trades 1 > /dev/null 2>&1 &)
 	@sleep 2
 	@echo "$(GREEN)✅ All bots started!$(NC)"
@@ -99,11 +100,11 @@ bots: redis ## Start all validated bots with optimal configurations
 	@echo "  📊 MomShort (20x leverage):"
 	@echo "     • AXSUSDT, SANDUSDT, DOGEUSDT"
 	@echo "     • 1000SHIBUSDT, GALAUSDT, MANAUSDT"
-	@echo "     • SOLUSDT, AVAXUSDT"
 	@echo ""
 	@echo "  📊 VWAP Pullback:"
 	@echo "     • ETHUSDT (5x) - 5min candles"
 	@echo "     • AXSUSDT (20x) - 1min candles"
+	@echo "     • AVAXUSDT (20x) - 1min candles, +31.12% return"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -126,9 +127,9 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo ""
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
-	@echo "$(BLUE)🤖 Active Bots:$(NC) 8 total"
+	@echo "$(BLUE)🤖 Active Bots:$(NC) 9 total"
 	@echo "   • 6 MomShort bots (20x leverage)"
-	@echo "   • 2 VWAP Pullback bots (5x-20x leverage)"
+	@echo "   • 3 VWAP Pullback bots (5x-20x leverage)"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
 	@echo "   • $(YELLOW)make status-all$(NC)  - Check all processes"

@@ -214,7 +214,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "DOGEUSDT": DOGE_CONFIG,
     "1000SHIBUSDT": SHIB_CONFIG,
     "ETHUSDT": ETH_CONFIG,
-    "SOLUSDT": SOL_CONFIG,
+    # "SOLUSDT": SOL_CONFIG,  # Removed: RejShort strategy not implemented (champion was +28.55%)
     "AVAXUSDT": AVAX_CONFIG,
 }
 
