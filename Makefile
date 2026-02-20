@@ -72,35 +72,36 @@ dashboard: redis build-frontend ## Start dashboard server only
 	@export REDIS_URL=redis://localhost:6379 && \
 		poetry run python -m trader serve --port 8080 --host 0.0.0.0
 
-bots: redis ## Start all validated bots with optimal configurations
+bots: redis ## Start all validated bots with optimal configurations (auto-reads from trader/config.py)
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
 	@echo "$(GREEN)  Starting Trading Bots$(NC)"
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
 	@echo ""
-	@export REDIS_URL=redis://localhost:6379 && \
-		(poetry run python -m trader bot --symbol axsusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader bot --symbol sandusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader pullback --symbol galausdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader bot --symbol manausdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader bot --symbol solusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader bot --symbol pepeusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader pullback --symbol dogeusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader pullback --symbol 1000shibusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader pullback --symbol xrpusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader pullback --symbol ethusdt --leverage 5 > /dev/null 2>&1 &) && \
-		(poetry run python -m trader pullback --symbol avaxusdt --leverage 20 > /dev/null 2>&1 &)
-	@sleep 2
-	@echo "$(GREEN)✅ All bots started!$(NC)"
+	@echo "$(YELLOW)All bots auto-configure from trader/config.py (interval, TP/SL, params)$(NC)"
 	@echo ""
-	@echo "$(BLUE)Active Strategies:$(NC)"
+	@export REDIS_URL=redis://localhost:6379 && \
+		(nohup poetry run python -m trader bot --symbol axsusdt --leverage 20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot --symbol sandusdt --leverage 20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot --symbol manausdt --leverage 20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot --symbol solusdt --leverage 20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 20 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol avaxusdt --leverage 20 --tp 7.0 --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 20 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 20 --tp 7.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 20 --tp 10.0 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 5 --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 > /dev/null 2>&1 &)
+	@sleep 3
+	@echo "$(GREEN)✅ Bots started! (PEPE skipped - invalid symbol)$(NC)"
+	@echo ""
+	@echo "$(BLUE)Active Strategies (10 bots):$(NC)"
 	@echo "  📊 MomShort (20x leverage):"
 	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
-	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%), PEPEUSDT (1m, +35.63%)"
+	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%)"
 	@echo ""
-	@echo "  📊 VWAPPullback (20x leverage):"
-	@echo "     • GALAUSDT (1m, +34.85%), AVAXUSDT (1m, +31.12%)"
-	@echo "     • DOGEUSDT (5m, +41.28%), 1000SHIBUSDT (5m, +37.51%)"
-	@echo "     • XRPUSDT (5m, +29.21%), ETHUSDT (5m, 5x, +31.28%)"
+	@echo "  📊 VWAPPullback:"
+	@echo "     • GALAUSDT (1m, 20x, +34.85%), AVAXUSDT (1m, 20x, +31.12%)"
+	@echo "     • DOGEUSDT (5m, 20x, +41.28%), 1000SHIBUSDT (5m, 20x, +37.51%)"
+	@echo "     • XRPUSDT (5m, 20x, +29.21%), ETHUSDT (5m, 5x, +31.28%)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
