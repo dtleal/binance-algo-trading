@@ -72,6 +72,11 @@ function BotCard({ state, liveEvents }: { state: BotState; liveEvents: WsEvent[]
         </div>
       </div>
 
+      {/* Trades counter - visible in all states */}
+      <div className="bg-gray-900/50 rounded-lg px-3 py-2 text-xs text-gray-400">
+        Trades today: <span className="text-white font-medium">{state.trades_today ?? 0}/{state.max_trades_per_day ?? 4}</span>
+      </div>
+
       {/* Signal progress (SCANNING) */}
       {botState === "SCANNING" && (
         <div className="bg-gray-900/50 rounded-lg px-3 py-2 text-xs text-gray-400">
@@ -88,8 +93,6 @@ function BotCard({ state, liveEvents }: { state: BotState; liveEvents: WsEvent[]
               </span>
             </span>
           )}
-          {" · "}
-          Trades: <span className="text-white">{state.trades_today ?? 0}/{state.max_trades_per_day ?? 4}</span>
         </div>
       )}
 

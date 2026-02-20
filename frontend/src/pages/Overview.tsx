@@ -4,6 +4,7 @@ import {
   BarChart, Bar, Cell, AreaChart, Area,
 } from "recharts";
 import { useAccountSummary, useTrades, usePerformance, usePositions, useBotStates } from "../hooks/useApi";
+import { useFilter } from "../contexts/FilterContext";
 
 function Card({
   label, value, sub, color = "text-white",
@@ -65,14 +66,24 @@ function buildPnlCurve(trades: { time: number; realized_pnl: number }[]) {
 }
 
 export default function Overview() {
+  const { filter } = useFilter();
   const { summary }      = useAccountSummary();
-  const { trades }       = useTrades(30);
+  const { trades }       = useTrades(filter.dateRange);
   const { performance }  = usePerformance();
   const { positions }    = usePositions();
   const { bots }         = useBotStates();
 
+  // Filter trades by symbol and strategy
+  const filteredTrades = useMemo(() => {
+    return trades.filter(t => {
+      const symbolMatch = filter.symbol === "ALL" || t.symbol === filter.symbol;
+      // Strategy filtering would require backend support to tag trades with strategy
+      return symbolMatch;
+    });
+  }, [trades, filter.symbol]);
+
   const todayUTC = new Date().toISOString().slice(0, 10);
-  const todayTrades  = trades.filter(
+  const todayTrades  = filteredTrades.filter(
     (t) => new Date(t.time).toISOString().slice(0, 10) === todayUTC
   );
   const pnlToday = todayTrades.reduce((s, t) => s + t.realized_pnl, 0);
@@ -84,14 +95,14 @@ export default function Overview() {
   const equityChange24h = summary?.equity_change_24h_pct ?? 0;
   const openPositions = summary?.open_positions ?? 0;
 
-  const pnlCurve = buildPnlCurve(trades);
+  const pnlCurve = buildPnlCurve(filteredTrades);
   const activeBots = Object.values(bots).length;
   const scanningBots = Object.values(bots).filter(b => b.state === "SCANNING").length;
 
   // Build daily P&L chart
   const dailyPnl = useMemo(() => {
     const byDay: Record<string, number> = {};
-    for (const t of trades) {
+    for (const t of filteredTrades) {
       if (t.realized_pnl === 0) continue; // Skip opening trades
       const d = new Date(t.time).toISOString().slice(0, 10);
       byDay[d] = (byDay[d] ?? 0) + t.realized_pnl;
@@ -102,7 +113,7 @@ export default function Overview() {
         date: date.slice(5), // MM-DD format
         pnl: parseFloat(pnl.toFixed(2)),
       }));
-  }, [trades]);
+  }, [filteredTrades]);
 
   return (
     <div className="space-y-6">
@@ -265,11 +276,11 @@ export default function Overview() {
         {/* Recent trades or Open Positions */}
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
           <p className="text-sm font-semibold text-gray-300 mb-4">
-            {trades.length > 0 ? "Recent Trades" : "Open Positions"}
+            {filteredTrades.length > 0 ? "Recent Trades" : "Open Positions"}
           </p>
           <div className="space-y-2 overflow-y-auto max-h-[240px]">
-            {trades.length > 0 ? (
-              trades.slice(0, 15).map((t, i) => (
+            {filteredTrades.length > 0 ? (
+              filteredTrades.slice(0, 15).map((t, i) => (
                 <div key={i} className="flex items-center justify-between text-xs py-1.5
                   border-b border-gray-700/50 last:border-0">
                   <div>

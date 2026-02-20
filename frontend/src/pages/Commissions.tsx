@@ -1,10 +1,9 @@
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
 import { useCommissions } from "../hooks/useApi";
-
-type Days = 7 | 30 | 90;
+import { useFilter } from "../contexts/FilterContext";
 
 const DayTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -28,17 +27,15 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 }
 
 export default function Commissions() {
-  const [days, setDays] = useState<Days>(30);
-  const { commissions, isLoading } = useCommissions(days);
+  const { filter } = useFilter();
+  const { commissions, isLoading } = useCommissions(filter.dateRange);
 
   const dailyChart = useMemo(() => {
-    if (!commissions?.daily) return [];
-    return Object.entries(commissions.daily)
-      .sort()
-      .map(([date, usdt]) => ({
-        date: date.slice(5),
-        usdt: parseFloat((usdt as number).toFixed(4)),
-      }));
+    if (!commissions?.daily || !Array.isArray(commissions.daily)) return [];
+    return commissions.daily.map((item: { date: string; commission: number }) => ({
+      date: item.date.slice(5),
+      usdt: parseFloat(item.commission.toFixed(4)),
+    }));
   }, [commissions]);
 
   const byAsset = commissions?.by_asset ?? {};
@@ -57,22 +54,7 @@ export default function Commissions() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">Commissions</h1>
-        <div className="flex gap-1 bg-gray-800 border border-gray-700 rounded-lg p-1">
-          {([7, 30, 90] as Days[]).map((d) => (
-            <button
-              key={d}
-              onClick={() => setDays(d)}
-              className={`px-3 py-1 rounded text-sm transition-colors ${
-                days === d ? "bg-amber-600 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              {d}d
-            </button>
-          ))}
-        </div>
-      </div>
+      <h1 className="text-xl font-bold text-white">Commissions</h1>
 
       {isLoading ? (
         <div className="p-8 text-center text-gray-500 text-sm">Loading…</div>
@@ -81,7 +63,7 @@ export default function Commissions() {
           {/* Stat cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <StatCard
-              label={`Total Fees (${days}d)`}
+              label={`Total Fees (${filter.dateRange}d)`}
               value={`-$${totalUsdt.toFixed(4)}`}
               sub="USDT equivalent"
             />

@@ -6,22 +6,27 @@ import Positions from "./pages/Positions";
 import History from "./pages/History";
 import Commissions from "./pages/Commissions";
 import { useFeedWebSocket } from "./hooks/useWebSocket";
+import { FilterProvider } from "./contexts/FilterContext";
+import GlobalFilter from "./components/GlobalFilter";
 
 export default function App() {
   const { events, connected } = useFeedWebSocket();
 
   return (
-    <div className="flex h-screen bg-gray-950 text-gray-100 overflow-hidden">
-      <Sidebar connected={connected} />
-      <main className="flex-1 overflow-y-auto p-6">
-        <Routes>
-          <Route path="/"            element={<Overview />} />
-          <Route path="/bots"        element={<Bots events={events} />} />
-          <Route path="/positions"   element={<Positions />} />
-          <Route path="/history"     element={<History />} />
-          <Route path="/commissions" element={<Commissions />} />
-        </Routes>
-      </main>
-    </div>
+    <FilterProvider>
+      <div className="flex h-screen bg-gray-950 text-gray-100 overflow-hidden">
+        <Sidebar connected={connected} />
+        <main className="flex-1 overflow-y-auto p-6">
+          <GlobalFilter />
+          <Routes>
+            <Route path="/"            element={<Overview />} />
+            <Route path="/bots"        element={<Bots events={events} />} />
+            <Route path="/positions"   element={<Positions />} />
+            <Route path="/history"     element={<History />} />
+            <Route path="/commissions" element={<Commissions />} />
+          </Routes>
+        </main>
+      </div>
+    </FilterProvider>
   );
 }

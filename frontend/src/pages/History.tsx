@@ -4,8 +4,7 @@ import {
 } from "recharts";
 import { useTrades, useBotStates, usePositions } from "../hooks/useApi";
 import { Trade } from "../types";
-
-type Days = 7 | 30 | 90;
+import { useFilter } from "../contexts/FilterContext";
 
 function fmtUSD(n: number) {
   return (n >= 0 ? "+" : "") + n.toLocaleString("en-US", {
@@ -47,13 +46,8 @@ const PnlTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function History() {
-  const [days, setDays] = useState<Days>(30);
-  const [filter, setFilter] = useState("");
-  const [sort, setSort] = useState<{ key: keyof Trade; dir: 1 | -1 }>({
-    key: "time", dir: -1,
-  });
-
-  const { trades, isLoading } = useTrades(days);
+  const { filter: globalFilter } = useFilter();
+  const { trades, isLoading } = useTrades(globalFilter.dateRange);
   const { bots } = useBotStates();
   const { positions } = usePositions();
 
@@ -61,25 +55,26 @@ export default function History() {
   const openPositions = positions.length;
 
   const filtered = useMemo(() => {
-    const q = filter.toLowerCase();
-    return trades.filter((t) =>
-      !q ||
-      t.symbol.toLowerCase().includes(q) ||
-      t.side.toLowerCase().includes(q) ||
-      t.commission_asset.toLowerCase().includes(q)
-    );
-  }, [trades, filter]);
+    return trades.filter((t) => {
+      const symbolMatch = globalFilter.symbol === "ALL" || t.symbol === globalFilter.symbol;
+      return symbolMatch;
+    });
+  }, [trades, globalFilter.symbol]);
+
+  const [sort, setSort] = useState<{ key: keyof Trade; dir: 1 | -1 }>({
+    key: "time", dir: -1,
+  });
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
-      const av = a[sort.key] as number;
-      const bv = b[sort.key] as number;
-      return (av < bv ? -1 : av > bv ? 1 : 0) * sort.dir;
+      const av = a[sort.key];
+      const bv = b[sort.key];
+      return ((av as number) < (bv as number) ? -1 : (av as number) > (bv as number) ? 1 : 0) * sort.dir;
     });
   }, [filtered, sort]);
 
   function toggleSort(key: keyof Trade) {
-    setSort((prev) => ({
+    setSort((prev: { key: keyof Trade; dir: 1 | -1 }) => ({
       key,
       dir: prev.key === key ? ((prev.dir * -1) as 1 | -1) : -1,
     }));
@@ -130,22 +125,7 @@ export default function History() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-white">Trade History</h1>
-        <div className="flex gap-1 bg-gray-800 border border-gray-700 rounded-lg p-1">
-          {([7, 30, 90] as Days[]).map((d) => (
-            <button
-              key={d}
-              onClick={() => setDays(d)}
-              className={`px-3 py-1 rounded text-sm transition-colors ${
-                days === d ? "bg-emerald-600 text-white" : "text-gray-400 hover:text-white"
-              }`}
-            >
-              {d}d
-            </button>
-          ))}
-        </div>
-      </div>
+      <h1 className="text-xl font-bold text-white">Trade History</h1>
 
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -178,17 +158,9 @@ export default function History() {
         </div>
       )}
 
-      {/* Filter + Table */}
+      {/* Table */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
         <div className="px-4 py-3 border-b border-gray-700 flex items-center gap-3">
-          <input
-            type="text"
-            placeholder="Filter by symbol, side…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-1.5 text-sm
-              text-gray-200 placeholder-gray-600 focus:outline-none focus:border-emerald-600 w-60"
-          />
           <span className="text-xs text-gray-500">{sorted.length} records</span>
         </div>
 

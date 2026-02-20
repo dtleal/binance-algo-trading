@@ -1,4 +1,4 @@
-.PHONY: install monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry logs clean help fetch-data fetch-btc fetch-eth fetch-eth-5m backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -6,11 +6,168 @@ STOP_LOSS ?= 5.0
 LEVERAGE ?= 5
 DAYS ?= 7
 
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+# Colors
+GREEN  := \033[0;32m
+YELLOW := \033[0;33m
+BLUE   := \033[0;34m
+RED    := \033[0;31m
+NC     := \033[0m
 
-install: ## Install dependencies
-	poetry install
+help: ## Show this help
+	@echo "$(GREEN)╔════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║    Binance Trader - Command Reference     ║$(NC)"
+	@echo "$(GREEN)╚════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@echo "$(YELLOW)🚀 Quick Start:$(NC)"
+	@echo "  $(BLUE)make install$(NC)  - Install all dependencies"
+	@echo "  $(BLUE)make start$(NC)    - Start dashboard + all optimized bots"
+	@echo "  $(BLUE)make stop$(NC)     - Stop all processes"
+	@echo ""
+	@echo "$(YELLOW)📋 All Available Commands:$(NC)"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  $(BLUE)%-22s$(NC) %s\n", $$1, $$2}'
+	@echo ""
+
+install: ## Install all dependencies (backend + frontend)
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo "$(GREEN)  Installing Binance Trader$(NC)"
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo ""
+	@echo "$(YELLOW)📦 Installing backend dependencies...$(NC)"
+	@poetry install
+	@echo ""
+	@echo "$(YELLOW)📦 Installing frontend dependencies...$(NC)"
+	@cd frontend && npm install
+	@echo ""
+	@echo "$(YELLOW)🔨 Building frontend...$(NC)"
+	@cd frontend && npm run build
+	@echo ""
+	@echo "$(GREEN)✅ Installation complete!$(NC)"
+	@echo ""
+	@echo "$(BLUE)Next steps:$(NC)"
+	@echo "  1. Configure your .env file with API keys"
+	@echo "  2. Run: $(YELLOW)make start$(NC)"
+	@echo ""
+
+build-frontend: ## Build frontend for production
+	@echo "$(YELLOW)🔨 Building frontend...$(NC)"
+	@cd frontend && npm run build
+	@echo "$(GREEN)✅ Frontend built successfully!$(NC)"
+
+redis: ## Start Redis server
+	@echo "$(YELLOW)🔌 Starting Redis...$(NC)"
+	@if command -v redis-server > /dev/null; then \
+		redis-server --daemonize yes 2>/dev/null || true; \
+		echo "$(GREEN)✅ Redis running$(NC)"; \
+	else \
+		echo "$(RED)❌ Redis not installed!$(NC)"; \
+		echo "$(YELLOW)Install with: brew install redis$(NC)"; \
+		exit 1; \
+	fi
+
+dashboard: redis build-frontend ## Start dashboard server only
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo "$(GREEN)  Starting Dashboard$(NC)"
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo ""
+	@export REDIS_URL=redis://localhost:6379 && \
+		poetry run python -m trader serve --port 8080 --host 0.0.0.0
+
+bots: redis ## Start all validated bots with optimal configurations
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo "$(GREEN)  Starting Trading Bots$(NC)"
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo ""
+	@export REDIS_URL=redis://localhost:6379 && \
+		(poetry run python -m trader bot --symbol axsusdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader bot --symbol sandusdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader bot --symbol dogeusdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader bot --symbol 1000shibusdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader bot --symbol galausdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader bot --symbol manausdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader pullback --symbol ethusdt --leverage 5 --tp 10.0 --sl 5.0 \
+			--min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --vwap-window-days 1 \
+			--ema-period 100 --pos-size 0.30 --max-trades 2 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader pullback --symbol axsusdt --leverage 20 --tp 10.0 --sl 5.0 \
+			--min-bars 5 --confirm-bars 1 --vwap-prox 0.005 --vwap-window-days 10 \
+			--ema-period 200 --pos-size 0.20 --max-trades 1 > /dev/null 2>&1 &)
+	@sleep 2
+	@echo "$(GREEN)✅ All bots started!$(NC)"
+	@echo ""
+	@echo "$(BLUE)Active Strategies:$(NC)"
+	@echo "  📊 MomShort (20x leverage):"
+	@echo "     • AXSUSDT, SANDUSDT, DOGEUSDT"
+	@echo "     • 1000SHIBUSDT, GALAUSDT, MANAUSDT"
+	@echo ""
+	@echo "  📊 VWAP Pullback:"
+	@echo "     • ETHUSDT (5x) - 5min candles"
+	@echo "     • AXSUSDT (20x) - 1min candles"
+	@echo ""
+
+start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
+	@echo "$(GREEN)╔════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║      Starting Binance Trader System        ║$(NC)"
+	@echo "$(GREEN)╚════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@$(MAKE) -s build-frontend
+	@echo ""
+	@echo "$(YELLOW)🤖 Starting trading bots...$(NC)"
+	@$(MAKE) -s bots
+	@echo "$(YELLOW)📊 Starting dashboard...$(NC)"
+	@export REDIS_URL=redis://localhost:6379 && \
+		nohup poetry run python -m trader serve --port 8080 --host 0.0.0.0 > /dev/null 2>&1 &
+	@sleep 2
+	@echo ""
+	@echo "$(GREEN)╔════════════════════════════════════════════╗$(NC)"
+	@echo "$(GREEN)║          ✅ System Started!                ║$(NC)"
+	@echo "$(GREEN)╚════════════════════════════════════════════╝$(NC)"
+	@echo ""
+	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
+	@echo ""
+	@echo "$(BLUE)🤖 Active Bots:$(NC) 8 total"
+	@echo "   • 6 MomShort bots (20x leverage)"
+	@echo "   • 2 VWAP Pullback bots (5x-20x leverage)"
+	@echo ""
+	@echo "$(BLUE)📝 Useful commands:$(NC)"
+	@echo "   • $(YELLOW)make status-all$(NC)  - Check all processes"
+	@echo "   • $(YELLOW)make logs$(NC)        - View bot logs"
+	@echo "   • $(YELLOW)make stop$(NC)        - Stop everything"
+	@echo ""
+
+stop: ## ⛔ Stop all processes (bots + dashboard + redis)
+	@echo "$(YELLOW)⛔ Stopping all processes...$(NC)"
+	@pkill -f "python -m trader" 2>/dev/null || true
+	@pkill -f "redis-server" 2>/dev/null || true
+	@echo "$(GREEN)✅ All processes stopped$(NC)"
+
+status-all: ## 📊 Show status of all running processes
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo "$(GREEN)  System Status$(NC)"
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo ""
+	@echo "$(BLUE)Redis:$(NC)"
+	@pgrep -fl redis-server > /dev/null && echo "  $(GREEN)✅ Running$(NC)" || echo "  $(RED)❌ Not running$(NC)"
+	@echo ""
+	@echo "$(BLUE)Dashboard:$(NC)"
+	@pgrep -fl "trader serve" > /dev/null && echo "  $(GREEN)✅ Running$(NC) - http://localhost:8080" || echo "  $(RED)❌ Not running$(NC)"
+	@echo ""
+	@echo "$(BLUE)MomShort Bots:$(NC)"
+	@BOT_COUNT=$$(pgrep -fl "trader bot" | wc -l | tr -d ' '); \
+		if [ $$BOT_COUNT -gt 0 ]; then \
+			echo "  $(GREEN)✅ $$BOT_COUNT bots running$(NC)"; \
+			pgrep -fl "trader bot" | sed 's/^/     /' | grep -o 'symbol [a-z0-9]*' | sed 's/symbol /• /'; \
+		else \
+			echo "  $(RED)❌ No bots running$(NC)"; \
+		fi
+	@echo ""
+	@echo "$(BLUE)VWAP Pullback Bots:$(NC)"
+	@PULLBACK_COUNT=$$(pgrep -fl "trader pullback" | wc -l | tr -d ' '); \
+		if [ $$PULLBACK_COUNT -gt 0 ]; then \
+			echo "  $(GREEN)✅ $$PULLBACK_COUNT bots running$(NC)"; \
+			pgrep -fl "trader pullback" | sed 's/^/     /' | grep -o 'symbol [a-z0-9]*' | sed 's/symbol /• /'; \
+		else \
+			echo "  $(RED)❌ No bots running$(NC)"; \
+		fi
+	@echo ""
 
 monitor: ## Start monitor with all streams (SYMBOL=axsusdt)
 	poetry run python -m trader monitor --symbol $(SYMBOL)
