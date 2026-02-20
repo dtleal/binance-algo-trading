@@ -186,6 +186,10 @@ def main():
 
     elif args.command == "pullback":
         from trader.bot_vwap_pullback import VWAPPullbackBot
+        # Auto-detect interval from SYMBOL_CONFIGS if available
+        interval = "1m"
+        if args.symbol.upper() in SYMBOL_CONFIGS:
+            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
         bot = VWAPPullbackBot(
             symbol=args.symbol,
             leverage=args.leverage,
@@ -200,6 +204,7 @@ def main():
             pos_size_pct=args.pos_size,
             ema_period=args.ema_period,
             max_trades_per_day=args.max_trades,
+            interval=interval,
         )
         _run_async(bot.run())
 
@@ -235,7 +240,25 @@ async def _serve(args):
     # Start VWAPPullback bots
     for sym in args.pullback_symbols:
         from trader.bot_vwap_pullback import VWAPPullbackBot
-        bot = VWAPPullbackBot(symbol=sym, leverage=args.leverage, dry_run=args.dry_run)
+        from trader.config import get_symbol_config
+        # Use pre-configured settings if available
+        if sym.upper() in SYMBOL_CONFIGS:
+            cfg = get_symbol_config(sym)
+            bot = VWAPPullbackBot(
+                symbol=sym,
+                leverage=args.leverage,
+                dry_run=args.dry_run,
+                tp_pct=cfg.tp_pct,
+                sl_pct=cfg.sl_pct,
+                min_bars=cfg.min_bars,
+                confirm_bars=cfg.confirm_bars,
+                vwap_prox=cfg.vwap_prox,
+                pos_size_pct=cfg.pos_size_pct,
+                vol_filter=cfg.vol_filter,
+                interval=cfg.interval,
+            )
+        else:
+            bot = VWAPPullbackBot(symbol=sym, leverage=args.leverage, dry_run=args.dry_run)
         tasks.append(asyncio.create_task(bot.run()))
 
     # Start MomShort bots

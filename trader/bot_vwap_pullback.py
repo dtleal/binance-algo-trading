@@ -91,6 +91,7 @@ class VWAPPullbackBot:
         ema_period: int = 200,
         max_trades_per_day: int = 4,
         vol_filter: bool = False,
+        interval: str = "1m",
     ):
         self.symbol = symbol.upper()
         self.leverage = leverage
@@ -101,6 +102,7 @@ class VWAPPullbackBot:
         self.eod_min = eod_min
         self.pos_size_pct = pos_size_pct
         self.min_notional = 5.0  # Binance default minimum
+        self.interval = interval
 
         # Precision — resolved at startup
         self._price_decimals = 4  # default, overridden from exchange info
@@ -536,10 +538,10 @@ class VWAPPullbackBot:
         try:
             connection = await ws_client.websocket_streams.create_connection()
             stream = await connection.kline_candlestick_streams(
-                symbol=self.symbol.lower(), interval="1m"
+                symbol=self.symbol.lower(), interval=self.interval
             )
             stream.on("message", self._on_kline)
-            logger.info(f"Subscribed to {self.symbol.lower()}@kline_1m (futures)")
+            logger.info(f"Subscribed to {self.symbol.lower()}@kline_{self.interval} (futures)")
             logger.info(f"State: {self._state.name} | Waiting for candles...")
             logger.info("-" * 60)
 

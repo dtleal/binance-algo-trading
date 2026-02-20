@@ -360,10 +360,10 @@ class MomShortBot:
         try:
             connection = await ws_client.websocket_streams.create_connection()
             stream = await connection.kline_candlestick_streams(
-                symbol=self.symbol.lower(), interval="1m"
+                symbol=self.symbol.lower(), interval=self.cfg.interval
             )
             stream.on("message", self._on_kline)
-            logger.info(f"Subscribed to {self.symbol.lower()}@kline_1m (futures)")
+            logger.info(f"Subscribed to {self.symbol.lower()}@kline_{self.cfg.interval} (futures)")
             logger.info(f"State: {self._state.name} | Waiting for candles...")
             logger.info("-" * 60)
 

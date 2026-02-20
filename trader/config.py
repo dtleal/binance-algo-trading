@@ -56,6 +56,7 @@ class SymbolConfig:
     qty_decimals: int     # 0 for both (whole integers)
     vol_filter: bool = False   # require volume > SMA(20) on breakdown candle
     min_notional: float = 5.0  # Binance minimum order notional (USDT)
+    interval: str = "1m"  # WebSocket kline interval (1m, 5m, 15m, 30m, 1h)
 
 
 AXS_CONFIG = SymbolConfig(
@@ -126,33 +127,35 @@ GALA_CONFIG = SymbolConfig(
 DOGE_CONFIG = SymbolConfig(
     symbol="DOGEUSDT",
     asset="DOGE",
-    tp_pct=10.0,        # Champion: 5m timeframe, +41.28% return
+    tp_pct=10.0,        # Champion: 5m VWAPPullback, +41.28% return (322 trades, 54.3% WR)
     sl_pct=5.0,
     min_bars=3,
-    confirm_bars=0,     # Updated from sweep (was 2)
-    vwap_prox=0.002,    # Updated from sweep: 0.2% (was 0.5%)
+    confirm_bars=0,
+    vwap_prox=0.002,    # 0.2%
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
     pos_size_pct=0.20,
     price_decimals=5,
     qty_decimals=0,
+    interval="5m",
 )
 
 SHIB_CONFIG = SymbolConfig(
     symbol="1000SHIBUSDT",
     asset="SHIB",
-    tp_pct=7.0,         # Updated from sweep: 7% (was 10%), +37.51% return
+    tp_pct=7.0,         # Champion: 5m VWAPPullback, +37.51% return (354 trades, 53.1% WR)
     sl_pct=5.0,
     min_bars=3,
-    confirm_bars=0,     # Updated from sweep (was 2)
-    vwap_prox=0.005,    # Champion: 0.5%
+    confirm_bars=0,
+    vwap_prox=0.005,    # 0.5%
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
     pos_size_pct=0.20,
     price_decimals=6,
     qty_decimals=0,
+    interval="5m",
 )
 
 ETH_CONFIG = SymbolConfig(
@@ -207,6 +210,44 @@ AVAX_CONFIG = SymbolConfig(
     min_notional=5.0,
 )
 
+XRP_CONFIG = SymbolConfig(
+    symbol="XRPUSDT",
+    asset="XRP",
+    tp_pct=10.0,        # Champion: 5m VWAPPullback, +29.21% return (351 trades, 44.7% WR)
+    sl_pct=2.0,
+    min_bars=3,
+    confirm_bars=0,
+    vwap_prox=0.005,    # 0.5%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.20,  # 20% per trade
+    price_decimals=4,
+    qty_decimals=1,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="5m",
+)
+
+PEPE_CONFIG = SymbolConfig(
+    symbol="PEPEUSDT",
+    asset="PEPE",
+    tp_pct=7.0,         # Champion: 1m MomShort, +35.63% return (315 trades, 51.7% WR)
+    sl_pct=5.0,
+    min_bars=12,
+    confirm_bars=2,
+    vwap_prox=0.005,    # 0.5%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.20,  # 20% per trade
+    price_decimals=8,
+    qty_decimals=0,
+    vol_filter=True,
+    min_notional=5.0,
+    interval="1m",
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -217,6 +258,8 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "ETHUSDT": ETH_CONFIG,
     "SOLUSDT": SOL_CONFIG,
     "AVAXUSDT": AVAX_CONFIG,
+    "XRPUSDT": XRP_CONFIG,
+    "PEPEUSDT": PEPE_CONFIG,
 }
 
 

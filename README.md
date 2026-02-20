@@ -1,8 +1,12 @@
 # Binance Trader
 
-Async Python bot for automated USDT-M futures short-selling on Binance.
+Async Python bot for automated USDT-M futures trading on Binance.
 
-The bot implements **MomShort** (Momentum Short), an intraday VWAP-breakdown strategy that detects periods where price consolidates near the daily VWAP, then enters short when price breaks decisively below. Positions are held until end-of-day, with wide TP/SL acting as safety guardrails rather than primary exits.
+The bot implements two strategies:
+- **MomShort** (Momentum Short): Intraday VWAP-breakdown strategy for short-selling
+- **VWAPPullback**: Bidirectional VWAP pullback with EMA trend filter (supports long and short positions)
+
+Both strategies support **configurable timeframes** (1m, 5m, 15m, 30m, 1h) via WebSocket kline streams.
 
 ## How the Strategy Works
 
@@ -15,14 +19,30 @@ Exits are checked every candle in order: stop-loss (5% above entry), take-profit
 
 The strategy is configured per-symbol in `trader/config.py` — parameters like TP/SL, min consolidation bars, confirmation bars, and VWAP proximity threshold vary per asset.
 
-## Supported Symbols
+## Active Portfolio (11 Bots)
 
-| Symbol    | TP   | SL   | Min Bars | Confirm | VWAP Prox |
-|-----------|------|------|----------|---------|-----------|
-| AXSUSDT   | 10%  | 5%   | 3        | 2       | 0.5%      |
-| SANDUSDT  | 10%  | 0.8% | 5        | 2       | 0.2%      |
-| MANAUSDT  | 5%   | 5%   | 12       | 2       | 0.5%      |
-| GALAUSDT  | 5%   | 5%   | 5        | 0       | 0.2%      |
+### MomShort Strategy (1m timeframe)
+| Symbol     | Return  | TP   | SL   | Leverage | Config               |
+|------------|---------|------|------|----------|----------------------|
+| AXSUSDT    | +40.10% | 10%  | 5%   | 20x      | bars=3, cfm=2        |
+| SANDUSDT   | —       | 10%  | 0.8% | 20x      | bars=5, cfm=2        |
+| GALAUSDT   | —       | 5%   | 5%   | 20x      | bars=5, cfm=0        |
+| MANAUSDT   | —       | 5%   | 5%   | 20x      | bars=12, cfm=2       |
+| SOLUSDT    | +28.13% | 7%   | 5%   | 20x      | bars=8, cfm=0        |
+| PEPEUSDT   | +35.63% | 7%   | 5%   | 20x      | bars=12, cfm=2       |
+
+### VWAPPullback Strategy (5m timeframe)
+| Symbol       | Return  | TP   | SL   | Leverage | Config               |
+|--------------|---------|------|------|----------|----------------------|
+| DOGEUSDT     | +41.28% | 10%  | 5%   | 20x      | bars=3, cfm=0        |
+| 1000SHIBUSDT | +37.51% | 7%   | 5%   | 20x      | bars=3, cfm=0        |
+| XRPUSDT      | +29.21% | 10%  | 2%   | 20x      | bars=3, cfm=0        |
+
+### VWAPPullback Strategy (1m timeframe)
+| Symbol     | Return  | TP   | SL   | Leverage | Config               |
+|------------|---------|------|------|----------|----------------------|
+| ETHUSDT    | —       | 10%  | 5%   | 5x       | bars=20, cfm=0       |
+| AVAXUSDT   | +31.12% | 7%   | 2%   | 20x      | bars=30, cfm=0       |
 
 ## Setup
 
@@ -77,19 +97,45 @@ trader/
 
 ## Backtesting
 
-The strategy parameters were selected through a large-scale parameter sweep over ~1 year of 1-minute candle data.
+Strategy parameters are selected through multi-timeframe parameter sweeps over ~1 year of historical data.
 
-### Pipeline
+### Onboarding Pipeline
 
-#### 1. Fetch historical data
+When adding a new asset to the portfolio:
 
-`fetch_klines.py` downloads 1-minute klines from the Binance public API and saves them as CSV:
+#### 1. Download 1m historical data
 
 ```bash
-python fetch_klines.py
+poetry run python fetch_klines.py SYMBOL --days 365
 ```
 
-Edit the `SYMBOL` constant at the top to change the target pair. The script paginates through the API automatically (1000 candles per request) and covers approximately 1 year of data.
+This downloads 1-minute klines from the Binance public API.
+
+#### 2. Aggregate to multiple timeframes
+
+```bash
+poetry run python aggregate_klines.py SYMBOL_1m_klines.csv
+```
+
+Generates 5m, 15m, 30m, and 1h candles from the 1m base data.
+
+#### 3. Run parameter sweeps for all timeframes
+
+```bash
+./backtest_sweep/target/release/backtest_sweep SYMBOL_1m_klines.csv > sweep_results/SYMBOL_1m_sweep.txt
+./backtest_sweep/target/release/backtest_sweep SYMBOL_5m_klines.csv > sweep_results/SYMBOL_5m_sweep.txt
+./backtest_sweep/target/release/backtest_sweep SYMBOL_15m_klines.csv > sweep_results/SYMBOL_15m_sweep.txt
+./backtest_sweep/target/release/backtest_sweep SYMBOL_30m_klines.csv > sweep_results/SYMBOL_30m_sweep.txt
+./backtest_sweep/target/release/backtest_sweep SYMBOL_1h_klines.csv > sweep_results/SYMBOL_1h_sweep.txt
+```
+
+#### 4. Identify champion configuration
+
+Compare returns across all timeframes and select the best-performing strategy+timeframe combination.
+
+#### 5. Update configuration
+
+Add the asset to `trader/config.py` with champion parameters and `interval` field.
 
 #### 2. Run the parameter sweep (Rust)
 
