@@ -37,10 +37,10 @@ export default function GlobalFilter() {
   }, [filter]);
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 mb-6">
-      <div className="flex flex-wrap items-end gap-4">
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-3 md:p-4 mb-4 md:mb-6">
+      <div className="flex flex-col md:flex-row md:flex-wrap md:items-end gap-3 md:gap-4">
         {/* Symbol filter */}
-        <div className="flex-1 min-w-[150px]">
+        <div className="flex-1 md:min-w-[150px]">
           <label className="block text-xs text-gray-400 uppercase tracking-wider mb-2">
             Symbol
           </label>
@@ -57,7 +57,7 @@ export default function GlobalFilter() {
         </div>
 
         {/* Strategy filter */}
-        <div className="flex-1 min-w-[150px]">
+        <div className="flex-1 md:min-w-[150px]">
           <label className="block text-xs text-gray-400 uppercase tracking-wider mb-2">
             Strategy
           </label>
@@ -76,7 +76,7 @@ export default function GlobalFilter() {
         </div>
 
         {/* Date range filter */}
-        <div className="flex-1 min-w-[150px]">
+        <div className="flex-1 md:min-w-[150px]">
           <label className="block text-xs text-gray-400 uppercase tracking-wider mb-2">
             Date Range
           </label>
@@ -85,7 +85,7 @@ export default function GlobalFilter() {
               <button
                 key={d}
                 onClick={() => setDateRange(d)}
-                className={`flex-1 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                className={`flex-1 px-2 md:px-3 py-1.5 rounded text-xs md:text-sm font-medium transition-colors ${
                   dateRange === d
                     ? "bg-emerald-600 text-white"
                     : "text-gray-400 hover:text-white hover:bg-gray-800"
@@ -98,17 +98,17 @@ export default function GlobalFilter() {
         </div>
 
         {/* Action buttons */}
-        <div className="flex gap-2">
+        <div className="flex gap-2 w-full md:w-auto">
           <button
             onClick={handleApply}
-            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium
+            className="flex-1 md:flex-none px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium
               rounded-lg transition-colors"
           >
             Apply
           </button>
           <button
             onClick={handleReset}
-            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm
+            className="flex-1 md:flex-none px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-300 text-sm
               rounded-lg transition-colors"
           >
             Reset

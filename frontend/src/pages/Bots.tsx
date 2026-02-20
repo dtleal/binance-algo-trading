@@ -255,20 +255,20 @@ export default function Bots({ events }: { events: WsEvent[] }) {
   const botList = Object.values(bots);
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-xl font-bold text-white">Bots</h1>
+    <div className="space-y-4 md:space-y-6">
+      <h1 className="text-lg md:text-xl font-bold text-white">Bots</h1>
 
       {botList.length === 0 ? (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-12 text-center">
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 md:p-12 text-center">
           <p className="text-gray-500 text-sm">No bots running.</p>
-          <p className="text-gray-600 text-xs mt-2">
+          <p className="text-gray-600 text-xs mt-2 break-all">
             Start a bot with <code className="bg-gray-700 px-1.5 py-0.5 rounded">
-              poetry run python -m trader serve --with-pullback axsusdt
+              make start
             </code>
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
           {botList.map((b) => (
             <BotCard key={`${b.symbol}:${b.strategy}`} state={b} liveEvents={events} />
           ))}
@@ -276,9 +276,9 @@ export default function Bots({ events }: { events: WsEvent[] }) {
       )}
 
       {/* Activity log */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 md:p-5">
         <p className="text-sm font-semibold text-gray-300 mb-3">Activity Log</p>
-        <div className="space-y-1.5 max-h-48 overflow-y-auto font-mono text-xs">
+        <div className="space-y-1.5 max-h-48 overflow-y-auto font-mono text-[10px] md:text-xs">
           {log.length === 0 ? (
             <p className="text-gray-600">Waiting for events…</p>
           ) : (
