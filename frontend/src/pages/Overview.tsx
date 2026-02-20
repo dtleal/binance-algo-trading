@@ -124,15 +124,16 @@ export default function Overview() {
       {/* Metric cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 md:gap-4">
         <Card
-          label="Total Equity"
-          value={summary ? fmtUSD(totalEquity) : "—"}
-          sub={summary ? `Unrealized: ${fmtUSD(unrealizedPnl)}` : undefined}
-          color={unrealizedPnl >= 0 ? "text-white" : "text-white"}
+          label="Open P&L"
+          value={summary ? fmtUSD(unrealizedPnl) : "—"}
+          sub={openPositions > 0 ? `${openPositions} position${openPositions > 1 ? 's' : ''}` : "No positions"}
+          color={unrealizedPnl >= 0 ? "text-emerald-400" : "text-red-400"}
         />
         <Card
-          label="Available Balance"
-          value={summary ? fmtUSD(summary.available_balance) : "—"}
-          sub={summary ? `Margin: ${fmtUSD(summary.position_margin)}` : undefined}
+          label="Total Equity"
+          value={summary ? fmtUSD(totalEquity) : "—"}
+          sub={summary ? `Available: ${fmtUSD(summary.available_balance)}` : undefined}
+          color="text-white"
         />
         <Card
           label="P&L 24h"

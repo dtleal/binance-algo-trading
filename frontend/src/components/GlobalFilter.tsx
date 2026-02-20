@@ -14,7 +14,7 @@ export default function GlobalFilter() {
   // Extract unique symbols from running bots
   const symbols = ["ALL", ...Array.from(new Set(Object.values(bots).map(b => b.symbol)))];
   const strategies = ["ALL", "momshort", "pullback"];
-  const dateRanges = [7, 30, 90];
+  const dateRanges = [1, 7, 30, 90];
 
   // Apply button handler
   const handleApply = () => {
@@ -91,7 +91,7 @@ export default function GlobalFilter() {
                     : "text-gray-400 hover:text-white hover:bg-gray-800"
                 }`}
               >
-                {d}d
+                {d === 1 ? "Today" : `${d}d`}
               </button>
             ))}
           </div>
