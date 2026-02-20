@@ -84,6 +84,8 @@ bots: redis ## Start all validated bots with optimal configurations
 		(poetry run python -m trader bot --symbol 1000shibusdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader bot --symbol galausdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader bot --symbol manausdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader bot --symbol solusdt --leverage 20 > /dev/null 2>&1 &) && \
+		(poetry run python -m trader bot --symbol avaxusdt --leverage 20 > /dev/null 2>&1 &) && \
 		(poetry run python -m trader pullback --symbol ethusdt --leverage 5 --tp 10.0 --sl 5.0 \
 			--min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --vwap-window-days 1 \
 			--ema-period 100 --pos-size 0.30 --max-trades 2 > /dev/null 2>&1 &) && \
@@ -97,6 +99,7 @@ bots: redis ## Start all validated bots with optimal configurations
 	@echo "  📊 MomShort (20x leverage):"
 	@echo "     • AXSUSDT, SANDUSDT, DOGEUSDT"
 	@echo "     • 1000SHIBUSDT, GALAUSDT, MANAUSDT"
+	@echo "     • SOLUSDT, AVAXUSDT"
 	@echo ""
 	@echo "  📊 VWAP Pullback:"
 	@echo "     • ETHUSDT (5x) - 5min candles"

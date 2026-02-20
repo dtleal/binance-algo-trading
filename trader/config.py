@@ -172,6 +172,40 @@ ETH_CONFIG = SymbolConfig(
     min_notional=20.0,
 )
 
+SOL_CONFIG = SymbolConfig(
+    symbol="SOLUSDT",
+    asset="SOL",
+    tp_pct=7.0,         # Champion: 5m RejShort, +28.55% return
+    sl_pct=5.0,
+    min_bars=5,
+    confirm_bars=0,
+    vwap_prox=0.000,    # 0% - RejShort doesn't use VWAP proximity
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.20,  # 20% per trade
+    price_decimals=2,
+    qty_decimals=2,
+    min_notional=5.0,
+)
+
+AVAX_CONFIG = SymbolConfig(
+    symbol="AVAXUSDT",
+    asset="AVAX",
+    tp_pct=7.0,         # Champion: 1m VWAPPullback, +31.12% return
+    sl_pct=2.0,
+    min_bars=30,
+    confirm_bars=0,
+    vwap_prox=0.005,    # 0.5%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.20,  # 20% per trade
+    price_decimals=2,
+    qty_decimals=2,
+    min_notional=5.0,
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -180,6 +214,8 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "DOGEUSDT": DOGE_CONFIG,
     "1000SHIBUSDT": SHIB_CONFIG,
     "ETHUSDT": ETH_CONFIG,
+    "SOLUSDT": SOL_CONFIG,
+    "AVAXUSDT": AVAX_CONFIG,
 }
 
 
