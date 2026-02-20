@@ -269,7 +269,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "SOLUSDT": SOL_CONFIG,
     "AVAXUSDT": AVAX_CONFIG,
     "XRPUSDT": XRP_CONFIG,
-    "PEPEUSDT": PEPE_CONFIG,
+    # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 
 
