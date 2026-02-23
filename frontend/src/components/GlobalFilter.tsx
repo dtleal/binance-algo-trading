@@ -10,25 +10,27 @@ export default function GlobalFilter() {
   const dateRanges = [1, 7, 30, 90];
   const today = new Date().toISOString().slice(0, 10);
 
-  const isPresetActive = (d: number) => filter.specificDate === null && filter.dateRange === d;
+  const hasCustomRange = filter.dateFrom !== null || filter.dateTo !== null;
+  const isPresetActive = (d: number) => !hasCustomRange && filter.dateRange === d;
 
   const handleDateRangeClick = (d: number) => {
-    updateFilter({ dateRange: d, specificDate: null });
+    updateFilter({ dateRange: d, dateFrom: null, dateTo: null });
   };
 
-  const handleSpecificDate = (val: string) => {
-    if (val) {
-      updateFilter({ specificDate: val });
-    } else {
-      updateFilter({ specificDate: null });
-    }
+  const handleDateFrom = (val: string) => {
+    updateFilter({ dateFrom: val || null });
+  };
+
+  const handleDateTo = (val: string) => {
+    updateFilter({ dateTo: val || null });
   };
 
   const isFiltered =
     filter.symbol !== "ALL" ||
     filter.strategy !== "ALL" ||
     filter.dateRange !== 30 ||
-    filter.specificDate !== null;
+    filter.dateFrom !== null ||
+    filter.dateTo !== null;
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl p-3 md:p-4 mb-4 md:mb-6">
@@ -92,20 +94,35 @@ export default function GlobalFilter() {
           </div>
         </div>
 
-        {/* Specific date picker */}
-        <div className="flex-1 md:min-w-[160px]">
+        {/* Custom date range */}
+        <div className="flex-1 md:min-w-[260px]">
           <label className="block text-xs text-gray-400 uppercase tracking-wider mb-2">
-            Specific Date
+            Custom Range
           </label>
-          <input
-            type="date"
-            max={today}
-            value={filter.specificDate ?? ""}
-            onChange={(e) => handleSpecificDate(e.target.value)}
-            className={`w-full bg-gray-900 border rounded-lg px-3 py-2 text-sm text-white
-              focus:outline-none transition-colors
-              ${filter.specificDate ? "border-emerald-600" : "border-gray-700 focus:border-emerald-600"}`}
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="date"
+              max={filter.dateTo ?? today}
+              value={filter.dateFrom ?? ""}
+              onChange={(e) => handleDateFrom(e.target.value)}
+              placeholder="From"
+              className={`flex-1 bg-gray-900 border rounded-lg px-3 py-2 text-sm text-white
+                focus:outline-none transition-colors
+                ${hasCustomRange ? "border-emerald-600" : "border-gray-700 focus:border-emerald-600"}`}
+            />
+            <span className="text-gray-500 text-xs shrink-0">to</span>
+            <input
+              type="date"
+              min={filter.dateFrom ?? undefined}
+              max={today}
+              value={filter.dateTo ?? ""}
+              onChange={(e) => handleDateTo(e.target.value)}
+              placeholder="To"
+              className={`flex-1 bg-gray-900 border rounded-lg px-3 py-2 text-sm text-white
+                focus:outline-none transition-colors
+                ${hasCustomRange ? "border-emerald-600" : "border-gray-700 focus:border-emerald-600"}`}
+            />
+          </div>
         </div>
 
         {/* Reset button */}
@@ -135,9 +152,9 @@ export default function GlobalFilter() {
               {filter.strategy}
             </span>
           )}
-          {filter.specificDate ? (
+          {hasCustomRange ? (
             <span className="px-2 py-1 bg-amber-900/40 text-amber-400 rounded">
-              {filter.specificDate}
+              {filter.dateFrom ?? "…"} → {filter.dateTo ?? "today"}
             </span>
           ) : filter.dateRange !== 30 && (
             <span className="px-2 py-1 bg-amber-900/40 text-amber-400 rounded">

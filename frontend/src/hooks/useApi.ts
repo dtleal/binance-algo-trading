@@ -17,10 +17,14 @@ export function usePositions() {
   return { positions: data?.positions ?? [], error, isLoading };
 }
 
-export function useTrades(days = 7, specificDate: string | null = null) {
-  // When a specific date is selected, fetch enough days to include it
-  const fetchDays = specificDate
-    ? Math.max(days, Math.ceil((Date.now() - new Date(specificDate).getTime()) / 86_400_000) + 2)
+export function useTrades(
+  days = 7,
+  dateFrom: string | null = null,
+  dateTo: string | null = null,
+) {
+  // When a custom range is set, fetch enough days to cover dateFrom
+  const fetchDays = dateFrom
+    ? Math.max(days, Math.ceil((Date.now() - new Date(dateFrom).getTime()) / 86_400_000) + 2)
     : days;
 
   const { data, error, isLoading } = useSWR<{ trades: Trade[] }>(
@@ -30,8 +34,13 @@ export function useTrades(days = 7, specificDate: string | null = null) {
   );
 
   const allTrades = data?.trades ?? [];
-  const trades = specificDate
-    ? allTrades.filter(t => new Date(t.time).toISOString().slice(0, 10) === specificDate)
+  const trades = (dateFrom || dateTo)
+    ? allTrades.filter(t => {
+        const d = new Date(t.time).toISOString().slice(0, 10);
+        if (dateFrom && d < dateFrom) return false;
+        if (dateTo   && d > dateTo)   return false;
+        return true;
+      })
     : allTrades;
 
   return { trades, error, isLoading };

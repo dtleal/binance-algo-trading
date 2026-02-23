@@ -47,7 +47,7 @@ const PnlTooltip = ({ active, payload, label }: any) => {
 
 export default function History() {
   const { filter: globalFilter } = useFilter();
-  const { trades, isLoading } = useTrades(globalFilter.dateRange, globalFilter.specificDate);
+  const { trades, isLoading } = useTrades(globalFilter.dateRange, globalFilter.dateFrom, globalFilter.dateTo);
   const { bots } = useBotStates();
   const { positions } = usePositions();
 
