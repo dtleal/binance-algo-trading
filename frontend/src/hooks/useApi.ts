@@ -5,14 +5,14 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 export function useBalance() {
   const { data, error, isLoading } = useSWR<{ usdt: Balance }>("/api/balance", fetcher, {
-    refreshInterval: 30_000,
+    refreshInterval: 5_000,
   });
   return { balance: data?.usdt ?? null, error, isLoading };
 }
 
 export function usePositions() {
   const { data, error, isLoading } = useSWR<{ positions: Position[] }>("/api/positions", fetcher, {
-    refreshInterval: 10_000,
+    refreshInterval: 5_000,
   });
   return { positions: data?.positions ?? [], error, isLoading };
 }
@@ -77,7 +77,7 @@ export function useBotStates() {
   const { data, error } = useSWR<{ bots: Record<string, BotState> }>(
     "/api/bot_states",
     fetcher,
-    { refreshInterval: 5_000 }
+    { refreshInterval: 1_000 }
   );
   return { bots: data?.bots ?? {}, error };
 }
@@ -93,7 +93,7 @@ export function useAccountSummary() {
     pnl_24h: number;
     equity_change_24h_pct: number;
   }>("/api/account_summary", fetcher, {
-    refreshInterval: 10_000,
+    refreshInterval: 5_000,
   });
   return { summary: data ?? null, error, isLoading };
 }
