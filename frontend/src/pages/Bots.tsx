@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useBotStates } from "../hooks/useApi";
 import { WsEvent, BotState } from "../types";
 import BotLogsModal from "../components/BotLogsModal";
@@ -15,6 +15,8 @@ const STATE_DOT: Record<string, string> = {
   COOLDOWN:    "bg-amber-400",
 };
 
+type BotFilter = "all" | "in_position" | "scanning" | "cooldown" | "traded";
+
 function fmtPrice(n: number | undefined, decimals = 4) {
   if (n == null) return "—";
   return n.toFixed(decimals);
@@ -29,7 +31,6 @@ function BotCard({
   liveEvents: WsEvent[];
   onClick: () => void;
 }) {
-  // Overlay the last candle event for this bot to get freshest price
   const lastCandle = [...liveEvents]
     .filter((e) => e.type === "candle" && e.symbol === state.symbol) as Extract<WsEvent, { type: "candle" }>[];
   const live = lastCandle[0];
@@ -88,7 +89,7 @@ function BotCard({
         </div>
       </div>
 
-      {/* Trades counter - visible in all states */}
+      {/* Trades counter */}
       <div className="bg-gray-900/50 rounded-lg px-3 py-2 text-xs text-gray-400">
         Trades today: <span className="text-white font-medium">{state.trades_today ?? 0}/{state.max_trades_per_day ?? 4}</span>
       </div>
@@ -234,12 +235,21 @@ function BotCard({
   );
 }
 
+function SectionHeader({ label, count, color }: { label: string; count: number; color: string }) {
+  return (
+    <div className={`flex items-center gap-2 text-xs font-semibold uppercase tracking-widest ${color} mb-2`}>
+      <span>{label}</span>
+      <span className="bg-gray-700 text-gray-300 px-1.5 py-0.5 rounded font-normal">{count}</span>
+    </div>
+  );
+}
+
 export default function Bots({ events }: { events: WsEvent[] }) {
   const { bots } = useBotStates();
   const [log, setLog] = useState<{ ts: string; msg: string; color: string }[]>([]);
   const [selectedBot, setSelectedBot] = useState<{ key: string; symbol: string } | null>(null);
+  const [activeFilter, setActiveFilter] = useState<BotFilter>("all");
 
-  // Append signal/order/closed events to the activity log
   useEffect(() => {
     const last = events[0];
     if (!last) return;
@@ -271,9 +281,79 @@ export default function Bots({ events }: { events: WsEvent[] }) {
 
   const botList = Object.values(bots);
 
+  const counts = useMemo(() => ({
+    all:         botList.length,
+    in_position: botList.filter(b => b.state === "IN_POSITION").length,
+    scanning:    botList.filter(b => b.state === "SCANNING").length,
+    cooldown:    botList.filter(b => b.state === "COOLDOWN").length,
+    traded:      botList.filter(b => (b.trades_today ?? 0) > 0).length,
+  }), [botList]);
+
+  const filteredBots = useMemo(() => {
+    switch (activeFilter) {
+      case "in_position": return botList.filter(b => b.state === "IN_POSITION");
+      case "scanning":    return botList.filter(b => b.state === "SCANNING");
+      case "cooldown":    return botList.filter(b => b.state === "COOLDOWN");
+      case "traded":      return botList.filter(b => (b.trades_today ?? 0) > 0);
+      default:            return botList;
+    }
+  }, [botList, activeFilter]);
+
+  // When showing all, group by state: IN_POSITION → COOLDOWN → SCANNING
+  const grouped = useMemo(() => {
+    if (activeFilter !== "all") return null;
+    return {
+      in_position: filteredBots.filter(b => b.state === "IN_POSITION"),
+      cooldown:    filteredBots.filter(b => b.state === "COOLDOWN"),
+      scanning:    filteredBots.filter(b => b.state === "SCANNING"),
+    };
+  }, [filteredBots, activeFilter]);
+
+  const FILTERS: { key: BotFilter; label: string; countKey: keyof typeof counts }[] = [
+    { key: "all",         label: "All",         countKey: "all" },
+    { key: "in_position", label: "In Position",  countKey: "in_position" },
+    { key: "cooldown",    label: "Cooldown",     countKey: "cooldown" },
+    { key: "scanning",    label: "Scanning",     countKey: "scanning" },
+    { key: "traded",      label: "Traded Today", countKey: "traded" },
+  ];
+
   return (
     <div className="space-y-4 md:space-y-6">
-      <h1 className="text-lg md:text-xl font-bold text-white">Bots</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg md:text-xl font-bold text-white">Bots</h1>
+        <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+          <span>{counts.in_position} in position</span>
+          <span className="ml-2 w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" />
+          <span>{counts.cooldown} cooldown</span>
+          <span className="ml-2 w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse inline-block" />
+          <span>{counts.scanning} scanning</span>
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      {botList.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {FILTERS.map(f => (
+            <button
+              key={f.key}
+              onClick={() => setActiveFilter(f.key)}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border transition-colors ${
+                activeFilter === f.key
+                  ? "bg-emerald-900/40 border-emerald-700 text-emerald-300"
+                  : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+              }`}
+            >
+              {f.label}
+              <span className={`text-[10px] px-1 py-0.5 rounded font-medium ${
+                activeFilter === f.key ? "bg-emerald-800/60 text-emerald-300" : "bg-gray-700 text-gray-400"
+              }`}>
+                {counts[f.countKey]}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {botList.length === 0 ? (
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 md:p-12 text-center">
@@ -284,9 +364,61 @@ export default function Bots({ events }: { events: WsEvent[] }) {
             </code>
           </p>
         </div>
+      ) : filteredBots.length === 0 ? (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-8 text-center">
+          <p className="text-gray-500 text-sm">No bots match this filter.</p>
+        </div>
+      ) : grouped ? (
+        <div className="space-y-6">
+          {grouped.in_position.length > 0 && (
+            <div>
+              <SectionHeader label="In Position" count={grouped.in_position.length} color="text-emerald-400" />
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+                {grouped.in_position.map((b) => (
+                  <BotCard
+                    key={`${b.symbol}:${b.strategy}`}
+                    state={b}
+                    liveEvents={events}
+                    onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {grouped.cooldown.length > 0 && (
+            <div>
+              <SectionHeader label="Cooldown" count={grouped.cooldown.length} color="text-amber-400" />
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+                {grouped.cooldown.map((b) => (
+                  <BotCard
+                    key={`${b.symbol}:${b.strategy}`}
+                    state={b}
+                    liveEvents={events}
+                    onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+          {grouped.scanning.length > 0 && (
+            <div>
+              <SectionHeader label="Scanning" count={grouped.scanning.length} color="text-blue-400" />
+              <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
+                {grouped.scanning.map((b) => (
+                  <BotCard
+                    key={`${b.symbol}:${b.strategy}`}
+                    state={b}
+                    liveEvents={events}
+                    onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 md:gap-4">
-          {botList.map((b) => (
+          {filteredBots.map((b) => (
             <BotCard
               key={`${b.symbol}:${b.strategy}`}
               state={b}
