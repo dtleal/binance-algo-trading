@@ -16,7 +16,7 @@ const STRATEGY_VALUES: &[u8] = &[0, 1, 2, 3, 4]; // RejShort, RejLong, MomShort,
 const EMA_PERIODS: &[usize] = &[100, 200, 300, 500];
 const MAX_TRADES_PER_DAY: &[usize] = &[1, 2, 4, 6];
 
-// No TP in V2 — trailing stop replaces fixed TP
+// V2 — trailing stop with optional fixed TP (in R multiples)
 const SL_VALUES: &[f64] = &[
     0.001, 0.002, 0.003, 0.004, 0.006, 0.008,
     0.01, 0.015, 0.02, 0.05,
@@ -33,6 +33,9 @@ const MAX_HOLD_VALUES: &[u16] = &[0, 30, 120, 360]; // 0 = EOD
 // V2 trailing stop shape parameters
 const BE_R_VALUES: &[f64] = &[1.0, 1.5, 2.0, 3.0]; // R multiple at which SL reaches breakeven
 const TRAIL_STEP_VALUES: &[f64] = &[0.25, 0.5, 1.0]; // step size (in R) after breakeven
+
+// Fixed TP in R multiples (0.0 = no fixed TP, use pure trailing stop)
+const TP_R_VALUES: &[f64] = &[0.0, 1.5, 2.0, 2.5, 3.0];
 
 // VWAP rolling window in days
 const NUM_VWAP_WINDOWS: usize = 5;
@@ -79,6 +82,7 @@ struct RunResult {
     max_hold: u16,
     be_r: f64,
     trail_step: f64,
+    tp_r: f64,
     pos_size_pct: f64,
     trades: usize,
     wins: usize,
@@ -459,7 +463,7 @@ fn trailing_sl_price(entry: f64, r: f64, best_r: f64, short: bool, be_r: f64, tr
     }
 }
 
-fn evaluate(entries: &[Entry], candles: &[Candle], sl_pct: f64, pos_size: f64, use_entry_direction: bool, default_short: bool, max_hold: u16, be_r: f64, trail_step: f64)
+fn evaluate(entries: &[Entry], candles: &[Candle], sl_pct: f64, pos_size: f64, use_entry_direction: bool, default_short: bool, max_hold: u16, be_r: f64, trail_step: f64, tp_r: f64)
     -> (usize, usize, usize, f64, f64, usize)
 {
     let mut capital = INITIAL_CAPITAL;
@@ -494,6 +498,13 @@ fn evaluate(entries: &[Entry], candles: &[Candle], sl_pct: f64, pos_size: f64, u
                 (c.high - e.entry_price) / r
             };
             if candle_best_r > best_r { best_r = candle_best_r; }
+
+            // Check fixed TP (favorable side hit TP level first)
+            if tp_r > 0.0 && best_r >= tp_r {
+                exit_price = if short { e.entry_price - tp_r * r } else { e.entry_price + tp_r * r };
+                is_eod = false;
+                break;
+            }
 
             // Compute current trailing SL price
             let sl_price = trailing_sl_price(e.entry_price, r, best_r, short, be_r, trail_step);
@@ -604,19 +615,22 @@ fn main() {
     let nonempty = entry_sets.iter().filter(|e| !e.entries.is_empty()).count();
     println!("  {} entry sets ({} non-empty)", entry_sets.len(), nonempty);
 
-    // Phase 2: parallel sweep (no TP; be_r and trail_step are new dimensions)
-    let combos_per_set = SL_VALUES.len() * BE_R_VALUES.len() * TRAIL_STEP_VALUES.len() * POS_SIZE_VALUES.len() * MAX_HOLD_VALUES.len();
+    // Phase 2: parallel sweep — SL × BE_R × TRAIL_STEP × TP_R × POS_SIZE × MAX_HOLD
+    let combos_per_set = SL_VALUES.len() * BE_R_VALUES.len() * TRAIL_STEP_VALUES.len()
+        * TP_R_VALUES.len() * POS_SIZE_VALUES.len() * MAX_HOLD_VALUES.len();
     let total = entry_sets.len() * combos_per_set;
     println!("\nPhase 2 — evaluating {} combinations (parallel)...", total);
 
-    let mut combos: Vec<(usize, f64, f64, f64, f64, u16)> = Vec::with_capacity(total);
+    let mut combos: Vec<(usize, f64, f64, f64, f64, f64, u16)> = Vec::with_capacity(total);
     for (idx, _) in entry_sets.iter().enumerate() {
         for &sl in SL_VALUES {
             for &be in BE_R_VALUES {
                 for &ts in TRAIL_STEP_VALUES {
-                    for &ps in POS_SIZE_VALUES {
-                        for &mh in MAX_HOLD_VALUES {
-                            combos.push((idx, sl, be, ts, ps, mh));
+                    for &tpr in TP_R_VALUES {
+                        for &ps in POS_SIZE_VALUES {
+                            for &mh in MAX_HOLD_VALUES {
+                                combos.push((idx, sl, be, ts, tpr, ps, mh));
+                            }
                         }
                     }
                 }
@@ -624,7 +638,7 @@ fn main() {
         }
     }
 
-    let results: Vec<RunResult> = combos.par_iter().map(|&(idx, sl, be_r, trail_step, ps, mh)| {
+    let results: Vec<RunResult> = combos.par_iter().map(|&(idx, sl, be_r, trail_step, tp_r, ps, mh)| {
         let es = &entry_sets[idx];
         let n = es.entries.len();
         let sname = strategy_name(es.strategy);
@@ -640,14 +654,14 @@ fn main() {
                 entry_window: wl, vwap_prox: es.vwap_prox * 100.0,
                 vwap_window: es.vwap_window,
                 ema_period: es.ema_period, max_trades_per_day: es.max_trades_per_day,
-                max_hold: mh, be_r, trail_step, pos_size_pct: ps*100.0,
+                max_hold: mh, be_r, trail_step, tp_r, pos_size_pct: ps*100.0,
                 trades: 0, wins: 0, losses: 0, eods: 0,
                 win_rate: 0.0, return_pct: 0.0,
                 final_capital: INITIAL_CAPITAL, max_dd_pct: 0.0, max_consec_loss: 0,
             };
         }
 
-        let (w, l, e, fc, md, mc) = evaluate(&es.entries, &candles, sl, ps, is_pb, short, mh, be_r, trail_step);
+        let (w, l, e, fc, md, mc) = evaluate(&es.entries, &candles, sl, ps, is_pb, short, mh, be_r, trail_step, tp_r);
         RunResult {
             strategy: sname, sl_pct: sl*100.0,
             min_bars: es.min_bars, vol_filter: es.vol_filter,
@@ -655,7 +669,7 @@ fn main() {
             entry_window: wl, vwap_prox: es.vwap_prox * 100.0,
             vwap_window: es.vwap_window,
             ema_period: es.ema_period, max_trades_per_day: es.max_trades_per_day,
-            max_hold: mh, be_r, trail_step, pos_size_pct: ps*100.0,
+            max_hold: mh, be_r, trail_step, tp_r, pos_size_pct: ps*100.0,
             trades: n, wins: w, losses: l, eods: e,
             win_rate: (w as f64 / n as f64 * 1000.0).round() / 10.0,
             return_pct: ((fc / INITIAL_CAPITAL - 1.0) * 10000.0).round() / 100.0,
@@ -672,7 +686,7 @@ fn main() {
         let mut w = csv::Writer::from_path("backtest_sweep_v2.csv").unwrap();
         w.write_record(["strategy","sl_pct","min_bars","vol_filter",
             "confirm_bars","trend_filter","entry_window","vwap_prox","vwap_window",
-            "ema_period","max_trades_per_day","max_hold","be_r","trail_step","pos_size_pct",
+            "ema_period","max_trades_per_day","max_hold","be_r","trail_step","tp_r","pos_size_pct",
             "trades","wins","losses","eods",
             "win_rate","return_pct","final_capital","max_dd_pct","max_consec_loss"]).unwrap();
         let mut csv_rows = 0usize;
@@ -688,6 +702,7 @@ fn main() {
                 if r.max_trades_per_day > 0 { r.max_trades_per_day.to_string() } else { "-".to_string() },
                 if r.max_hold == 0 { "EOD".to_string() } else { r.max_hold.to_string() },
                 f2(r.be_r), f2(r.trail_step),
+                if r.tp_r > 0.0 { f2(r.tp_r) } else { "-".to_string() },
                 format!("{:.0}", r.pos_size_pct),
                 r.trades.to_string(), r.wins.to_string(), r.losses.to_string(), r.eods.to_string(),
                 format!("{:.1}", r.win_rate), f2(r.return_pct), f2(r.final_capital),
@@ -798,6 +813,12 @@ fn main() {
         let a = s.iter().map(|r| r.return_pct).sum::<f64>() / s.len().max(1) as f64;
         println!("  trail_step={:.2}: avg_ret={:+6.2}%  (n={})", ts, a, s.len());
     }
+    for &tpr in TP_R_VALUES {
+        let s: Vec<&&RunResult> = active.iter().filter(|r| (r.tp_r - tpr).abs() < 0.001).collect();
+        let a = s.iter().map(|r| r.return_pct).sum::<f64>() / s.len().max(1) as f64;
+        let label = if tpr <= 0.0 { "none (trailing only)".to_string() } else { format!("{:.1}R", tpr) };
+        println!("  tp_r={}: avg_ret={:+6.2}%  (n={})", label, a, s.len());
+    }
 }
 
 fn impact_bool(active: &[&RunResult], label: &str, pred: fn(&RunResult) -> bool) {
@@ -810,33 +831,37 @@ fn impact_bool(active: &[&RunResult], label: &str, pred: fn(&RunResult) -> bool)
 
 fn f2(v: f64) -> String { format!("{:.2}", v) }
 
+fn tp_label(tp_r: f64) -> String {
+    if tp_r <= 0.0 { " - ".to_string() } else { format!("{:.1}R", tp_r) }
+}
+
 fn ph() {
-    println!("  {:>12} {:>5} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4} {:>3} {:>4} {:>4} {:>4} {:>3} {:>3} {:>3} {:>3} {:>5} {:>8} {:>9} {:>6} {:>4}",
-        "strat","SL%","bar","vf","cf","tf","wndw","prox","vwD","hold","beR","tstp","ps%",
+    println!("  {:>12} {:>5} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4} {:>3} {:>4} {:>4} {:>4} {:>4} {:>3} {:>3} {:>3} {:>3} {:>5} {:>8} {:>9} {:>6} {:>4}",
+        "strat","SL%","bar","vf","cf","tf","wndw","prox","vwD","hold","beR","tstp","tpR","ps%",
         "trd","win","los","eod%","win%","return%","final$","mCL");
 }
 fn pr(r: &RunResult) {
     let mh = if r.max_hold == 0 { "EOD".to_string() } else { format!("{}", r.max_hold) };
     let eod_pct = if r.trades > 0 { r.eods as f64 / r.trades as f64 * 100.0 } else { 0.0 };
-    println!("  {:>12} {:>5.2} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4.1} {:>3} {:>4} {:>4.1} {:>4.2} {:>3.0} {:>3} {:>3} {:>3} {:>4.0}% {:>4.1}% {:>7.2}% {:>9.2} {:>4}",
+    println!("  {:>12} {:>5.2} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4.1} {:>3} {:>4} {:>4.1} {:>4.2} {:>4} {:>3.0} {:>3} {:>3} {:>3} {:>4.0}% {:>4.1}% {:>7.2}% {:>9.2} {:>4}",
         r.strategy, r.sl_pct, r.min_bars, r.vol_filter,
         r.confirm_bars, r.trend_filter, r.entry_window, r.vwap_prox, r.vwap_window, mh,
-        r.be_r, r.trail_step, r.pos_size_pct,
+        r.be_r, r.trail_step, tp_label(r.tp_r), r.pos_size_pct,
         r.trades, r.wins, r.losses, eod_pct,
         r.win_rate, r.return_pct, r.final_capital, r.max_consec_loss);
 }
 fn ph2() {
-    println!("  {:>12} {:>5} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4} {:>3} {:>4} {:>4} {:>4} {:>3} {:>3} {:>3} {:>3} {:>5} {:>8} {:>9} {:>6} {:>4} {:>7}",
-        "strat","SL%","bar","vf","cf","tf","wndw","prox","vwD","hold","beR","tstp","ps%",
+    println!("  {:>12} {:>5} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4} {:>3} {:>4} {:>4} {:>4} {:>4} {:>3} {:>3} {:>3} {:>3} {:>5} {:>8} {:>9} {:>6} {:>4} {:>7}",
+        "strat","SL%","bar","vf","cf","tf","wndw","prox","vwD","hold","beR","tstp","tpR","ps%",
         "trd","win","los","eod%","win%","return%","final$","mCL","ret/dd");
 }
 fn pr2(r: &RunResult, ratio: f64) {
     let mh = if r.max_hold == 0 { "EOD".to_string() } else { format!("{}", r.max_hold) };
     let eod_pct = if r.trades > 0 { r.eods as f64 / r.trades as f64 * 100.0 } else { 0.0 };
-    println!("  {:>12} {:>5.2} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4.1} {:>3} {:>4} {:>4.1} {:>4.2} {:>3.0} {:>3} {:>3} {:>3} {:>4.0}% {:>4.1}% {:>7.2}% {:>9.2} {:>4} {:>7.2}",
+    println!("  {:>12} {:>5.2} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4.1} {:>3} {:>4} {:>4.1} {:>4.2} {:>4} {:>3.0} {:>3} {:>3} {:>3} {:>4.0}% {:>4.1}% {:>7.2}% {:>9.2} {:>4} {:>7.2}",
         r.strategy, r.sl_pct, r.min_bars, r.vol_filter,
         r.confirm_bars, r.trend_filter, r.entry_window, r.vwap_prox, r.vwap_window, mh,
-        r.be_r, r.trail_step, r.pos_size_pct,
+        r.be_r, r.trail_step, tp_label(r.tp_r), r.pos_size_pct,
         r.trades, r.wins, r.losses, eod_pct,
         r.win_rate, r.return_pct, r.final_capital, r.max_consec_loss, ratio);
 }
