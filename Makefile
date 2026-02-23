@@ -271,7 +271,7 @@ fetch-eth-5m: ## Download 1 year of ETHUSDT 5-minute klines (official, for ETH V
 # ══════════════════════════════════════════════════════════════════════════════
 
 onboarding: ## Full onboarding: download → aggregate → sweep all timeframes (SYMBOL=dogeusdt)
-ifndef SYMBOL
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
 	@echo "$(RED)❌ Error: SYMBOL not specified$(NC)"
 	@echo ""
 	@echo "$(YELLOW)Usage:$(NC)"
@@ -284,7 +284,7 @@ ifndef SYMBOL
 	@echo "  3. Run parameter sweep on all available timeframes"
 	@echo ""
 	@exit 1
-endif
+else
 	@SYMBOL_UPPER=$$(echo "$(SYMBOL)" | tr '[:lower:]' '[:upper:]'); \
 	FETCH_DAYS=$$([ "$(DAYS)" = "7" ] && echo "365" || echo "$(DAYS)"); \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
@@ -320,16 +320,18 @@ endif
 	echo "$(GREEN)  ✅ Onboarding complete — $(SYMBOL)$(NC)"; \
 	echo "$(GREEN)  Review sweep CSVs: data/sweeps/$(SYMBOL)_*_sweep.csv$(NC)"; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"
+endif
 
 onboarding-download: ## Download 1m data only (SYMBOL=dogeusdt DAYS=365)
-ifndef SYMBOL
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
 	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make onboarding-download SYMBOL=dogeusdt$(NC)"
 	@exit 1
-endif
+else
 	@SYMBOL_UPPER=$$(echo "$(SYMBOL)" | tr '[:lower:]' '[:upper:]'); \
 	mkdir -p data/klines; \
 	echo "$(YELLOW)📥 Downloading $(or $(DAYS),365) days of $$SYMBOL_UPPER data...$(NC)"; \
 	poetry run python scripts/fetch_klines.py $$SYMBOL_UPPER $(if $(DAYS),-d $(DAYS),) -o data/klines/$(SYMBOL)_1m_klines.csv
+endif
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 🧪 BACKTESTING
@@ -353,10 +355,10 @@ build-sweep: ## Build Rust sweep (release mode)
 	cd backtest_sweep && cargo build --release
 
 sweep-rust: ## Run standard sweep across all available timeframes (SYMBOL=axsusdt)
-ifndef SYMBOL
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
 	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make sweep-rust SYMBOL=dogeusdt$(NC)"
 	@exit 1
-endif
+else
 	@mkdir -p data/sweeps; \
 	BINARY=./backtest_sweep/target/release/backtest_sweep; \
 	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep$(NC)"; exit 1; fi; \
@@ -374,6 +376,7 @@ endif
 		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
 	done; \
 	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
+endif
 
 sweep-rust-axs: ## Run Rust sweep for AXSUSDT (all 5 strategies)
 	@$(MAKE) sweep-rust SYMBOL=axsusdt
@@ -459,11 +462,11 @@ build-sweep-v2: ## Build Rust V2 sweep binary (trailing stop, no TP)
 	cd backtest_sweep_v2 && cargo build --release
 
 sweep-v2: ## Run V2 sweep across all available timeframes for SYMBOL (e.g. make sweep-v2 SYMBOL=ethusdt)
-ifndef SYMBOL
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
 	@echo "$(RED)❌ Error: SYMBOL not specified$(NC)"
 	@echo "$(YELLOW)Usage: make sweep-v2 SYMBOL=ethusdt$(NC)"
 	@exit 1
-endif
+else
 	@echo "$(GREEN)═══════════════════════════════════════════════════$(NC)"
 	@echo "$(GREEN)  V2 Sweep — $(SYMBOL) — all timeframes$(NC)"
 	@echo "$(GREEN)═══════════════════════════════════════════════════$(NC)"
@@ -488,6 +491,7 @@ endif
 		fi; \
 	done; \
 	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
+endif
 
 # V2 bots — VWAPPullback with R-multiple trailing stop (same SL params as V1, no TP)
 bot-gala-v2: ## Run VWAPPullback V2 bot for GALAUSDT
