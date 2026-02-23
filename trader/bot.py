@@ -290,6 +290,7 @@ class MomShortBot:
         logger.info(f"{BOLD}{prefix}MomShort Bot — {self.symbol}{RESET}")
         logger.info(
             f"Leverage: {self.leverage}x | "
+            f"Interval: {self.cfg.interval} | "
             f"TP: {self.cfg.tp_pct}% | SL: {self.cfg.sl_pct}% | "
             f"Position size: {self.cfg.pos_size_pct * 100:.0f}%"
         )

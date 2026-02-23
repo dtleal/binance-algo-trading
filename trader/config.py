@@ -258,6 +258,25 @@ PEPE_CONFIG = SymbolConfig(
     interval="1m",
 )
 
+XAU_CONFIG = SymbolConfig(
+    symbol="XAUUSDT",
+    asset="XAU",
+    tp_pct=5.0,         # Champion: 1m VWAPPullback, +7.67% return (53 trades, 49.1% WR, 75d data)
+    sl_pct=5.0,
+    min_bars=3,
+    confirm_bars=1,
+    vwap_prox=0.005,    # 0.5%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.20,
+    price_decimals=2,
+    qty_decimals=3,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="1m",
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -269,6 +288,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "SOLUSDT": SOL_CONFIG,
     "AVAXUSDT": AVAX_CONFIG,
     "XRPUSDT": XRP_CONFIG,
+    "XAUUSDT": XAU_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 

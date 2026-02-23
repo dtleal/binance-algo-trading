@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -89,11 +89,12 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 20 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 20 --tp 7.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 20 --tp 10.0 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 5 --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 5 --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 20 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &)
 	@sleep 3
 	@echo "$(GREEN)✅ Bots started! (PEPE skipped - invalid symbol)$(NC)"
 	@echo ""
-	@echo "$(BLUE)Active Strategies (10 bots):$(NC)"
+	@echo "$(BLUE)Active Strategies (11 bots):$(NC)"
 	@echo "  📊 MomShort (20x leverage):"
 	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
 	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%)"
@@ -102,6 +103,7 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 	@echo "     • GALAUSDT (1m, 20x, +34.85%), AVAXUSDT (1m, 20x, +31.12%)"
 	@echo "     • DOGEUSDT (5m, 20x, +41.28%), 1000SHIBUSDT (5m, 20x, +37.51%)"
 	@echo "     • XRPUSDT (5m, 20x, +29.21%), ETHUSDT (5m, 5x, +31.28%)"
+	@echo "     • XAUUSDT (1m, 20x, +7.67%)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -124,9 +126,9 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo ""
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
-	@echo "$(BLUE)🤖 Active Bots:$(NC) 10 total (PEPE excluded)"
+	@echo "$(BLUE)🤖 Active Bots:$(NC) 11 total (PEPE excluded)"
 	@echo "   • 4 MomShort bots (3x 1m + 1x 5m, 20x leverage)"
-	@echo "   • 6 VWAPPullback bots (4x 5m + 2x 1m, 5x-20x leverage)"
+	@echo "   • 7 VWAPPullback bots (4x 5m + 3x 1m, 5x-20x leverage)"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
 	@echo "   • $(YELLOW)make status-all$(NC)  - Check all processes"
@@ -232,6 +234,12 @@ bot-shib: ## Run VWAPPullback trading bot for 1000SHIBUSDT
 
 bot-shib-dry: ## Run 1000SHIBUSDT bot in dry-run mode
 	poetry run python -m trader pullback --symbol 1000shibusdt --dry-run --leverage $(LEVERAGE)
+
+bot-xau: ## Run VWAPPullback trading bot for XAUUSDT (Gold)
+	poetry run python -m trader pullback --symbol xauusdt --leverage $(LEVERAGE)
+
+bot-xau-dry: ## Run XAUUSDT bot in dry-run mode
+	poetry run python -m trader pullback --symbol xauusdt --dry-run --leverage $(LEVERAGE)
 
 logs: ## Tail the latest log file
 	@ls -t logs/*.log 2>/dev/null | head -1 | xargs -r tail -f || echo "No log files found"

@@ -445,12 +445,16 @@ class VWAPPullbackBot:
                 # Any SELL (short open) or BUY (long open, side=BUY buyer=True)
                 if (t.side == "SELL" and not t.buyer) or (t.side == "BUY" and t.buyer):
                     self._signal.mark_traded()
-                    self._state = _State.COOLDOWN
-                    logger.info(
-                        f"{YELLOW}Already traded {self.symbol} today — "
-                        f"entering COOLDOWN{RESET}"
-                    )
-                    return
+            if self._signal.trades_today > 0:
+                logger.info(
+                    f"{YELLOW}Found {self._signal.trades_today} trade(s) today for "
+                    f"{self.symbol} (limit: {self._signal.max_trades_per_day}){RESET}"
+                )
+            if self._signal.traded_today:
+                self._state = _State.COOLDOWN
+                logger.info(
+                    f"{YELLOW}Daily limit reached — entering COOLDOWN{RESET}"
+                )
         except Exception as e:
             logger.info(f"{YELLOW}Could not check trade history: {e}{RESET}")
 
@@ -480,6 +484,7 @@ class VWAPPullbackBot:
         logger.info(f"{BOLD}{prefix}VWAPPullback Bot — {self.symbol}{RESET}")
         logger.info(
             f"Leverage: {self.leverage}x | "
+            f"Interval: {self.interval} | "
             f"TP: {self.tp_pct}% | SL: {self.sl_pct}% | "
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
             f"EMA period: {self._ema.period} | "
