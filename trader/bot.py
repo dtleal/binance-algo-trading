@@ -250,14 +250,15 @@ class MomShortBot:
             trades = resp.data()
             if not trades:
                 return
-            # Any SELL trade today means we already opened a short
+            # Any SELL trade today means we already opened a short.
+            # Log the info but do NOT enter COOLDOWN — the position is already
+            # closed (no open position was found), so the bot starts in SCANNING
+            # and is ready to re-engage on a fresh signal.
             for t in trades:
                 if t.side == "SELL" and not t.buyer:
-                    self._signal.mark_traded()
-                    self._state = _State.COOLDOWN
                     logger.info(
-                        f"{YELLOW}Already traded {self.symbol} today — "
-                        f"entering COOLDOWN{RESET}"
+                        f"{YELLOW}Traded {self.symbol} today already, "
+                        f"but no open position — resuming SCANNING{RESET}"
                     )
                     return
         except Exception as e:
