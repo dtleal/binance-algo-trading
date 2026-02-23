@@ -189,7 +189,7 @@ export default function Overview() {
         {/* Daily P&L bars */}
         <div className="mt-6 pt-5 border-t border-gray-700">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Daily P&L</p>
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={280}>
             <BarChart data={dailyPnl} barCategoryGap="30%">
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
               <XAxis
