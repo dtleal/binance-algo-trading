@@ -394,8 +394,11 @@ async def get_performance():
         symbol = bot_state.get("symbol", "")
         strategy = bot_state.get("strategy", "")
 
-        # Filter trades for this symbol
-        symbol_trades = [t for t in trades_data["trades"] if t["symbol"] == symbol]
+        # Only count closing fills (realized_pnl != 0) — opening fills have realized_pnl == 0
+        symbol_trades = [
+            t for t in trades_data["trades"]
+            if t["symbol"] == symbol and t["realized_pnl"] != 0
+        ]
 
         total_trades = len(symbol_trades)
         winning_trades = sum(1 for t in symbol_trades if t["realized_pnl"] > 0)
@@ -413,17 +416,18 @@ async def get_performance():
             "unrealized_pnl": round(bot_state.get("unrealized_pnl", 0), 2),
         }
 
-    # Overall portfolio stats
-    total_trades_all = len(trades_data["trades"])
-    winning_trades_all = sum(1 for t in trades_data["trades"] if t["realized_pnl"] > 0)
-    total_pnl_all = sum(t["realized_pnl"] for t in trades_data["trades"])
+    # Overall portfolio stats — closing fills only
+    closing_trades_all = [t for t in trades_data["trades"] if t["realized_pnl"] != 0]
+    total_trades_all = len(closing_trades_all)
+    winning_trades_all = sum(1 for t in closing_trades_all if t["realized_pnl"] > 0)
+    total_pnl_all = sum(t["realized_pnl"] for t in closing_trades_all)
 
     return {
         "bots": bot_metrics,
         "portfolio": {
             "total_trades": total_trades_all,
             "winning_trades": winning_trades_all,
-            "win_rate": round((winning_trades_all / total_trades_all * 100), 1) if total_trades_all > 0 else 0,
+            "win_rate": round((winning_trades_all / total_trades_all * 100), 1) if total_trades_all > 0 else 0,  # based on closing fills only
             "total_pnl": round(total_pnl_all, 2),
         }
     }
