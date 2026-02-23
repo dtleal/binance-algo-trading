@@ -70,7 +70,7 @@ function buildPnlCurve(trades: { time: number; realized_pnl: number }[]) {
 export default function Overview() {
   const { filter } = useFilter();
   const { summary }      = useAccountSummary();
-  const { trades }       = useTrades(filter.dateRange);
+  const { trades }       = useTrades(filter.dateRange, filter.specificDate);
   const { performance }  = usePerformance();
   const { positions }    = usePositions();
   const { bots }         = useBotStates();

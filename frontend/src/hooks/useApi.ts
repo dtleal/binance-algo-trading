@@ -17,13 +17,24 @@ export function usePositions() {
   return { positions: data?.positions ?? [], error, isLoading };
 }
 
-export function useTrades(days = 7) {
+export function useTrades(days = 7, specificDate: string | null = null) {
+  // When a specific date is selected, fetch enough days to include it
+  const fetchDays = specificDate
+    ? Math.max(days, Math.ceil((Date.now() - new Date(specificDate).getTime()) / 86_400_000) + 2)
+    : days;
+
   const { data, error, isLoading } = useSWR<{ trades: Trade[] }>(
-    `/api/trades?days=${days}`,
+    `/api/trades?days=${fetchDays}`,
     fetcher,
     { refreshInterval: 60_000 }
   );
-  return { trades: data?.trades ?? [], error, isLoading };
+
+  const allTrades = data?.trades ?? [];
+  const trades = specificDate
+    ? allTrades.filter(t => new Date(t.time).toISOString().slice(0, 10) === specificDate)
+    : allTrades;
+
+  return { trades, error, isLoading };
 }
 
 export function useKlines(symbol: string, interval = "15m", limit = 200) {

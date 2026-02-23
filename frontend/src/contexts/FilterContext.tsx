@@ -3,7 +3,8 @@ import { createContext, useContext, useState, ReactNode } from "react";
 export interface GlobalFilter {
   symbol: string;      // "ALL" or specific symbol like "AXSUSDT"
   strategy: string;    // "ALL", "momshort", "pullback"
-  dateRange: number;   // days: 7, 30, 90
+  dateRange: number;   // days: 1, 7, 30, 90 — ignored when specificDate is set
+  specificDate: string | null;  // "YYYY-MM-DD" — overrides dateRange when set
 }
 
 interface FilterContextType {
@@ -17,6 +18,7 @@ const DEFAULT_FILTER: GlobalFilter = {
   symbol: "ALL",
   strategy: "ALL",
   dateRange: 30,
+  specificDate: null,
 };
 
 const FilterContext = createContext<FilterContextType | undefined>(undefined);
