@@ -687,11 +687,15 @@ class MomShortBot:
                         except Exception:
                             pass
                     logger.info(
-                        f"{YELLOW}{prefix}Position closed (SL/TP filled){pnl_info}{RESET}"
+                        f"{YELLOW}{prefix}Position closed externally (SL/TP or manual){pnl_info}{RESET}"
                     )
                     self._emit({"type": "position_closed", "symbol": self.symbol,
                                "reason": "SL/TP", "pnl_info": pnl_info})
-                    self._state = _State.COOLDOWN
+                    # Go back to SCANNING so the bot can re-enter if a new signal forms.
+                    # Also reset traded_today so a manual close doesn't permanently block
+                    # the bot for the rest of the day.
+                    self._signal.traded_today = False
+                    self._state = _State.SCANNING
                     _registry.update(self._reg_key, {
                         "state": self._state.name, "direction": None,
                         "entry_price": None, "sl_price": None, "tp_price": None,
@@ -710,8 +714,7 @@ class MomShortBot:
         logger.info(f"{BOLD}{prefix}EOD close triggered (23:50 UTC){RESET}")
 
         if self._state != _State.IN_POSITION:
-            logger.info(f"{prefix}No position to close at EOD")
-            self._state = _State.COOLDOWN
+            logger.info(f"{prefix}No position to close at EOD (already closed externally)")
             return
 
         if self.dry_run:
