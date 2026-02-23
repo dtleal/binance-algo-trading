@@ -412,17 +412,38 @@ pullback-eth-dry: ## Run VWAPPullback bot for ETHUSDT in DRY-RUN mode (5min opti
 # 🔄 V2 — R-multiple trailing stop (no fixed TP)
 # ══════════════════════════════════════════════════════════════════════════════
 
-CSV ?= axsusdt_1m_klines.csv
-
 build-sweep-v2: ## Build Rust V2 sweep binary (trailing stop, no TP)
 	cd backtest_sweep && cargo build --release --bin backtest_sweep_v2
 
-sweep-v2: ## Run V2 trailing-stop sweep (CSV=<file.csv>)
-	@if [ ! -f "$(CSV)" ]; then \
-		echo "Error: $(CSV) not found. Specify with CSV=<path>"; \
-		exit 1; \
-	fi
-	./backtest_sweep/target/release/backtest_sweep_v2 $(CSV)
+sweep-v2: ## Run V2 sweep across all available timeframes for SYMBOL (e.g. make sweep-v2 SYMBOL=ethusdt)
+ifndef SYMBOL
+	@echo "$(RED)❌ Error: SYMBOL not specified$(NC)"
+	@echo "$(YELLOW)Usage: make sweep-v2 SYMBOL=ethusdt$(NC)"
+	@exit 1
+endif
+	@echo "$(GREEN)═══════════════════════════════════════════════════$(NC)"
+	@echo "$(GREEN)  V2 Sweep — $(SYMBOL) — all timeframes$(NC)"
+	@echo "$(GREEN)═══════════════════════════════════════════════════$(NC)"
+	@BINARY=./backtest_sweep/target/release/backtest_sweep_v2; \
+	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep-v2$(NC)"; exit 1; fi; \
+	FOUND=0; \
+	for TF in 1m 5m 15m 30m 1h; do \
+		CSV_FILE="$(SYMBOL)_$${TF}_klines.csv"; \
+		ALT_FILE="$(SYMBOL)_$${TF}_klines_official.csv"; \
+		if [ -f "$$ALT_FILE" ]; then CSV_FILE="$$ALT_FILE"; fi; \
+		if [ ! -f "$$CSV_FILE" ]; then echo "  ⏭  $$CSV_FILE not found, skipping"; continue; fi; \
+		FOUND=1; \
+		echo ""; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		echo "$(YELLOW)  Timeframe: $$TF  →  $$CSV_FILE$(NC)"; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		$$BINARY $$CSV_FILE; \
+		if [ -f "backtest_sweep_v2.csv" ]; then \
+			mv backtest_sweep_v2.csv "$(SYMBOL)_$${TF}_sweep_v2.csv"; \
+			echo "  📄 Results saved → $(SYMBOL)_$${TF}_sweep_v2.csv"; \
+		fi; \
+	done; \
+	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL)$(NC)"; exit 1; fi
 
 # V2 bots — VWAPPullback with R-multiple trailing stop (same SL params as V1, no TP)
 bot-gala-v2: ## Run VWAPPullback V2 bot for GALAUSDT
