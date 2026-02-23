@@ -59,7 +59,7 @@ export default function PerformanceMetrics({ trades, startCapital = 1000 }: Perf
     const grossProfit = winners.reduce((sum, t) => sum + t.realized_pnl, 0);
     const grossLoss = Math.abs(losers.reduce((sum, t) => sum + t.realized_pnl, 0));
     const netProfit = grossProfit - grossLoss;
-    const totalCommissions = closingTrades.reduce((sum, t) => sum + t.commission, 0);
+    const totalCommissions = trades.reduce((sum, t) => sum + t.commission, 0);
 
     // Average metrics
     const avgWin = winningTrades > 0 ? grossProfit / winningTrades : 0;
