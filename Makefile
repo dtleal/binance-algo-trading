@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -407,3 +407,86 @@ pullback-eth-dry: ## Run VWAPPullback bot for ETHUSDT in DRY-RUN mode (5min opti
 	@echo "💰 Backtest result: +31.38% return | 49.8% win rate | 6.47% max DD"
 	@echo ""
 	poetry run python -m trader pullback --symbol ethusdt --dry-run --leverage $(LEVERAGE) $(PULLBACK_ETH_5M_PARAMS)
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 🔄 V2 — R-multiple trailing stop (no fixed TP)
+# ══════════════════════════════════════════════════════════════════════════════
+
+CSV ?= axsusdt_1m_klines.csv
+
+build-sweep-v2: ## Build Rust V2 sweep binary (trailing stop, no TP)
+	cd backtest_sweep && cargo build --release --bin backtest_sweep_v2
+
+sweep-v2: ## Run V2 trailing-stop sweep (CSV=<file.csv>)
+	@if [ ! -f "$(CSV)" ]; then \
+		echo "Error: $(CSV) not found. Specify with CSV=<path>"; \
+		exit 1; \
+	fi
+	./backtest_sweep/target/release/backtest_sweep_v2 $(CSV)
+
+# V2 bots — VWAPPullback with R-multiple trailing stop (same SL params as V1, no TP)
+bot-gala-v2: ## Run VWAPPullback V2 bot for GALAUSDT
+	poetry run python -m trader pullback-v2 --symbol galausdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20
+
+bot-gala-v2-dry: ## Run GALAUSDT V2 bot in dry-run mode
+	poetry run python -m trader pullback-v2 --symbol galausdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20
+
+bot-avax-v2: ## Run VWAPPullback V2 bot for AVAXUSDT
+	poetry run python -m trader pullback-v2 --symbol avaxusdt --leverage $(LEVERAGE) --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+
+bot-avax-v2-dry: ## Run AVAXUSDT V2 bot in dry-run mode
+	poetry run python -m trader pullback-v2 --symbol avaxusdt --dry-run --leverage $(LEVERAGE) --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+
+bot-doge-v2: ## Run VWAPPullback V2 bot for DOGEUSDT
+	poetry run python -m trader pullback-v2 --symbol dogeusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20
+
+bot-doge-v2-dry: ## Run DOGEUSDT V2 bot in dry-run mode
+	poetry run python -m trader pullback-v2 --symbol dogeusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20
+
+bot-shib-v2: ## Run VWAPPullback V2 bot for 1000SHIBUSDT
+	poetry run python -m trader pullback-v2 --symbol 1000shibusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+
+bot-shib-v2-dry: ## Run 1000SHIBUSDT V2 bot in dry-run mode
+	poetry run python -m trader pullback-v2 --symbol 1000shibusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+
+bot-xrp-v2: ## Run VWAPPullback V2 bot for XRPUSDT
+	poetry run python -m trader pullback-v2 --symbol xrpusdt --leverage $(LEVERAGE) --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+
+bot-xrp-v2-dry: ## Run XRPUSDT V2 bot in dry-run mode
+	poetry run python -m trader pullback-v2 --symbol xrpusdt --dry-run --leverage $(LEVERAGE) --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+
+bot-eth-v2: ## Run VWAPPullback V2 bot for ETHUSDT (5min candles)
+	poetry run python -m trader pullback-v2 --symbol ethusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 --max-trades 2
+
+bot-eth-v2-dry: ## Run ETHUSDT V2 bot in dry-run mode (5min candles)
+	poetry run python -m trader pullback-v2 --symbol ethusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 --max-trades 2
+
+bot-xau-v2: ## Run VWAPPullback V2 bot for XAUUSDT (Gold)
+	poetry run python -m trader pullback-v2 --symbol xauusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20
+
+bot-xau-v2-dry: ## Run XAUUSDT V2 bot in dry-run mode
+	poetry run python -m trader pullback-v2 --symbol xauusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20
+
+bots-v2: redis ## Start all VWAPPullback V2 bots (trailing stop)
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo "$(GREEN)  Starting V2 Trading Bots (trailing stop)$(NC)"
+	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
+	@echo ""
+	@export REDIS_URL=redis://localhost:6379 && \
+		(nohup poetry run python -m trader pullback-v2 --symbol galausdt --leverage 20 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol avaxusdt --leverage 20 --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol dogeusdt --leverage 20 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol 1000shibusdt --leverage 20 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol xrpusdt --leverage 20 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol ethusdt --leverage 5 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 --max-trades 2 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol xauusdt --leverage 20 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &)
+	@sleep 3
+	@echo "$(GREEN)✅ V2 bots started!$(NC)"
+	@echo ""
+	@echo "$(BLUE)Active V2 Strategies (7 bots — R-multiple trailing stop):$(NC)"
+	@echo "  📊 VWAPPullback V2:"
+	@echo "     • GALAUSDT (1m, 20x), AVAXUSDT (1m, 20x)"
+	@echo "     • DOGEUSDT (5m, 20x), 1000SHIBUSDT (5m, 20x)"
+	@echo "     • XRPUSDT (5m, 20x), ETHUSDT (5m, 5x)"
+	@echo "     • XAUUSDT (1m, 20x)"
+	@echo ""

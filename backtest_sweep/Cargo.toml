@@ -3,6 +3,14 @@ name = "backtest_sweep"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "backtest_sweep"
+path = "src/main.rs"
+
+[[bin]]
+name = "backtest_sweep_v2"
+path = "src/main_v2.rs"
+
 [dependencies]
 csv = "1"
 rayon = "1"

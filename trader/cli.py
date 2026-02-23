@@ -86,6 +86,35 @@ def main():
     pb_parser.add_argument("--ema-period", type=int, default=200, help="EMA period for trend detection (default: 200)")
     pb_parser.add_argument("--max-trades", type=int, default=4, help="Max trades per UTC day (default: 4)")
 
+    # --- pullback-v2 ---
+    pb2_parser = subparsers.add_parser(
+        "pullback-v2", help="Run VWAPPullback V2 bot (R-multiple trailing stop, no fixed TP)"
+    )
+    pb2_parser.add_argument(
+        "--symbol", required=True,
+        help="Futures trading pair (e.g. btcusdt, ethusdt, solusdt)",
+    )
+    pb2_parser.add_argument(
+        "--leverage", type=int, default=DEFAULT_LEVERAGE,
+        help=f"Leverage multiplier (default: {DEFAULT_LEVERAGE}x)",
+    )
+    pb2_parser.add_argument(
+        "--capital", type=float, default=None,
+        help="Trading capital in USDT (default: auto-detect from account)",
+    )
+    pb2_parser.add_argument(
+        "--dry-run", action="store_true",
+        help="Run without placing orders (log signals only)",
+    )
+    pb2_parser.add_argument("--sl", type=float, default=2.5, help="Initial stop-loss %% (default: 2.5)")
+    pb2_parser.add_argument("--min-bars", type=int, default=3, help="Min consolidation bars (default: 3)")
+    pb2_parser.add_argument("--confirm-bars", type=int, default=2, help="Confirmation bars (default: 2)")
+    pb2_parser.add_argument("--vwap-prox", type=float, default=0.005, help="VWAP proximity threshold (default: 0.005)")
+    pb2_parser.add_argument("--vwap-window-days", type=int, default=10, help="VWAP rolling window in days (default: 10)")
+    pb2_parser.add_argument("--pos-size", type=float, default=0.20, help="Position size as fraction of capital (default: 0.20)")
+    pb2_parser.add_argument("--ema-period", type=int, default=200, help="EMA period for trend detection (default: 200)")
+    pb2_parser.add_argument("--max-trades", type=int, default=4, help="Max trades per UTC day (default: 4)")
+
     # --- plot ---
     plot_parser = subparsers.add_parser("plot", help="Show daily P&L and cumulative charts")
     plot_parser.add_argument(
@@ -196,6 +225,28 @@ def main():
             capital=args.capital,
             dry_run=args.dry_run,
             tp_pct=args.tp,
+            sl_pct=args.sl,
+            min_bars=args.min_bars,
+            confirm_bars=args.confirm_bars,
+            vwap_prox=args.vwap_prox,
+            vwap_window_days=args.vwap_window_days,
+            pos_size_pct=args.pos_size,
+            ema_period=args.ema_period,
+            max_trades_per_day=args.max_trades,
+            interval=interval,
+        )
+        _run_async(bot.run())
+
+    elif args.command == "pullback-v2":
+        from trader.bot_vwap_pullback_v2 import VWAPPullbackBotV2
+        interval = "1m"
+        if args.symbol.upper() in SYMBOL_CONFIGS:
+            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
+        bot = VWAPPullbackBotV2(
+            symbol=args.symbol,
+            leverage=args.leverage,
+            capital=args.capital,
+            dry_run=args.dry_run,
             sl_pct=args.sl,
             min_bars=args.min_bars,
             confirm_bars=args.confirm_bars,
