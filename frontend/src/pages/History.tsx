@@ -92,13 +92,13 @@ export default function History() {
     );
   }
 
-  // Stats
-  const closingTrades = trades.filter((t) => t.realized_pnl !== 0);
+  // Stats (scoped to filtered trades)
+  const closingTrades = filtered.filter((t) => t.realized_pnl !== 0);
   const totalPnl  = closingTrades.reduce((s, t) => s + t.realized_pnl, 0);
   const winCount  = closingTrades.filter((t) => t.realized_pnl > 0).length;
   const winRate   = closingTrades.length ? ((winCount / closingTrades.length) * 100).toFixed(1) : "—";
   const avgPnl    = closingTrades.length ? totalPnl / closingTrades.length : 0;
-  const totalComm = trades.reduce((s, t) => s + t.commission, 0);
+  const totalComm = filtered.reduce((s, t) => s + t.commission, 0);
 
   // Daily P&L bar chart
   const dailyPnl = useMemo(() => {
