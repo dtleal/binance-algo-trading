@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  BarChart, Bar, Cell, AreaChart, Area,
+  BarChart, Bar, Cell, AreaChart, Area, ComposedChart,
 } from "recharts";
-import { useAccountSummary, useTrades, usePerformance, usePositions, useBotStates } from "../hooks/useApi";
+import { useAccountSummary, useTrades, usePerformance, usePositions, useBotStates, useEquityHistory } from "../hooks/useApi";
 import { useFilter } from "../contexts/FilterContext";
 import PerformanceMetrics from "../components/PerformanceMetrics";
 import PerformanceRankings from "../components/PerformanceRankings";
@@ -28,43 +28,76 @@ function fmtDate(ms: number) {
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-/** Build daily P&L curve from trade list */
-function buildPnlCurve(trades: { time: number; realized_pnl: number }[]) {
-  if (trades.length === 0) {
-    // No trades yet - show zero P&L for last 30 days
-    const data = [];
-    const now = new Date();
-    for (let i = 29; i >= 0; i--) {
-      const d = new Date(now);
-      d.setDate(d.getDate() - i);
-      data.push({
-        date: d.toISOString().slice(5, 10), // MM-DD format
-        pnl: 0,
-        dailyPnl: 0,
-      });
+interface EquitySnapshot { time: number; equity: number; unrealized_pnl: number }
+
+/**
+ * Merge equity snapshots with realized P&L into a single time-series.
+ * Each point carries:
+ *   pnl    — cumulative realized P&L up to that moment (step function)
+ *   equity — equity delta from the first snapshot (includes unrealized)
+ */
+function buildCombinedCurve(
+  trades: { time: number; realized_pnl: number }[],
+  snapshots: EquitySnapshot[],
+) {
+  if (snapshots.length === 0 && trades.length === 0) return [];
+
+  // Step 1 — sorted closing fills
+  const closes = trades
+    .filter(t => t.realized_pnl !== 0)
+    .sort((a, b) => a.time - b.time);
+
+  // Step 2 — baseline equity (first snapshot)
+  const baseEquity = snapshots.length > 0 ? snapshots[0].equity : 0;
+
+  // Step 3 — build points from equity snapshots
+  let cumPnl = 0;
+  let closeIdx = 0;
+
+  const points = snapshots.map(s => {
+    // Advance cumulative P&L to this snapshot's timestamp
+    while (closeIdx < closes.length && closes[closeIdx].time <= s.time) {
+      cumPnl += closes[closeIdx].realized_pnl;
+      closeIdx++;
     }
-    return data;
+    const label = new Date(s.time).toISOString().slice(5, 16).replace("T", " ");
+    return {
+      date:        label,
+      pnl:         parseFloat(cumPnl.toFixed(2)),
+      equity:      parseFloat((s.equity - baseEquity).toFixed(2)),
+      dailyPnl:    null as number | null,
+    };
+  });
+
+  // Step 4 — if no snapshots, fall back to daily aggregation (original behaviour)
+  if (points.length === 0) {
+    const byDay: Record<string, number> = {};
+    for (const t of closes) {
+      const d = new Date(t.time).toISOString().slice(0, 10);
+      byDay[d] = (byDay[d] ?? 0) + t.realized_pnl;
+    }
+    let running = 0;
+    return Object.entries(byDay).sort().map(([date, dp]) => {
+      running += dp;
+      return { date: date.slice(5), pnl: parseFloat(running.toFixed(2)), equity: null, dailyPnl: parseFloat(dp.toFixed(2)) };
+    });
   }
 
-  const byDay: Record<string, number> = {};
+  return points;
+}
 
+/** Legacy daily P&L bar chart helper */
+function buildDailyBars(trades: { time: number; realized_pnl: number }[]) {
+  const byDay: Record<string, number> = {};
   for (const t of trades) {
-    if (t.realized_pnl === 0) continue; // Skip opening trades
+    if (t.realized_pnl === 0) continue;
     const d = new Date(t.time).toISOString().slice(0, 10);
     byDay[d] = (byDay[d] ?? 0) + t.realized_pnl;
   }
-
-  const sorted = Object.entries(byDay).sort();
-  let cumulativePnl = 0;
-
-  return sorted.map(([date, dailyPnl]) => {
-    cumulativePnl += dailyPnl;
-    return {
-      date: date.slice(5), // MM-DD format
-      pnl: parseFloat(cumulativePnl.toFixed(2)),
-      dailyPnl: parseFloat(dailyPnl.toFixed(2)),
-    };
-  });
+  return Object.entries(byDay).sort().map(([date, pnl]) => ({
+    date: date.slice(5),
+    pnl:  parseFloat(pnl.toFixed(2)),
+  }));
 }
 
 export default function Overview() {
@@ -74,6 +107,7 @@ export default function Overview() {
   const { performance }  = usePerformance();
   const { positions }    = usePositions();
   const { bots }         = useBotStates();
+  const { snapshots }    = useEquityHistory(filter.dateRange);
 
   // Filter trades by symbol and strategy
   const filteredTrades = useMemo(() => {
@@ -97,25 +131,12 @@ export default function Overview() {
   const equityChange24h = summary?.equity_change_24h_pct ?? 0;
   const openPositions = summary?.open_positions ?? 0;
 
-  const pnlCurve = buildPnlCurve(filteredTrades);
+  const pnlCurve = buildCombinedCurve(filteredTrades, snapshots);
   const activeBots = Object.values(bots).length;
   const scanningBots = Object.values(bots).filter(b => b.state === "SCANNING").length;
 
-  // Build daily P&L chart
-  const dailyPnl = useMemo(() => {
-    const byDay: Record<string, number> = {};
-    for (const t of filteredTrades) {
-      if (t.realized_pnl === 0) continue; // Skip opening trades
-      const d = new Date(t.time).toISOString().slice(0, 10);
-      byDay[d] = (byDay[d] ?? 0) + t.realized_pnl;
-    }
-    return Object.entries(byDay)
-      .sort()
-      .map(([date, pnl]) => ({
-        date: date.slice(5), // MM-DD format
-        pnl: parseFloat(pnl.toFixed(2)),
-      }));
-  }, [filteredTrades]);
+  const dailyPnl = useMemo(() => buildDailyBars(filteredTrades), [filteredTrades]);
+  const hasEquity = snapshots.length > 0;
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -155,34 +176,48 @@ export default function Overview() {
       </div>
 
       <div className="grid grid-cols-1 gap-6">
-        {/* P&L Curve */}
+        {/* Cumulative P&L + Equity curve */}
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
               <p className="text-sm font-semibold text-gray-300">Cumulative P&L</p>
-              <p className="text-xs text-gray-500 mt-1">Last 30 days performance</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {hasEquity ? "Realized P&L vs Equity fluctuation" : "Realized P&L · Last 30 days"}
+              </p>
             </div>
-            {pnlCurve.length > 0 && (
-              <div className="text-right">
-                <p className={`text-2xl font-bold ${
-                  pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "text-emerald-400" : "text-red-400"
-                }`}>
-                  {pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "+" : ""}
-                  {fmtUSD(pnlCurve[pnlCurve.length - 1].pnl)}
-                </p>
-                <p className="text-xs text-gray-500">Total</p>
-              </div>
-            )}
+            <div className="flex items-center gap-4">
+              {hasEquity && (
+                <div className="flex items-center gap-3 text-xs text-gray-500">
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block w-4 h-0.5 bg-emerald-400"></span>Realized
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="inline-block w-4 h-0.5 bg-blue-400 border-dashed"></span>Equity
+                  </span>
+                </div>
+              )}
+              {pnlCurve.length > 0 && (
+                <div className="text-right">
+                  <p className={`text-2xl font-bold ${
+                    pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "text-emerald-400" : "text-red-400"
+                  }`}>
+                    {pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "+" : ""}
+                    {fmtUSD(pnlCurve[pnlCurve.length - 1].pnl)}
+                  </p>
+                  <p className="text-xs text-gray-500">Realized</p>
+                </div>
+              )}
+            </div>
           </div>
           <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={pnlCurve}>
+            <ComposedChart data={pnlCurve}>
               <defs>
                 <linearGradient id="colorPnl" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
+                  <stop offset="5%"  stopColor="#10b981" stopOpacity={0.25}/>
                   <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
                 </linearGradient>
-                <linearGradient id="colorPnlNegative" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#ef4444" stopOpacity={0.3}/>
+                <linearGradient id="colorPnlNeg" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.25}/>
                   <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
                 </linearGradient>
               </defs>
@@ -191,6 +226,7 @@ export default function Overview() {
                 dataKey="date"
                 tick={{ fill: "#6b7280", fontSize: 11 }}
                 axisLine={{ stroke: "#374151" }}
+                interval="preserveStartEnd"
               />
               <YAxis
                 tick={{ fill: "#6b7280", fontSize: 11 }}
@@ -201,41 +237,53 @@ export default function Overview() {
               <Tooltip
                 content={({ active, payload }) => {
                   if (!active || !payload?.length) return null;
-                  const data = payload[0].payload;
+                  const d = payload[0].payload;
                   return (
-                    <div className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 shadow-xl">
-                      <p className="text-gray-400 text-xs mb-2">{data.date}</p>
+                    <div className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 shadow-xl text-xs">
+                      <p className="text-gray-400 mb-2">{d.date}</p>
                       <div className="space-y-1">
-                        <div className="flex items-center justify-between gap-4">
-                          <span className="text-xs text-gray-500">Daily P&L:</span>
-                          <span className={`text-sm font-bold ${
-                            data.dailyPnl >= 0 ? "text-emerald-400" : "text-red-400"
-                          }`}>
-                            {data.dailyPnl >= 0 ? "+" : ""}{fmtUSD(data.dailyPnl)}
+                        <div className="flex justify-between gap-4">
+                          <span className="text-gray-500">Realized P&L:</span>
+                          <span className={`font-bold ${d.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                            {d.pnl >= 0 ? "+" : ""}{fmtUSD(d.pnl)}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between gap-4 pt-1 border-t border-gray-700">
-                          <span className="text-xs text-gray-500">Total P&L:</span>
-                          <span className={`text-base font-bold ${
-                            data.pnl >= 0 ? "text-emerald-400" : "text-red-400"
-                          }`}>
-                            {data.pnl >= 0 ? "+" : ""}{fmtUSD(data.pnl)}
-                          </span>
-                        </div>
+                        {d.equity != null && (
+                          <div className="flex justify-between gap-4">
+                            <span className="text-gray-500">Equity Δ:</span>
+                            <span className={`font-bold ${d.equity >= 0 ? "text-blue-400" : "text-orange-400"}`}>
+                              {d.equity >= 0 ? "+" : ""}{fmtUSD(d.equity)}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
                   );
                 }}
               />
+              {/* Realized P&L — area */}
               <Area
-                type="monotone"
+                type="stepAfter"
                 dataKey="pnl"
                 stroke={pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "#10b981" : "#ef4444"}
-                strokeWidth={2.5}
-                fill={pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "url(#colorPnl)" : "url(#colorPnlNegative)"}
-                fillOpacity={1}
+                strokeWidth={2}
+                fill={pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "url(#colorPnl)" : "url(#colorPnlNeg)"}
+                dot={false}
+                connectNulls
               />
-            </AreaChart>
+              {/* Equity fluctuation — dashed line (only when snapshots available) */}
+              {hasEquity && (
+                <Line
+                  type="monotone"
+                  dataKey="equity"
+                  stroke="#60a5fa"
+                  strokeWidth={1.5}
+                  strokeDasharray="4 3"
+                  dot={false}
+                  connectNulls
+                />
+              )}
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
 

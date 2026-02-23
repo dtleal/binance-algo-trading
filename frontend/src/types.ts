@@ -66,6 +66,13 @@ export interface BotState {
   };
 }
 
+export interface EquitySnapshot {
+  time: number;           // epoch ms
+  equity: number;
+  unrealized_pnl: number;
+  balance: number;
+}
+
 export type WsEvent =
   | { type: "candle"; symbol: string; strategy: string; ts: string; price: number; vwap: number; ema: number | null; trend: string; state: string; counter?: number; confirming?: boolean; unrealized_pnl?: number; unrealized_pnl_pct?: number }
   | { type: "signal"; symbol: string; strategy: string; direction: string; price: number; ts: string }

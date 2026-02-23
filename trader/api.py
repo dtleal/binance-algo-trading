@@ -26,6 +26,37 @@ from fastapi.staticfiles import StaticFiles
 from trader.config import BINANCE_API_KEY, BINANCE_SECRET_KEY, SOCKS_PROXY, SYMBOL_CONFIGS
 from trader import events, bot_registry
 
+_EQUITY_STREAM = "equity:history"
+_EQUITY_MAXLEN = 2016   # 7 days × 24h × 12 snapshots/h (5 min interval)
+
+
+async def _equity_snapshot_loop() -> None:
+    """Background task: snapshot account equity every 5 minutes into Redis."""
+    import os
+    import redis.asyncio as aioredis
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    r = await aioredis.from_url(redis_url, decode_responses=True)
+
+    while True:
+        try:
+            summary = await get_account_summary()
+            ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+            await r.xadd(
+                _EQUITY_STREAM,
+                {
+                    "time":           str(ts),
+                    "equity":         str(summary["total_equity"]),
+                    "unrealized_pnl": str(summary["unrealized_pnl"]),
+                    "balance":        str(summary["total_balance"]),
+                },
+                maxlen=_EQUITY_MAXLEN,
+                approximate=True,
+            )
+        except Exception:
+            pass
+        await asyncio.sleep(300)
+
+
 app = FastAPI(title="Binance Trader Dashboard", version="1.0.0")
 
 app.add_middleware(
@@ -34,6 +65,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _startup():
+    asyncio.create_task(_equity_snapshot_loop())
 
 # ── Binance client (lazy, shared) ────────────────────────────────────────────
 
@@ -340,6 +376,32 @@ async def get_account_summary():
             "pnl_24h": 0,
             "equity_change_24h_pct": 0,
         }
+
+
+@app.get("/api/equity_history")
+async def get_equity_history(days: int = 7):
+    """Return equity snapshots (5-min interval) stored in Redis Stream."""
+    import os
+    import redis.asyncio as aioredis
+    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+    r = await aioredis.from_url(redis_url, decode_responses=True)
+
+    cutoff_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - days * 86_400_000
+    min_id = f"{cutoff_ms}-0"
+    try:
+        messages = await r.xrange(_EQUITY_STREAM, min=min_id)
+        snapshots = [
+            {
+                "time":           int(data["time"]),
+                "equity":         float(data["equity"]),
+                "unrealized_pnl": float(data["unrealized_pnl"]),
+                "balance":        float(data["balance"]),
+            }
+            for _, data in messages
+        ]
+        return {"snapshots": snapshots}
+    except Exception as e:
+        return {"snapshots": [], "error": str(e)}
 
 
 @app.get("/api/market_data")

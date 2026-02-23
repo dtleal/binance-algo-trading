@@ -1,5 +1,5 @@
 import useSWR from "swr";
-import { Balance, Position, Trade, BotState } from "../types";
+import { Balance, Position, Trade, BotState, EquitySnapshot } from "../types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -53,6 +53,15 @@ export function useKlines(symbol: string, interval = "15m", limit = 200) {
     { revalidateOnFocus: false }
   );
   return { klines: data?.klines ?? [], error, isLoading };
+}
+
+export function useEquityHistory(days = 7) {
+  const { data, error, isLoading } = useSWR<{ snapshots: EquitySnapshot[] }>(
+    `/api/equity_history?days=${days}`,
+    fetcher,
+    { refreshInterval: 60_000 }
+  );
+  return { snapshots: data?.snapshots ?? [], error, isLoading };
 }
 
 export function useCommissions(days = 30) {
