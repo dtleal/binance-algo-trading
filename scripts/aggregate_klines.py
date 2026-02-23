@@ -132,7 +132,7 @@ Examples:
     # Aggregate to each timeframe
     for timeframe in args.timeframes:
         interval_minutes = TIMEFRAME_MINUTES[timeframe]
-        output_file = f"{base_name}_{timeframe}_klines.csv"
+        output_file = str(input_path.parent / f"{base_name}_{timeframe}_klines.csv")
 
         print(f"\n🔄 Aggregating to {timeframe}...")
         aggregated = aggregate_candles(candles, interval_minutes)

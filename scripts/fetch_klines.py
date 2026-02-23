@@ -38,7 +38,7 @@ def main():
     args = parser.parse_args()
 
     symbol = args.symbol.upper()
-    output_file = args.output or f"{symbol.lower()}_1m_klines.csv"
+    output_file = args.output or f"data/klines/{symbol.lower()}_1m_klines.csv"
 
     # Auto-detect Futures symbols (start with digits like 1000SHIBUSDT)
     use_futures = args.futures or symbol[0].isdigit()

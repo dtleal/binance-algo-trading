@@ -53,9 +53,9 @@ def main():
     parser.add_argument("--run-best", action="store_true", help="Auto-run detailed backtest (VWAPPullback only)")
     args = parser.parse_args()
 
-    csv_file = Path("backtest_sweep.csv")
+    csv_file = Path("data/sweeps/backtest_sweep.csv")
     if not csv_file.exists():
-        print("❌ backtest_sweep.csv not found. Run 'make sweep-rust-axs' first.")
+        print("❌ data/sweeps/backtest_sweep.csv not found. Run 'make sweep-rust SYMBOL=...' first.")
         sys.exit(1)
 
     print(f"📊 Loading {csv_file}...")
@@ -122,7 +122,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from backtest_detail_pullback import load, run_backtest, analyze, plot_equity
 
 # Best config from Rust sweep
-CSV_FILE = "axsusdt_1m_klines.csv"
+CSV_FILE = "data/klines/axsusdt_1m_klines.csv"
 EMA_PERIOD = {int(best['ema_period'])}
 TP_PCT = {best['tp_pct'] / 100}
 SL_PCT = {best['sl_pct'] / 100}

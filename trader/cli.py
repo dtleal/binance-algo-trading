@@ -115,6 +115,88 @@ def main():
     pb2_parser.add_argument("--ema-period", type=int, default=200, help="EMA period for trend detection (default: 200)")
     pb2_parser.add_argument("--max-trades", type=int, default=4, help="Max trades per UTC day (default: 4)")
 
+    # --- ema-scalp ---
+    ema_parser = subparsers.add_parser(
+        "ema-scalp", help="Run EMAScalp bot (bidirectional EMA crossover, trailing stop)"
+    )
+    ema_parser.add_argument("--symbol", required=True, help="Futures trading pair (e.g. btcusdt)")
+    ema_parser.add_argument("--leverage", type=int, default=DEFAULT_LEVERAGE,
+        help=f"Leverage multiplier (default: {DEFAULT_LEVERAGE}x)")
+    ema_parser.add_argument("--capital", type=float, default=None,
+        help="Trading capital in USDT (default: auto-detect)")
+    ema_parser.add_argument("--dry-run", action="store_true",
+        help="Run without placing orders (log signals only)")
+    ema_parser.add_argument("--sl", type=float, default=0.3,
+        help="Initial stop-loss %% (default: 0.3)")
+    ema_parser.add_argument("--fast-period", type=int, default=8,
+        help="Fast EMA period (default: 8)")
+    ema_parser.add_argument("--slow-period", type=int, default=21,
+        help="Slow EMA period (default: 21)")
+    ema_parser.add_argument("--vol-filter", action="store_true",
+        help="Only enter on above-average volume candles")
+    ema_parser.add_argument("--max-trades", type=int, default=10,
+        help="Max trades per UTC day (default: 10)")
+    ema_parser.add_argument("--pos-size", type=float, default=0.20,
+        help="Position size as fraction of capital (default: 0.20)")
+    ema_parser.add_argument("--be-r", type=float, default=2.0,
+        help="R multiple at which SL reaches breakeven (default: 2.0)")
+    ema_parser.add_argument("--trail-step", type=float, default=0.5,
+        help="Trailing step size in R after breakeven (default: 0.5)")
+
+    # --- orb ---
+    orb_parser = subparsers.add_parser(
+        "orb", help="Run ORB bot (Opening Range Breakout, trailing stop)"
+    )
+    orb_parser.add_argument("--symbol", required=True, help="Futures trading pair (e.g. btcusdt)")
+    orb_parser.add_argument("--leverage", type=int, default=DEFAULT_LEVERAGE,
+        help=f"Leverage multiplier (default: {DEFAULT_LEVERAGE}x)")
+    orb_parser.add_argument("--capital", type=float, default=None,
+        help="Trading capital in USDT (default: auto-detect)")
+    orb_parser.add_argument("--dry-run", action="store_true",
+        help="Run without placing orders (log signals only)")
+    orb_parser.add_argument("--sl", type=float, default=0.5,
+        help="Initial stop-loss %% (default: 0.5)")
+    orb_parser.add_argument("--range-mins", type=int, default=30,
+        help="Opening range duration in minutes (default: 30)")
+    orb_parser.add_argument("--buffer-pct", type=float, default=0.001,
+        help="Breakout buffer above/below range (default: 0.001)")
+    orb_parser.add_argument("--vol-filter", action="store_true",
+        help="Only enter on above-average volume candles")
+    orb_parser.add_argument("--max-trades", type=int, default=4,
+        help="Max trades per UTC day (default: 4)")
+    orb_parser.add_argument("--pos-size", type=float, default=0.20,
+        help="Position size as fraction of capital (default: 0.20)")
+    orb_parser.add_argument("--be-r", type=float, default=2.0,
+        help="R multiple at which SL reaches breakeven (default: 2.0)")
+    orb_parser.add_argument("--trail-step", type=float, default=0.5,
+        help="Trailing step size in R after breakeven (default: 0.5)")
+
+    # --- pdhl ---
+    pdhl_parser = subparsers.add_parser(
+        "pdhl", help="Run PDHL bot (Previous Day High/Low rejection, trailing stop)"
+    )
+    pdhl_parser.add_argument("--symbol", required=True, help="Futures trading pair (e.g. btcusdt)")
+    pdhl_parser.add_argument("--leverage", type=int, default=DEFAULT_LEVERAGE,
+        help=f"Leverage multiplier (default: {DEFAULT_LEVERAGE}x)")
+    pdhl_parser.add_argument("--capital", type=float, default=None,
+        help="Trading capital in USDT (default: auto-detect)")
+    pdhl_parser.add_argument("--dry-run", action="store_true",
+        help="Run without placing orders (log signals only)")
+    pdhl_parser.add_argument("--sl", type=float, default=0.3,
+        help="Initial stop-loss %% (default: 0.3)")
+    pdhl_parser.add_argument("--prox-pct", type=float, default=0.002,
+        help="Proximity threshold to PDH/PDL (default: 0.002 = 0.2%%)")
+    pdhl_parser.add_argument("--confirm-bars", type=int, default=1,
+        help="Confirmation bars for rejection (default: 1)")
+    pdhl_parser.add_argument("--max-trades", type=int, default=4,
+        help="Max trades per UTC day (default: 4)")
+    pdhl_parser.add_argument("--pos-size", type=float, default=0.20,
+        help="Position size as fraction of capital (default: 0.20)")
+    pdhl_parser.add_argument("--be-r", type=float, default=2.0,
+        help="R multiple at which SL reaches breakeven (default: 2.0)")
+    pdhl_parser.add_argument("--trail-step", type=float, default=0.5,
+        help="Trailing step size in R after breakeven (default: 0.5)")
+
     # --- plot ---
     plot_parser = subparsers.add_parser("plot", help="Show daily P&L and cumulative charts")
     plot_parser.add_argument(
@@ -255,6 +337,71 @@ def main():
             pos_size_pct=args.pos_size,
             ema_period=args.ema_period,
             max_trades_per_day=args.max_trades,
+            interval=interval,
+        )
+        _run_async(bot.run())
+
+    elif args.command == "ema-scalp":
+        from trader.bot_ema_scalp import EMAScalpBot
+        interval = "1m"
+        if args.symbol.upper() in SYMBOL_CONFIGS:
+            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
+        bot = EMAScalpBot(
+            symbol=args.symbol,
+            leverage=args.leverage,
+            capital=args.capital,
+            dry_run=args.dry_run,
+            sl_pct=args.sl,
+            fast_period=args.fast_period,
+            slow_period=args.slow_period,
+            vol_filter=args.vol_filter,
+            max_trades_per_day=args.max_trades,
+            pos_size_pct=args.pos_size,
+            be_r=args.be_r,
+            trail_step=args.trail_step,
+            interval=interval,
+        )
+        _run_async(bot.run())
+
+    elif args.command == "orb":
+        from trader.bot_orb import ORBBot
+        interval = "1m"
+        if args.symbol.upper() in SYMBOL_CONFIGS:
+            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
+        bot = ORBBot(
+            symbol=args.symbol,
+            leverage=args.leverage,
+            capital=args.capital,
+            dry_run=args.dry_run,
+            sl_pct=args.sl,
+            range_mins=args.range_mins,
+            buffer_pct=args.buffer_pct,
+            vol_filter=args.vol_filter,
+            max_trades_per_day=args.max_trades,
+            pos_size_pct=args.pos_size,
+            be_r=args.be_r,
+            trail_step=args.trail_step,
+            interval=interval,
+        )
+        _run_async(bot.run())
+
+    elif args.command == "pdhl":
+        from trader.bot_pdhl import PDHLBot
+        interval = "1m"
+        if args.symbol.upper() in SYMBOL_CONFIGS:
+            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
+        bot = PDHLBot(
+            symbol=args.symbol,
+            leverage=args.leverage,
+            capital=args.capital,
+            dry_run=args.dry_run,
+            sl_pct=args.sl,
+            prox_pct=args.prox_pct,
+            confirm_bars=args.confirm_bars,
+            max_trades_per_day=args.max_trades,
+            pos_size_pct=args.pos_size,
+            be_r=args.be_r,
+            trail_step=args.trail_step,
             interval=interval,
         )
         _run_async(bot.run())

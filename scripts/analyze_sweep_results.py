@@ -166,7 +166,7 @@ def main():
 
     # Load results from each timeframe
     for tf in timeframes:
-        filepath = Path(f"sweep_results/{symbol_lower}_{tf}_sweep.txt")
+        filepath = Path(f"data/sweeps/{symbol_lower}_{tf}_sweep.txt")
 
         if not filepath.exists():
             missing_files.append(tf)

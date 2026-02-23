@@ -17,3 +17,14 @@ frontend/src/**/*.js.map
 # Ansible
 infra/ansible/ansible.log
 infra/ansible/*.retry
+
+# Rust build artifacts
+target/
+backtest_sweep/target/
+backtest_sweep_v2/target/
+
+# Redis
+dump.rdb
+
+# Data (klines are too large for git)
+data/klines/

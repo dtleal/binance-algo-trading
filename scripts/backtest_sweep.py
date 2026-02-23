@@ -11,7 +11,7 @@ from itertools import product
 import numpy as np
 import pandas as pd
 
-CSV_FILE = "axsusdc_1m_klines.csv"
+CSV_FILE = "data/klines/axsusdc_1m_klines.csv"
 FEE_PCT = 0.0004          # 0.04% taker fee per side
 INITIAL_CAPITAL = 1000.0
 ENTRY_START = "01:00"
@@ -200,9 +200,9 @@ def main():
     elapsed = time.time() - t0
     rdf = pd.DataFrame(results)
     rdf.sort_values("return_pct", ascending=False, inplace=True)
-    rdf.to_csv("backtest_sweep.csv", index=False)
+    rdf.to_csv("data/sweeps/backtest_sweep.csv", index=False)
 
-    print(f"\nDone in {elapsed:.1f}s — {len(rdf):,} results → backtest_sweep.csv\n")
+    print(f"\nDone in {elapsed:.1f}s — {len(rdf):,} results → data/sweeps/backtest_sweep.csv\n")
 
     # ── Reports ─────────────────────────────────────────────
     cols = ["tp_pct", "sl_pct", "rr_ratio", "min_bars", "vol_filter", "pos_size_pct",

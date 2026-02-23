@@ -9,7 +9,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 import os
-CSV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "galausdt_1m_klines.csv")
+CSV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../data/klines/galausdt_1m_klines.csv")
 TP_PCT = 0.05
 SL_PCT = 0.05
 MIN_BARS = 5

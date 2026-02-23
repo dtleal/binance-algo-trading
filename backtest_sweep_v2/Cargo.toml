@@ -1,10 +1,10 @@
 [package]
-name = "backtest_sweep"
+name = "backtest_sweep_v2"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "backtest_sweep"
+name = "backtest_sweep_v2"
 path = "src/main.rs"
 
 [dependencies]

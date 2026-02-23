@@ -20,7 +20,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # ── Configuration ────────────────────────────────────────────────────────────
-CSV_FILE      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "axsusdt_1m_klines.csv")
+CSV_FILE      = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../data/klines/axsusdt_1m_klines.csv")
 EMA_PERIOD    = 200       # bars — trend filter (does NOT reset daily)
 TP_PCT        = 0.05      # 5% take-profit
 SL_PCT        = 0.025     # 2.5% stop-loss
@@ -316,7 +316,7 @@ def analyze(tdf: pd.DataFrame):
     if len(eod_l):
         print(f"  EOD losers:  {len(eod_l):3d}  avg={eod_l['pnl_pct'].mean():+.4f}%")
 
-    out = "pullback_trades.csv"
+    out = "data/sweeps/pullback_trades.csv"
     tdf.to_csv(out, index=False)
     print(f"\n  Trade log → {out}")
 

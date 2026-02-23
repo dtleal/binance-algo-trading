@@ -28,7 +28,11 @@ poetry run python -m trader close                               # Close position
 - `trader/short.py` — `FuturesShort`: manual one-off USDT-M futures short
 - `trader/monitor.py` — WebSocket market data monitor (Spot)
 - `trader/cli.py` — Argparse CLI entry point
-- `aggregate_klines.py` — Converts 1m candles to higher timeframes (5m, 15m, 30m, 1h)
+- `scripts/` — Python scripts: `fetch_klines.py`, `aggregate_klines.py`, backtests, analysis
+- `data/klines/` — Historical kline CSVs (1m, 5m, 15m, 30m, 1h per symbol)
+- `data/sweeps/` — Sweep result CSVs and TXT files
+- `backtest_sweep/` — Standard Rust sweep binary (strategies 0-7 including EMAScalp/ORB/PDHL)
+- `backtest_sweep_v2/` — V2 Rust sweep binary (trailing stop, no fixed TP; use when explicitly requested)
 
 ## Code Conventions
 
@@ -41,10 +45,12 @@ poetry run python -m trader close                               # Close position
 
 ## Onboarding New Assets
 
-1. Download 1m historical data: `python fetch_klines.py SYMBOL --days 365`
-2. Aggregate to multiple timeframes: `python aggregate_klines.py SYMBOL_1m_klines.csv`
-3. Run sweeps for all timeframes (1m, 5m, 15m, 30m, 1h): `./backtest_sweep/target/release/backtest_sweep SYMBOL_TF_klines.csv`
-4. Compare results and identify champion (best return across all timeframes)
+Use `make onboarding SYMBOL=dogeusdt` to run the full automated process, or manually:
+
+1. Download 1m historical data: `python scripts/fetch_klines.py SYMBOL -d 365 -o data/klines/SYMBOL_1m_klines.csv`
+2. **MANDATORY** — Aggregate to all timeframes: `python scripts/aggregate_klines.py data/klines/SYMBOL_1m_klines.csv`
+3. Run sweeps for all timeframes: `make sweep-rust SYMBOL=dogeusdt` (iterates 1m, 5m, 15m, 30m, 1h automatically)
+4. Compare results in `data/sweeps/SYMBOL_*_sweep.csv`, identify champion (best return)
 5. Add SymbolConfig to `trader/config.py` with champion parameters and `interval` field
 6. Update `Makefile` bots target with correct command (`bot` for MomShort, `pullback` for VWAPPullback)
 7. Update README with new asset in portfolio table

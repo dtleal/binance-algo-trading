@@ -10,11 +10,23 @@ const ENTRY_START: u16 = 60;   // 01:00 UTC
 const ENTRY_CUTOFF: u16 = 1320; // 22:00 UTC
 
 // ── Parameter grid ─────────────────────────────────────────
-const STRATEGY_VALUES: &[u8] = &[0, 1, 2, 3, 4]; // RejShort, RejLong, MomShort, MomLong, VWAPPullback
+const STRATEGY_VALUES: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7]; // RejShort, RejLong, MomShort, MomLong, VWAPPullback, EMAScalp, ORB, PDHL
 
 // VWAPPullback-specific parameters
 const EMA_PERIODS: &[usize] = &[100, 200, 300, 500];
 const MAX_TRADES_PER_DAY: &[usize] = &[1, 2, 4, 6];
+
+// EMAScalp parameters
+const NUM_FAST_EMAS: usize = 3;
+const NUM_SLOW_EMAS: usize = 3;
+const EMA_FAST_VALUES: &[usize] = &[5, 8, 13];
+const EMA_SLOW_VALUES: &[usize] = &[21, 34, 55];
+// ORB parameters
+const ORB_RANGE_MINS: &[u16] = &[15, 30, 60];
+const ORB_BUFFER_VALUES: &[f64] = &[0.001, 0.002, 0.005];
+// PDHL parameters
+const PDHL_PROX_VALUES: &[f64] = &[0.001, 0.002, 0.005];
+const PDHL_CONFIRM_VALUES: &[usize] = &[1, 2, 3];
 
 const TP_VALUES: &[f64] = &[
     0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.008,
@@ -49,6 +61,8 @@ struct Candle {
     minute_of_day: u16,
     vwaps: [f64; NUM_VWAP_WINDOWS],
     emas: [f64; NUM_EMA_PERIODS],  // EMA for VWAPPullback (never resets)
+    fast_emas: [f64; NUM_FAST_EMAS], // EMAScalp fast EMAs
+    slow_emas: [f64; NUM_SLOW_EMAS], // EMAScalp slow EMAs
     vol_sma20: f64,
 }
 
@@ -77,6 +91,10 @@ struct RunResult {
     vwap_window: u32,
     ema_period: usize,         // VWAPPullback only
     max_trades_per_day: usize, // VWAPPullback only
+    fast_period: usize,        // EMAScalp (0 for others)
+    slow_period: usize,        // EMAScalp (0 for others)
+    orb_range_mins: u16,       // ORB (0 for others)
+    pdhl_prox_pct: f64,        // PDHL (0.0 for others)
     max_hold: u16,
     pos_size_pct: f64,
     trades: usize,
@@ -105,6 +123,12 @@ struct EntrySet {
     ema_period: usize,         // VWAPPullback only
     ema_idx: usize,            // VWAPPullback only
     max_trades_per_day: usize, // VWAPPullback only
+    fast_ema_idx: usize,       // EMAScalp only
+    slow_ema_idx: usize,       // EMAScalp only
+    orb_range_mins: u16,       // ORB only
+    orb_buffer_pct: f64,       // ORB only
+    pdhl_prox_pct: f64,        // PDHL only
+    pdhl_confirm: usize,       // PDHL only
     entries: Vec<Entry>,
 }
 
@@ -115,6 +139,9 @@ fn strategy_name(s: u8) -> &'static str {
         2 => "MomShort",
         3 => "MomLong",
         4 => "VWAPPullback",
+        5 => "EMAScalp",
+        6 => "ORB",
+        7 => "PDHL",
         _ => "?"
     }
 }
@@ -142,6 +169,8 @@ fn load_csv(path: &str) -> Vec<Candle> {
             minute_of_day: ((total_secs % 86400) / 60) as u16,
             vwaps: [0.0; NUM_VWAP_WINDOWS],
             emas: [0.0; NUM_EMA_PERIODS],
+            fast_emas: [0.0; NUM_FAST_EMAS],
+            slow_emas: [0.0; NUM_SLOW_EMAS],
             vol_sma20: 0.0,
         });
     }
@@ -202,6 +231,28 @@ fn precompute(candles: &mut [Candle]) {
             let c = candles[i].close;
             ema = c * k + ema * (1.0 - k);
             candles[i].emas[ei] = if i + 1 >= period { ema } else { f64::NAN };
+        }
+    }
+
+    // Fast EMAs for EMAScalp
+    for (ei, &period) in EMA_FAST_VALUES.iter().enumerate() {
+        let k = 2.0 / (period as f64 + 1.0);
+        let mut ema = candles[0].close;
+        for i in 0..n {
+            let c = candles[i].close;
+            ema = c * k + ema * (1.0 - k);
+            candles[i].fast_emas[ei] = if i + 1 >= period { ema } else { f64::NAN };
+        }
+    }
+
+    // Slow EMAs for EMAScalp
+    for (ei, &period) in EMA_SLOW_VALUES.iter().enumerate() {
+        let k = 2.0 / (period as f64 + 1.0);
+        let mut ema = candles[0].close;
+        for i in 0..n {
+            let c = candles[i].close;
+            ema = c * k + ema * (1.0 - k);
+            candles[i].slow_emas[ei] = if i + 1 >= period { ema } else { f64::NAN };
         }
     }
 }
@@ -432,6 +483,248 @@ fn find_entries(
     entries
 }
 
+// EMAScalp: detect fast/slow EMA crossovers
+fn find_entries_ema_scalp(
+    candles: &[Candle], day_indices: &BTreeMap<u32, Vec<usize>>,
+    fast_idx: usize, slow_idx: usize, max_trades_per_day: usize,
+) -> Vec<Entry> {
+    const ENTRY_START_EMA: u16 = 0;
+    const ENTRY_CUTOFF_EMA: u16 = 1380;
+    let mut entries = Vec::new();
+    for indices in day_indices.values() {
+        if indices.len() < 2 { continue; }
+        let mut trades_today = 0usize;
+        let mut i = 1usize; // start at 1 so we always have prev candle
+        while i < indices.len() {
+            if max_trades_per_day > 0 && trades_today >= max_trades_per_day { break; }
+            let idx = indices[i];
+            let c = &candles[idx];
+            if c.minute_of_day < ENTRY_START_EMA { i += 1; continue; }
+            if c.minute_of_day >= ENTRY_CUTOFF_EMA { i += 1; continue; }
+
+            let fast = c.fast_emas[fast_idx];
+            let slow = c.slow_emas[slow_idx];
+            if fast.is_nan() || slow.is_nan() { i += 1; continue; }
+
+            let prev_idx = indices[i - 1];
+            let prev_fast = candles[prev_idx].fast_emas[fast_idx];
+            let prev_slow = candles[prev_idx].slow_emas[slow_idx];
+            if prev_fast.is_nan() || prev_slow.is_nan() { i += 1; continue; }
+
+            let cross_long  = prev_fast <= prev_slow && fast > slow;
+            let cross_short = prev_fast >= prev_slow && fast < slow;
+
+            if cross_long || cross_short {
+                let ep = c.close;
+                let em = c.minute_of_day;
+                let rest = &indices[i + 1..];
+                let mut eod_close = candles[*indices.last().unwrap()].close;
+                let rest_start = if rest.is_empty() { 0 } else { rest[0] };
+                let mut rest_end = rest_start;
+                for &ri in rest {
+                    let rc = &candles[ri];
+                    if rc.minute_of_day >= END_OF_DAY {
+                        eod_close = rc.close;
+                        rest_end = ri;
+                        break;
+                    }
+                    rest_end = ri + 1;
+                }
+                entries.push(Entry {
+                    entry_price: ep, entry_minute: em,
+                    rest_start, rest_end, eod_close, is_long: cross_long,
+                });
+                trades_today += 1;
+                i = if rest_end > idx { rest_end.saturating_sub(indices[0]) } else { i + 1 };
+                continue;
+            }
+            i += 1;
+        }
+    }
+    entries
+}
+
+// ORB: opening range breakout
+fn find_entries_orb(
+    candles: &[Candle], day_indices: &BTreeMap<u32, Vec<usize>>,
+    range_mins: u16, buffer_pct: f64,
+) -> Vec<Entry> {
+    let mut entries = Vec::new();
+    for indices in day_indices.values() {
+        if indices.is_empty() { continue; }
+        let mut range_high = f64::NEG_INFINITY;
+        let mut range_low  = f64::INFINITY;
+        let mut range_set  = false;
+        let mut long_taken  = false;
+        let mut short_taken = false;
+
+        for (local_i, &idx) in indices.iter().enumerate() {
+            let c = &candles[idx];
+            // Build opening range
+            if c.minute_of_day < range_mins {
+                if c.high > range_high { range_high = c.high; }
+                if c.low  < range_low  { range_low  = c.low;  }
+                continue;
+            }
+            if !range_set {
+                if range_high == f64::NEG_INFINITY { break; } // no range data
+                range_set = true;
+            }
+            if long_taken && short_taken { break; }
+
+            let signal_long  = !long_taken  && c.close > range_high * (1.0 + buffer_pct);
+            let signal_short = !short_taken && c.close < range_low  * (1.0 - buffer_pct);
+
+            if signal_long || signal_short {
+                let ep = c.close;
+                let em = c.minute_of_day;
+                let rest = &indices[local_i + 1..];
+                let mut eod_close = candles[*indices.last().unwrap()].close;
+                let rest_start = if rest.is_empty() { 0 } else { rest[0] };
+                let mut rest_end = rest_start;
+                for &ri in rest {
+                    let rc = &candles[ri];
+                    if rc.minute_of_day >= END_OF_DAY {
+                        eod_close = rc.close;
+                        rest_end = ri;
+                        break;
+                    }
+                    rest_end = ri + 1;
+                }
+                entries.push(Entry {
+                    entry_price: ep, entry_minute: em,
+                    rest_start, rest_end, eod_close, is_long: signal_long,
+                });
+                if signal_long  { long_taken  = true; }
+                if signal_short { short_taken = true; }
+            }
+        }
+    }
+    entries
+}
+
+// PDHL: previous day high/low rejection
+fn find_entries_pdhl(
+    candles: &[Candle], day_indices: &BTreeMap<u32, Vec<usize>>,
+    prox_pct: f64, confirm_bars: usize,
+) -> Vec<Entry> {
+    const ENTRY_START_PDHL:  u16 = 60;
+    const ENTRY_CUTOFF_PDHL: u16 = 1320;
+    let mut entries = Vec::new();
+    let mut pdh = f64::NAN;
+    let mut pdl = f64::NAN;
+    let mut day_high = f64::NEG_INFINITY;
+    let mut day_low  = f64::INFINITY;
+
+    for indices in day_indices.values() {
+        if indices.is_empty() { continue; }
+        // Day reset: save prev day H/L as PDH/PDL
+        if day_high != f64::NEG_INFINITY {
+            pdh = day_high;
+            pdl = day_low;
+        }
+        day_high = f64::NEG_INFINITY;
+        day_low  = f64::INFINITY;
+
+        if pdh.is_nan() {
+            // First day — no PDH/PDL yet, just track today's range
+            for &idx in indices.iter() {
+                let c = &candles[idx];
+                if c.high > day_high { day_high = c.high; }
+                if c.low  < day_low  { day_low  = c.low;  }
+            }
+            continue;
+        }
+
+        let mut testing_pdh = false;
+        let mut testing_pdl = false;
+        let mut pdh_conf = 0usize;
+        let mut pdl_conf = 0usize;
+        let mut trades_today = 0usize;
+
+        for (local_i, &idx) in indices.iter().enumerate() {
+            let c = &candles[idx];
+            if c.high > day_high { day_high = c.high; }
+            if c.low  < day_low  { day_low  = c.low;  }
+            if c.minute_of_day < ENTRY_START_PDHL || c.minute_of_day >= ENTRY_CUTOFF_PDHL { continue; }
+            if trades_today >= 4 { break; }
+
+            // PDH approach
+            if c.high >= pdh * (1.0 - prox_pct) { testing_pdh = true; }
+            if testing_pdh && c.close < pdh * (1.0 - prox_pct) {
+                pdh_conf += 1;
+                if pdh_conf >= confirm_bars {
+                    let ep = c.close;
+                    let em = c.minute_of_day;
+                    let rest = &indices[local_i + 1..];
+                    let mut eod_close = candles[*indices.last().unwrap()].close;
+                    let rest_start = if rest.is_empty() { 0 } else { rest[0] };
+                    let mut rest_end = rest_start;
+                    for &ri in rest {
+                        let rc = &candles[ri];
+                        if rc.minute_of_day >= END_OF_DAY {
+                            eod_close = rc.close;
+                            rest_end = ri;
+                            break;
+                        }
+                        rest_end = ri + 1;
+                    }
+                    entries.push(Entry {
+                        entry_price: ep, entry_minute: em,
+                        rest_start, rest_end, eod_close, is_long: false,
+                    });
+                    trades_today += 1;
+                    testing_pdh = false;
+                    pdh_conf = 0;
+                }
+            } else if testing_pdh && c.close >= pdh * (1.0 - prox_pct) {
+                // Still in zone, reset conf
+                pdh_conf = 0;
+            } else if testing_pdh && c.close > pdh * (1.0 + prox_pct) {
+                // Broke above PDH — invalidate
+                testing_pdh = false;
+                pdh_conf = 0;
+            }
+
+            // PDL approach
+            if c.low <= pdl * (1.0 + prox_pct) { testing_pdl = true; }
+            if testing_pdl && c.close > pdl * (1.0 + prox_pct) {
+                pdl_conf += 1;
+                if pdl_conf >= confirm_bars {
+                    let ep = c.close;
+                    let em = c.minute_of_day;
+                    let rest = &indices[local_i + 1..];
+                    let mut eod_close = candles[*indices.last().unwrap()].close;
+                    let rest_start = if rest.is_empty() { 0 } else { rest[0] };
+                    let mut rest_end = rest_start;
+                    for &ri in rest {
+                        let rc = &candles[ri];
+                        if rc.minute_of_day >= END_OF_DAY {
+                            eod_close = rc.close;
+                            rest_end = ri;
+                            break;
+                        }
+                        rest_end = ri + 1;
+                    }
+                    entries.push(Entry {
+                        entry_price: ep, entry_minute: em,
+                        rest_start, rest_end, eod_close, is_long: true,
+                    });
+                    trades_today += 1;
+                    testing_pdl = false;
+                    pdl_conf = 0;
+                }
+            } else if testing_pdl && c.close <= pdl * (1.0 + prox_pct) {
+                pdl_conf = 0;
+            } else if testing_pdl && c.close < pdl * (1.0 - prox_pct) {
+                testing_pdl = false;
+                pdl_conf = 0;
+            }
+        }
+    }
+    entries
+}
+
 fn evaluate(entries: &[Entry], candles: &[Candle], tp_pct: f64, sl_pct: f64, pos_size: f64, use_entry_direction: bool, default_short: bool, max_hold: u16)
     -> (usize, usize, usize, f64, f64, usize)
 {
@@ -509,7 +802,7 @@ fn main() {
     println!("Phase 1 — precomputing entry signals...");
     let mut entry_sets: Vec<EntrySet> = Vec::new();
     for &strat in STRATEGY_VALUES {
-        if is_pullback(strat) {
+        if strat == 4 {
             // VWAPPullback: different parameter grid
             for &mb in MIN_BARS_VALUES {
                 for &cb in CONFIRM_BARS_VALUES {
@@ -527,6 +820,9 @@ fn main() {
                                         vwap_prox: vp, vwap_window: vw, vwap_window_idx: vw_idx,
                                         ema_period: ema_p, ema_idx,
                                         max_trades_per_day: max_t,
+                                        fast_ema_idx: 0, slow_ema_idx: 0,
+                                        orb_range_mins: 0, orb_buffer_pct: 0.0,
+                                        pdhl_prox_pct: 0.0, pdhl_confirm: 0,
                                         entries,
                                     });
                                 }
@@ -535,8 +831,67 @@ fn main() {
                     }
                 }
             }
+        } else if strat == 5 {
+            // EMAScalp
+            for (fi, _) in EMA_FAST_VALUES.iter().enumerate() {
+                for (si, _) in EMA_SLOW_VALUES.iter().enumerate() {
+                    for &max_t in MAX_TRADES_PER_DAY {
+                        let entries = find_entries_ema_scalp(&candles, &days, fi, si, max_t);
+                        entry_sets.push(EntrySet {
+                            strategy: strat, min_bars: 0, vol_filter: false,
+                            confirm_bars: 0, trend_filter: false,
+                            entry_start: 0, entry_cutoff: 1380,
+                            vwap_prox: 0.0, vwap_window: 0, vwap_window_idx: 0,
+                            ema_period: 0, ema_idx: 0,
+                            max_trades_per_day: max_t,
+                            fast_ema_idx: fi, slow_ema_idx: si,
+                            orb_range_mins: 0, orb_buffer_pct: 0.0,
+                            pdhl_prox_pct: 0.0, pdhl_confirm: 0,
+                            entries,
+                        });
+                    }
+                }
+            }
+        } else if strat == 6 {
+            // ORB
+            for &rm in ORB_RANGE_MINS {
+                for &buf in ORB_BUFFER_VALUES {
+                    let entries = find_entries_orb(&candles, &days, rm, buf);
+                    entry_sets.push(EntrySet {
+                        strategy: strat, min_bars: 0, vol_filter: false,
+                        confirm_bars: 0, trend_filter: false,
+                        entry_start: 0, entry_cutoff: 1380,
+                        vwap_prox: 0.0, vwap_window: 0, vwap_window_idx: 0,
+                        ema_period: 0, ema_idx: 0,
+                        max_trades_per_day: 0,
+                        fast_ema_idx: 0, slow_ema_idx: 0,
+                        orb_range_mins: rm, orb_buffer_pct: buf,
+                        pdhl_prox_pct: 0.0, pdhl_confirm: 0,
+                        entries,
+                    });
+                }
+            }
+        } else if strat == 7 {
+            // PDHL
+            for &prox in PDHL_PROX_VALUES {
+                for &conf in PDHL_CONFIRM_VALUES {
+                    let entries = find_entries_pdhl(&candles, &days, prox, conf);
+                    entry_sets.push(EntrySet {
+                        strategy: strat, min_bars: 0, vol_filter: false,
+                        confirm_bars: conf, trend_filter: false,
+                        entry_start: 60, entry_cutoff: 1320,
+                        vwap_prox: 0.0, vwap_window: 0, vwap_window_idx: 0,
+                        ema_period: 0, ema_idx: 0,
+                        max_trades_per_day: 0,
+                        fast_ema_idx: 0, slow_ema_idx: 0,
+                        orb_range_mins: 0, orb_buffer_pct: 0.0,
+                        pdhl_prox_pct: prox, pdhl_confirm: conf,
+                        entries,
+                    });
+                }
+            }
         } else {
-            // Old strategies
+            // Old strategies (0-3)
             let prox_vals: &[f64] = if is_momentum(strat) { VWAP_PROX_VALUES } else { &[0.0] };
             for &mb in MIN_BARS_VALUES {
                 for &vf in VOL_FILTER_VALUES {
@@ -555,6 +910,9 @@ fn main() {
                                             vwap_prox: vp, vwap_window: vw, vwap_window_idx: vw_idx,
                                             ema_period: 0, ema_idx: 0,
                                             max_trades_per_day: 1,
+                                            fast_ema_idx: 0, slow_ema_idx: 0,
+                                            orb_range_mins: 0, orb_buffer_pct: 0.0,
+                                            pdhl_prox_pct: 0.0, pdhl_confirm: 0,
                                             entries,
                                         });
                                     }
@@ -585,9 +943,12 @@ fn main() {
         let es = &entry_sets[idx];
         let n = es.entries.len();
         let sname = strategy_name(es.strategy);
-        let is_pb = is_pullback(es.strategy);
+        let is_pb = es.strategy >= 4; // bidirectional: use entry's is_long
         let short = is_short(es.strategy);
         let wl = window_label(es.entry_start, es.entry_cutoff);
+
+        let fast_p = EMA_FAST_VALUES.get(es.fast_ema_idx).copied().unwrap_or(0);
+        let slow_p = EMA_SLOW_VALUES.get(es.slow_ema_idx).copied().unwrap_or(0);
 
         if n == 0 {
             return RunResult {
@@ -598,6 +959,9 @@ fn main() {
                 entry_window: wl, vwap_prox: es.vwap_prox * 100.0,
                 vwap_window: es.vwap_window,
                 ema_period: es.ema_period, max_trades_per_day: es.max_trades_per_day,
+                fast_period: fast_p, slow_period: slow_p,
+                orb_range_mins: es.orb_range_mins,
+                pdhl_prox_pct: es.pdhl_prox_pct * 100.0,
                 max_hold: mh, pos_size_pct: ps*100.0,
                 trades: 0, wins: 0, losses: 0, eods: 0,
                 win_rate: 0.0, return_pct: 0.0,
@@ -614,6 +978,9 @@ fn main() {
             entry_window: wl, vwap_prox: es.vwap_prox * 100.0,
             vwap_window: es.vwap_window,
             ema_period: es.ema_period, max_trades_per_day: es.max_trades_per_day,
+            fast_period: fast_p, slow_period: slow_p,
+            orb_range_mins: es.orb_range_mins,
+            pdhl_prox_pct: es.pdhl_prox_pct * 100.0,
             max_hold: mh, pos_size_pct: ps*100.0,
             trades: n, wins: w, losses: l, eods: e,
             win_rate: (w as f64 / n as f64 * 1000.0).round() / 10.0,
@@ -631,7 +998,8 @@ fn main() {
         let mut w = csv::Writer::from_path("backtest_sweep.csv").unwrap();
         w.write_record(["strategy","tp_pct","sl_pct","rr_ratio","min_bars","vol_filter",
             "confirm_bars","trend_filter","entry_window","vwap_prox","vwap_window",
-            "ema_period","max_trades_per_day","max_hold","pos_size_pct","trades","wins","losses","eods",
+            "ema_period","max_trades_per_day","fast_period","slow_period","orb_range_mins","pdhl_prox_pct",
+            "max_hold","pos_size_pct","trades","wins","losses","eods",
             "win_rate","return_pct","final_capital","max_dd_pct","max_consec_loss"]).unwrap();
         let mut csv_rows = 0usize;
         for r in &results {
@@ -644,6 +1012,10 @@ fn main() {
                 format!("{}d", r.vwap_window),
                 if r.ema_period > 0 { r.ema_period.to_string() } else { "-".to_string() },
                 if r.max_trades_per_day > 0 { r.max_trades_per_day.to_string() } else { "-".to_string() },
+                if r.fast_period > 0 { r.fast_period.to_string() } else { "-".to_string() },
+                if r.slow_period > 0 { r.slow_period.to_string() } else { "-".to_string() },
+                if r.orb_range_mins > 0 { r.orb_range_mins.to_string() } else { "-".to_string() },
+                if r.pdhl_prox_pct > 0.0 { f2(r.pdhl_prox_pct) } else { "-".to_string() },
                 if r.max_hold == 0 { "EOD".to_string() } else { r.max_hold.to_string() },
                 format!("{:.0}", r.pos_size_pct),
                 r.trades.to_string(), r.wins.to_string(), r.losses.to_string(), r.eods.to_string(),

@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -248,89 +248,132 @@ clean: ## Remove log files
 	rm -rf logs/*.log
 
 # Backtest commands
-fetch-data: ## Download historical kline data (edit fetch_klines.py first)
-	poetry run python fetch_klines.py
+fetch-data: ## Download historical kline data (SYMBOL=axsusdt DAYS=365)
+	poetry run python scripts/fetch_klines.py $(shell echo $(SYMBOL) | tr '[:lower:]' '[:upper:]') -d $(DAYS) -o data/klines/$(SYMBOL)_1m_klines.csv
 
 fetch-btc: ## Download 1 year of BTCUSDT 1m klines
 	@echo "📥 Downloading BTCUSDT data (1 year)..."
-	@sed -i '' 's/SYMBOL = ".*"/SYMBOL = "BTCUSDT"/' fetch_klines.py
-	@sed -i '' 's/CSV_FILE = ".*"/CSV_FILE = "btcusdt_1m_klines.csv"/' fetch_klines.py
-	@poetry run python fetch_klines.py
-	@echo "✅ BTCUSDT data saved to btcusdt_1m_klines.csv"
+	@poetry run python scripts/fetch_klines.py BTCUSDT -d 365 -o data/klines/btcusdt_1m_klines.csv
+	@echo "✅ BTCUSDT data saved to data/klines/btcusdt_1m_klines.csv"
 
 fetch-eth: ## Download 1 year of ETHUSDT 1m klines
 	@echo "📥 Downloading ETHUSDT data (1 year)..."
-	@sed -i '' 's/SYMBOL = ".*"/SYMBOL = "ETHUSDT"/' fetch_klines.py
-	@sed -i '' 's/CSV_FILE = ".*"/CSV_FILE = "ethusdt_1m_klines.csv"/' fetch_klines.py
-	@poetry run python fetch_klines.py
-	@echo "✅ ETHUSDT data saved to ethusdt_1m_klines.csv"
+	@poetry run python scripts/fetch_klines.py ETHUSDT -d 365 -o data/klines/ethusdt_1m_klines.csv
+	@echo "✅ ETHUSDT data saved to data/klines/ethusdt_1m_klines.csv"
 
 fetch-eth-5m: ## Download 1 year of ETHUSDT 5-minute klines (official, for ETH VWAPPullback strategy)
 	@echo "📥 Downloading ETHUSDT 5-minute candles (1 year)..."
-	@poetry run python fetch_eth_5m_official.py
-	@echo "✅ ETHUSDT 5m data saved to ethusdt_5m_klines_official.csv"
+	@poetry run python scripts/fetch_eth_5m_official.py
+	@echo "✅ ETHUSDT 5m data saved to data/klines/ethusdt_5m_klines_official.csv"
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 📚 ONBOARDING - Automated new asset validation
 # ══════════════════════════════════════════════════════════════════════════════
 
-onboarding: ## Run complete onboarding for new asset (ATIVO=DOGEUSDT)
-ifndef ATIVO
-	@echo "$(RED)❌ Error: ATIVO not specified$(NC)"
+onboarding: ## Full onboarding: download → aggregate → sweep all timeframes (SYMBOL=dogeusdt)
+ifndef SYMBOL
+	@echo "$(RED)❌ Error: SYMBOL not specified$(NC)"
 	@echo ""
 	@echo "$(YELLOW)Usage:$(NC)"
-	@echo "  make onboarding ATIVO=DOGEUSDT"
-	@echo "  make onboarding ATIVO=1000SHIBUSDT"
-	@echo "  make onboarding ATIVO=ETHUSDT STRATEGY=pullback"
+	@echo "  make onboarding SYMBOL=dogeusdt"
+	@echo "  make onboarding SYMBOL=btcusdt DAYS=365"
 	@echo ""
-	@echo "$(YELLOW)Options:$(NC)"
-	@echo "  ATIVO     - Trading pair symbol (required)"
-	@echo "  STRATEGY  - Strategy type: momshort | pullback (default: momshort)"
-	@echo "  DAYS      - Days of historical data (default: 365)"
+	@echo "$(YELLOW)Steps executed:$(NC)"
+	@echo "  1. Download 1m historical data"
+	@echo "  2. Aggregate to 5m, 15m, 30m, 1h  (MANDATORY)"
+	@echo "  3. Run parameter sweep on all available timeframes"
 	@echo ""
 	@exit 1
 endif
-	@echo "$(GREEN)╔════════════════════════════════════════════════════════════╗$(NC)"
-	@echo "$(GREEN)║           Starting Onboarding: $(ATIVO)                    ║$(NC)"
-	@echo "$(GREEN)╚════════════════════════════════════════════════════════════╝$(NC)"
-	@echo ""
-	@poetry run python onboarding.py $(ATIVO) $(if $(STRATEGY),--strategy $(STRATEGY),) $(if $(DAYS),--days $(DAYS),)
+	@SYMBOL_UPPER=$$(echo "$(SYMBOL)" | tr '[:lower:]' '[:upper:]'); \
+	FETCH_DAYS=$$([ "$(DAYS)" = "7" ] && echo "365" || echo "$(DAYS)"); \
+	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
+	echo "$(GREEN)  Onboarding: $$SYMBOL_UPPER  ($$FETCH_DAYS days)$(NC)"; \
+	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
+	echo ""; \
+	echo "$(YELLOW)── Step 1: Download 1m historical data ──$(NC)"; \
+	mkdir -p data/klines data/sweeps; \
+	poetry run python scripts/fetch_klines.py $$SYMBOL_UPPER -d $$FETCH_DAYS -o data/klines/$(SYMBOL)_1m_klines.csv; \
+	if [ ! -f "data/klines/$(SYMBOL)_1m_klines.csv" ]; then \
+		echo "$(RED)❌ Download failed: data/klines/$(SYMBOL)_1m_klines.csv not found$(NC)"; exit 1; \
+	fi; \
+	echo ""; \
+	echo "$(YELLOW)── Step 2: Aggregate to 5m / 15m / 30m / 1h ──$(NC)"; \
+	poetry run python scripts/aggregate_klines.py data/klines/$(SYMBOL)_1m_klines.csv; \
+	echo ""; \
+	echo "$(YELLOW)── Step 3: Parameter sweep — all timeframes ──$(NC)"; \
+	BINARY=./backtest_sweep/target/release/backtest_sweep; \
+	if [ ! -f "$$BINARY" ]; then \
+		echo "$(RED)❌ Sweep binary not found. Run: make build-sweep$(NC)"; exit 1; \
+	fi; \
+	for TF in 1m 5m 15m 30m 1h; do \
+		CSV="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
+		if [ ! -f "$$CSV" ]; then echo "  ⏭  $$CSV not found, skipping"; continue; fi; \
+		echo ""; \
+		echo "$(YELLOW)━━━━ Sweep: $$TF  →  $$CSV ━━━━$(NC)"; \
+		$$BINARY $$CSV; \
+		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep.csv" 2>/dev/null || true; \
+		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
+	done; \
+	echo ""; \
+	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
+	echo "$(GREEN)  ✅ Onboarding complete — $(SYMBOL)$(NC)"; \
+	echo "$(GREEN)  Review sweep CSVs: data/sweeps/$(SYMBOL)_*_sweep.csv$(NC)"; \
+	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"
 
-onboarding-download: ## Download historical data only (ATIVO=DOGEUSDT DAYS=365)
-ifndef ATIVO
-	@echo "$(RED)❌ Error: ATIVO not specified. Usage: make onboarding-download ATIVO=DOGEUSDT$(NC)"
+onboarding-download: ## Download 1m data only (SYMBOL=dogeusdt DAYS=365)
+ifndef SYMBOL
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make onboarding-download SYMBOL=dogeusdt$(NC)"
 	@exit 1
 endif
-	@echo "$(YELLOW)📥 Downloading $(or $(DAYS),365) days of $(ATIVO) data...$(NC)"
-	@poetry run python fetch_klines.py $(ATIVO) $(if $(DAYS),-d $(DAYS),)
+	@SYMBOL_UPPER=$$(echo "$(SYMBOL)" | tr '[:lower:]' '[:upper:]'); \
+	mkdir -p data/klines; \
+	echo "$(YELLOW)📥 Downloading $(or $(DAYS),365) days of $$SYMBOL_UPPER data...$(NC)"; \
+	poetry run python scripts/fetch_klines.py $$SYMBOL_UPPER $(if $(DAYS),-d $(DAYS),) -o data/klines/$(SYMBOL)_1m_klines.csv
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 🧪 BACKTESTING
 # ══════════════════════════════════════════════════════════════════════════════
 
-backtest-sweep: ## Run MomShort parameter sweep (edit backtest_sweep.py first)
-	poetry run python backtest_sweep.py
+backtest-sweep: ## Run MomShort parameter sweep (edit scripts/backtest_sweep.py first)
+	poetry run python scripts/backtest_sweep.py
 
-backtest-detail: ## Run detailed MomShort backtest (edit backtest_detail.py first)
-	poetry run python backtest_detail.py
+backtest-detail: ## Run detailed MomShort backtest (edit scripts/backtest_detail.py first)
+	poetry run python scripts/backtest_detail.py
 
-backtest-detail-pullback: ## Run detailed VWAPPullback backtest (edit backtest_detail_pullback.py first)
-	poetry run python backtest_detail_pullback.py
+backtest-detail-pullback: ## Run detailed VWAPPullback backtest (edit scripts/backtest_detail_pullback.py first)
+	poetry run python scripts/backtest_detail_pullback.py
 
 backtest-eth-5m: ## Run ETH 5min VWAPPullback backtest with optimized params (+31.38% return)
 	@echo "📊 Running ETH 5min VWAPPullback backtest..."
-	@poetry run python backtest_eth_5m_FINAL.py
+	@poetry run python scripts/backtest_eth_5m_FINAL.py
 
 # Rust sweep (240x faster!)
 build-sweep: ## Build Rust sweep (release mode)
 	cd backtest_sweep && cargo build --release
 
-sweep-rust: ## Run Rust sweep for all strategies (SYMBOL=axsusdt)
-	@if [ ! -f "$(SYMBOL)_1m_klines.csv" ]; then \
-		echo "Error: $(SYMBOL)_1m_klines.csv not found. Run 'make fetch-data SYMBOL=$(SYMBOL)' first"; \
-		exit 1; \
-	fi
-	./backtest_sweep/target/release/backtest_sweep $(SYMBOL)_1m_klines.csv
+sweep-rust: ## Run standard sweep across all available timeframes (SYMBOL=axsusdt)
+ifndef SYMBOL
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make sweep-rust SYMBOL=dogeusdt$(NC)"
+	@exit 1
+endif
+	@mkdir -p data/sweeps; \
+	BINARY=./backtest_sweep/target/release/backtest_sweep; \
+	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep$(NC)"; exit 1; fi; \
+	FOUND=0; \
+	for TF in 1m 5m 15m 30m 1h; do \
+		CSV="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
+		if [ ! -f "$$CSV" ]; then echo "  ⏭  $$CSV not found, skipping"; continue; fi; \
+		FOUND=1; \
+		echo ""; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		echo "$(YELLOW)  Timeframe: $$TF  →  $$CSV$(NC)"; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		$$BINARY $$CSV; \
+		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep.csv" 2>/dev/null || true; \
+		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
+	done; \
+	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
 
 sweep-rust-axs: ## Run Rust sweep for AXSUSDT (all 5 strategies)
 	@$(MAKE) sweep-rust SYMBOL=axsusdt
@@ -352,10 +395,10 @@ sweep-rust-eth: ## Run Rust sweep for ETHUSDT (all 5 strategies)
 
 # Analyze sweep results
 analyze-sweep: ## Show top 5 VWAPPullback configs from Rust sweep
-	poetry run python analyze_sweep.py --top 5
+	poetry run python scripts/analyze_sweep.py --top 5
 
 analyze-best: ## Auto-run detailed backtest on BEST VWAPPullback config
-	poetry run python analyze_sweep.py --run-best
+	poetry run python scripts/analyze_sweep.py --run-best
 
 # VWAPPullback bot with OPTIMIZED parameters from sweep
 # Best config for AXS/SAND/GALA/MANA (1min candles): TP=10% SL=5% EMA=200 bars=5 cfm=1 vwap_prox=0.5% vwap_window=10d max_trades=1
@@ -413,7 +456,7 @@ pullback-eth-dry: ## Run VWAPPullback bot for ETHUSDT in DRY-RUN mode (5min opti
 # ══════════════════════════════════════════════════════════════════════════════
 
 build-sweep-v2: ## Build Rust V2 sweep binary (trailing stop, no TP)
-	cd backtest_sweep && cargo build --release --bin backtest_sweep_v2
+	cd backtest_sweep_v2 && cargo build --release
 
 sweep-v2: ## Run V2 sweep across all available timeframes for SYMBOL (e.g. make sweep-v2 SYMBOL=ethusdt)
 ifndef SYMBOL
@@ -424,12 +467,13 @@ endif
 	@echo "$(GREEN)═══════════════════════════════════════════════════$(NC)"
 	@echo "$(GREEN)  V2 Sweep — $(SYMBOL) — all timeframes$(NC)"
 	@echo "$(GREEN)═══════════════════════════════════════════════════$(NC)"
-	@BINARY=./backtest_sweep/target/release/backtest_sweep_v2; \
+	@mkdir -p data/sweeps; \
+	BINARY=./backtest_sweep_v2/target/release/backtest_sweep_v2; \
 	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep-v2$(NC)"; exit 1; fi; \
 	FOUND=0; \
 	for TF in 1m 5m 15m 30m 1h; do \
-		CSV_FILE="$(SYMBOL)_$${TF}_klines.csv"; \
-		ALT_FILE="$(SYMBOL)_$${TF}_klines_official.csv"; \
+		CSV_FILE="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
+		ALT_FILE="data/klines/$(SYMBOL)_$${TF}_klines_official.csv"; \
 		if [ -f "$$ALT_FILE" ]; then CSV_FILE="$$ALT_FILE"; fi; \
 		if [ ! -f "$$CSV_FILE" ]; then echo "  ⏭  $$CSV_FILE not found, skipping"; continue; fi; \
 		FOUND=1; \
@@ -439,11 +483,11 @@ endif
 		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
 		$$BINARY $$CSV_FILE; \
 		if [ -f "backtest_sweep_v2.csv" ]; then \
-			mv backtest_sweep_v2.csv "$(SYMBOL)_$${TF}_sweep_v2.csv"; \
-			echo "  📄 Results saved → $(SYMBOL)_$${TF}_sweep_v2.csv"; \
+			mv backtest_sweep_v2.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep_v2.csv"; \
+			echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep_v2.csv"; \
 		fi; \
 	done; \
-	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL)$(NC)"; exit 1; fi
+	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
 
 # V2 bots — VWAPPullback with R-multiple trailing stop (same SL params as V1, no TP)
 bot-gala-v2: ## Run VWAPPullback V2 bot for GALAUSDT
@@ -487,6 +531,26 @@ bot-xau-v2: ## Run VWAPPullback V2 bot for XAUUSDT (Gold)
 
 bot-xau-v2-dry: ## Run XAUUSDT V2 bot in dry-run mode
 	poetry run python -m trader pullback-v2 --symbol xauusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20
+
+# ── Aggressive strategies (EMAScalp / ORB / PDHL) ──────────────────────────
+
+bot-btc-ema: ## Run EMAScalp bot for BTCUSDT (fast=8 slow=21 sl=0.3% leverage=20)
+	poetry run python -m trader ema-scalp --symbol btcusdt --leverage 20 --sl 0.3 --fast-period 8 --slow-period 21 --pos-size 0.20
+
+bot-btc-ema-dry: ## Run EMAScalp bot for BTCUSDT in dry-run mode
+	poetry run python -m trader ema-scalp --symbol btcusdt --leverage 20 --sl 0.3 --fast-period 8 --slow-period 21 --pos-size 0.20 --dry-run
+
+bot-btc-orb: ## Run ORB bot for BTCUSDT (range=30min sl=0.5% leverage=20)
+	poetry run python -m trader orb --symbol btcusdt --leverage 20 --sl 0.5 --range-mins 30 --pos-size 0.20
+
+bot-btc-orb-dry: ## Run ORB bot for BTCUSDT in dry-run mode
+	poetry run python -m trader orb --symbol btcusdt --leverage 20 --sl 0.5 --range-mins 30 --pos-size 0.20 --dry-run
+
+bot-btc-pdhl: ## Run PDHL bot for BTCUSDT (prox=0.2% sl=0.3% leverage=20)
+	poetry run python -m trader pdhl --symbol btcusdt --leverage 20 --sl 0.3 --prox-pct 0.002 --pos-size 0.20
+
+bot-btc-pdhl-dry: ## Run PDHL bot for BTCUSDT in dry-run mode
+	poetry run python -m trader pdhl --symbol btcusdt --leverage 20 --sl 0.3 --prox-pct 0.002 --pos-size 0.20 --dry-run
 
 bots-v2: redis ## Start all VWAPPullback V2 bots (trailing stop)
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"

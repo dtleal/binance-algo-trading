@@ -4,60 +4,105 @@ How to evaluate a new token for automated trading.
 
 ---
 
-## Step 1: Download Historical Data
-
-Edit `fetch_klines.py` — change the symbol and output filename:
-
-```python
-SYMBOL = "NEWUSDC"           # or "NEWUSDT" — pick the most liquid pair
-CSV_FILE = "newusdc_1m_klines.csv"
-```
-
-Run it:
+## Quick Start (Automated)
 
 ```bash
-python fetch_klines.py
+make onboarding SYMBOL=dogeusdt          # full process: download → aggregate → sweep all TFs
+make onboarding SYMBOL=btcusdt DAYS=365  # explicit day count
+```
+
+This runs all 3 steps below automatically. Use the manual steps only to re-run a specific part.
+
+---
+
+## Step 1: Download Historical Data
+
+```bash
+python scripts/fetch_klines.py DOGEUSDT -d 365 -o data/klines/dogeusdt_1m_klines.csv
+```
+
+Or via Makefile:
+```bash
+make onboarding-download SYMBOL=dogeusdt DAYS=365
 ```
 
 This downloads up to 1 year of 1-minute candles from Binance's public REST API.
 Rate-limited at ~4 requests/sec, takes a few minutes for a full year (~525K candles).
 
 **Check the output:**
-- If the pair is newer than 1 year, you'll get less data (e.g. AXSUSDC started July 2025, only ~7 months)
+- If the pair is newer than 1 year, you'll get less data
 - Minimum recommended: **3 months** of data for any meaningful backtest
 - The script prints progress and final candle count
 
+Output file: `data/klines/dogeusdt_1m_klines.csv`
+
 ---
 
-## Step 2: Run the Parameter Sweep
+## Step 2: Aggregate to All Timeframes (MANDATORY)
 
-Edit `backtest_sweep/src/main.rs` — update the CSV path:
-
-```rust
-const CSV_FILE: &str = "../newusdc_1m_klines.csv";
-```
-
-Build and run:
+After downloading 1m data, **always** aggregate to all timeframes before running any sweep:
 
 ```bash
-cd backtest_sweep
-cargo build --release
-cargo run --release
+python scripts/aggregate_klines.py data/klines/dogeusdt_1m_klines.csv
 ```
 
-This sweeps ~4.8M parameter combinations across 4 strategies (RejShort, RejLong,
-MomShort, MomLong) with 12 parameters. Takes ~60-90 seconds on a modern machine.
+This generates **4 additional files** in `data/klines/`:
+- `data/klines/dogeusdt_5m_klines.csv`
+- `data/klines/dogeusdt_15m_klines.csv`
+- `data/klines/dogeusdt_30m_klines.csv`
+- `data/klines/dogeusdt_1h_klines.csv`
+
+**This step is mandatory.** The sweep must be run on all 5 timeframes (1m, 5m, 15m, 30m, 1h)
+to find the champion. Skipping aggregation means missing the timeframe where the strategy
+performs best.
+
+---
+
+## Step 3: Run the Parameter Sweep on All Timeframes
+
+Use the Makefile target (recommended — handles all TFs automatically):
+
+```bash
+make sweep-rust SYMBOL=dogeusdt
+```
+
+Or run manually per timeframe:
+
+```bash
+BINARY=./backtest_sweep/target/release/backtest_sweep
+
+$BINARY data/klines/dogeusdt_1m_klines.csv
+mv backtest_sweep.csv data/sweeps/dogeusdt_1m_sweep.csv
+
+$BINARY data/klines/dogeusdt_5m_klines.csv
+mv backtest_sweep.csv data/sweeps/dogeusdt_5m_sweep.csv
+
+$BINARY data/klines/dogeusdt_15m_klines.csv
+mv backtest_sweep.csv data/sweeps/dogeusdt_15m_sweep.csv
+
+$BINARY data/klines/dogeusdt_30m_klines.csv
+mv backtest_sweep.csv data/sweeps/dogeusdt_30m_sweep.csv
+
+$BINARY data/klines/dogeusdt_1h_klines.csv
+mv backtest_sweep.csv data/sweeps/dogeusdt_1h_sweep.csv
+```
+
+Results are saved to `data/sweeps/SYMBOL_TF_sweep.csv`.
+
+This sweeps all 8 strategies (RejShort, RejLong, MomShort, MomLong, VWAPPullback,
+EMAScalp, ORB, PDHL) across thousands of parameter combinations. Takes ~2-3 min per
+timeframe on 1m data, much faster on higher timeframes.
 
 **What to look for in the output:**
 
-1. **TOP 30 BY RETURN** — the raw best performers. Note which strategy and VWAP window
-   dominate. If multiple strategies appear, the token has diverse trading opportunities.
+1. **TOP 30 BY RETURN** — the raw best performers. Note which strategy and timeframe
+   dominate. If the same strategy appears across multiple timeframes, the edge is robust.
 
 2. **TOP 30 RISK-ADJUSTED** — return/maxDD ratio. High ratio with decent trade count
    (15+) is more trustworthy than raw return.
 
-3. **PER-STRATEGY SUMMARY** — which strategy type works best on average. If all 4 are
-   negative, the token may not be suitable for VWAP-based strategies.
+3. **PER-STRATEGY SUMMARY** — which strategy type works best on average. If all strategies
+   have negative avg return on a given timeframe, skip it.
 
 4. **PARAMETER IMPACT** — pay attention to:
    - `vwap_window`: which lookback period works best
@@ -65,32 +110,31 @@ MomShort, MomLong) with 12 parameters. Takes ~60-90 seconds on a modern machine.
    - `trend_filter`: if ON is much better, the token is trending not mean-reverting
 
 **Red flags (skip this token):**
-- All strategies have negative avg return
+- All strategies have negative avg return across all timeframes
 - Best return < 5% with low trade count (< 50)
 - Max drawdown > 15% on the best strategy
 - Win rate < 35% with R:R < 1.5
 
 ---
 
-## Step 3: Run Detailed Backtest on the Champion
+## Step 4: Run Detailed Backtest on the Champion
 
-Once you identify the best strategy from the sweep, update `backtest_detail.py` with
-the winning parameters:
+Once you identify the best strategy + timeframe from the sweep, update `scripts/backtest_detail.py`
+with the winning parameters:
 
 ```python
-CSV_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "newusdc_1m_klines.csv")
-TP_PCT = 0.10          # from sweep results
-SL_PCT = 0.05          # from sweep results
-MIN_BARS = 3           # from sweep results
+CSV_FILE     = "data/klines/dogeusdt_5m_klines.csv"   # use the champion's timeframe
+TP_PCT       = 0.10    # from sweep results
+SL_PCT       = 0.05    # from sweep results
+MIN_BARS     = 3       # from sweep results
 CONFIRM_BARS = 2       # from sweep results
-VWAP_PROX = 0.005      # from sweep results (0 for Rejection strategies)
-ENTRY_START = 60       # from sweep results (60=01:00, 360=06:00)
+VWAP_PROX    = 0.005   # from sweep results (0 for Rejection strategies)
+ENTRY_START  = 60      # from sweep results (60=01:00, 360=06:00)
 ENTRY_CUTOFF = 1320    # from sweep results (1320=22:00, 1080=18:00)
-POS_SIZE = 0.20        # from sweep results
+POS_SIZE     = 0.20    # from sweep results
 ```
 
-If the champion is a **Long** strategy, you also need to flip the P&L calculation
-in `run_backtest()`:
+If the champion is a **Long** strategy, flip the P&L calculation in `run_backtest()`:
 ```python
 # Short (default):
 pnl_pct = (entry_price - exit_price) / entry_price
@@ -99,21 +143,12 @@ pnl_pct = (entry_price - exit_price) / entry_price
 pnl_pct = (exit_price - entry_price) / entry_price
 ```
 
-And flip TP/SL prices:
-```python
-# Short (default):
-tp_price = entry_price * (1 - TP_PCT)
-sl_price = entry_price * (1 + SL_PCT)
-
-# Long (flip to):
-tp_price = entry_price * (1 + TP_PCT)
-sl_price = entry_price * (1 - SL_PCT)
-```
-
 Run it:
 
 ```bash
-python backtest_detail.py
+python scripts/backtest_detail.py
+# or:
+make backtest-detail
 ```
 
 **What to verify:**
@@ -124,14 +159,14 @@ python backtest_detail.py
 - Equity curve is steadily rising, not a few lucky spikes
 
 The script outputs:
-- `champion_trades.csv` — full trade log
+- `data/sweeps/champion_trades.csv` — full trade log
 - `champion_analysis.html` — interactive equity curve, P&L bars, drawdown chart
 
 ---
 
-## Step 4: Document the Strategy
+## Step 5: Document the Strategy
 
-Create `docs/STRATEGY_TOKEN.md` (e.g. `docs/STRATEGY_AXSUSDT.md`).
+Create `docs/STRATEGY_TOKEN.md` (e.g. `docs/STRATEGY_DOGEUSDT.md`).
 
 Use this template:
 
@@ -139,7 +174,7 @@ Use this template:
 # [StrategyName] Strategy — [TOKEN] Implementation Guide
 
 **Champion of [N] parameter sweep combinations**
-**Backtested on [PAIR] 1-minute candles: [START] to [END] ([N] months)**
+**Backtested on [PAIR] [TF] candles: [START] to [END] ([N] months)**
 
 ---
 
@@ -152,6 +187,7 @@ Use this template:
 | Parameter      | Value     | Description                                      |
 |----------------|-----------|--------------------------------------------------|
 | **Strategy**   | ...       | ...                                              |
+| **Timeframe**  | ...       | Champion timeframe (1m / 5m / 15m / 30m / 1h)   |
 | **TP**         | ...       | ...                                              |
 | **SL**         | ...       | ...                                              |
 | **min_bars**   | ...       | ...                                              |
@@ -197,7 +233,7 @@ specific strategy type (Short vs Long, Rejection vs Momentum)]
 
 ---
 
-## Step 5: Configure for Live Trading
+## Step 6: Configure for Live Trading
 
 If the strategy passes validation, add the token config to `trader/config.py`:
 
@@ -228,18 +264,25 @@ info = client.rest_api.exchange_information()
 
 ---
 
-## Quick Checklist — MomShort
+## Quick Checklist — Standard Onboarding
 
 ```
-[ ] 1. Download data         python fetch_klines.py
-[ ] 2. Run sweep             cd backtest_sweep && cargo run --release
-[ ] 3. Identify champion     Check TOP 30 BY RETURN + RISK-ADJUSTED tables
-[ ] 4. Detailed backtest     python backtest_detail.py (with champion params)
-[ ] 5. Validate results      All months profitable? DD < 10%? Consistent?
-[ ] 6. Document              docs/STRATEGY_TOKEN.md
-[ ] 7. Exchange precision    Check tick_size, step_size, min_qty
-[ ] 8. Config                Add to trader/config.py
-[ ] 9. Paper trade           Run for 1-2 weeks with tiny size first
+[ ] 0. Build sweep binary    make build-sweep   (only once, or after Rust code changes)
+[ ] 1. Download data         make onboarding-download SYMBOL=dogeusdt
+                             → data/klines/dogeusdt_1m_klines.csv
+[ ] 2. Aggregate timeframes  python scripts/aggregate_klines.py data/klines/dogeusdt_1m_klines.csv
+                             → data/klines/dogeusdt_{5m,15m,30m,1h}_klines.csv
+                             (or just: make onboarding SYMBOL=dogeusdt — does steps 1+2+3)
+[ ] 3. Run sweep (all TFs)   make sweep-rust SYMBOL=dogeusdt
+                             → data/sweeps/dogeusdt_{1m,5m,15m,30m,1h}_sweep.csv
+[ ] 4. Identify champion     Compare TOP 30 BY RETURN + RISK-ADJUSTED across all timeframes
+[ ] 5. Detailed backtest     Edit scripts/backtest_detail.py with champion params + TF
+                             make backtest-detail
+[ ] 6. Validate results      All months profitable? DD < 10%? Consistent?
+[ ] 7. Document              docs/STRATEGY_TOKEN.md
+[ ] 8. Exchange precision    Check tick_size, step_size, min_qty
+[ ] 9. Config                Add to trader/config.py with interval field
+[ ] 10. Paper trade          Run with --dry-run for 1-2 weeks first
 ```
 
 ---
@@ -253,21 +296,27 @@ USDT-M futures symbol without pre-configuration.
 ### Quick Checklist — VWAPPullback
 
 ```
-[ ] 1. Download data         python fetch_klines.py  (same as above)
-[ ] 2. Detailed backtest     python backtest_detail_pullback.py
-[ ] 3. Validate results      All months profitable? DD < 10%? Long/short balanced?
-[ ] 4. Tune parameters       Edit constants at top of backtest_detail_pullback.py
-[ ] 5. Document              docs/STRATEGY_TOKEN.md
-[ ] 6. Exchange precision    Fetched automatically at startup (or check manually)
-[ ] 7. Paper trade           Run with --dry-run for 1-2 weeks first
+[ ] 0. Build sweep binary    make build-sweep   (only once)
+[ ] 1. Download data         make onboarding-download SYMBOL=dogeusdt
+                             → data/klines/dogeusdt_1m_klines.csv
+[ ] 2. Aggregate timeframes  python scripts/aggregate_klines.py data/klines/dogeusdt_1m_klines.csv
+[ ] 3. Run sweep (all TFs)   make sweep-rust SYMBOL=dogeusdt
+                             → data/sweeps/dogeusdt_{1m,5m,15m,30m,1h}_sweep.csv
+[ ] 4. Detailed backtest     Edit scripts/backtest_detail_pullback.py with champion TF + params
+                             make backtest-detail-pullback
+[ ] 5. Validate results      All months profitable? DD < 10%? Long/short balanced?
+[ ] 6. Tune parameters       Edit constants at top of scripts/backtest_detail_pullback.py
+[ ] 7. Document              docs/STRATEGY_TOKEN.md
+[ ] 8. Exchange precision    Fetched automatically at startup (or check manually)
+[ ] 9. Paper trade           Run with --dry-run for 1-2 weeks first
 ```
 
-### Step 2: Run the VWAPPullback Backtest
+### Step 4: Run the VWAPPullback Detailed Backtest
 
-Edit `backtest_detail_pullback.py` — update the CSV path and parameters:
+Edit `scripts/backtest_detail_pullback.py` — update the CSV path and parameters:
 
 ```python
-CSV_FILE     = "newtoken_1m_klines.csv"
+CSV_FILE     = "data/klines/newtoken_5m_klines.csv"  # use the champion timeframe from sweep
 EMA_PERIOD   = 200      # trend filter period (try 100, 200, 500)
 TP_PCT       = 0.05     # 5% take-profit
 SL_PCT       = 0.025    # 2.5% stop-loss
@@ -280,7 +329,9 @@ POS_SIZE     = 0.20     # 20% of capital per trade
 Run it:
 
 ```bash
-python backtest_detail_pullback.py
+python scripts/backtest_detail_pullback.py
+# or:
+make backtest-detail-pullback
 ```
 
 **What to look for:**
@@ -301,7 +352,7 @@ python backtest_detail_pullback.py
 - Only one direction (long or short) has positive average P&L
 - Best month > 3× worst month (unstable edge)
 
-### Step 7: Run in Paper Trade Mode
+### Paper Trade Mode
 
 ```bash
 # Watch live signals without placing orders
@@ -315,18 +366,30 @@ poetry run python -m trader pullback --symbol NEWUSDT \
 
 ---
 
+## V2 Sweep (Trailing Stop — Advanced)
+
+The V2 sweep (`make sweep-v2 SYMBOL=...`) uses a trailing R-multiple stop instead of fixed TP.
+**This is not part of standard onboarding.** Only run it when explicitly requested.
+
+```bash
+make build-sweep-v2          # build once (separate Cargo project: backtest_sweep_v2/)
+make sweep-v2 SYMBOL=btcusdt # results → data/sweeps/btcusdt_{1m,5m,...}_sweep_v2.csv
+```
+
+---
+
 ## File Reference
 
-| File | Purpose |
-|------|---------|
-| `fetch_klines.py` | Download 1m candle data from Binance |
-| `backtest_sweep/src/main.rs` | Rust parameter sweep engine (~4.8M combos) — MomShort/Long |
-| `backtest_detail.py` | Detailed backtest for MomShort strategy |
-| `backtest_detail_pullback.py` | Detailed backtest for VWAPPullback (bidirectional + EMA) |
-| `backtest_sweep.csv` | Full sweep results |
-| `champion_trades.csv` | Trade log from MomShort detailed backtest |
-| `champion_analysis.html` | Interactive chart from MomShort detailed backtest |
-| `pullback_trades.csv` | Trade log from VWAPPullback detailed backtest |
-| `pullback_analysis.html` | Interactive chart from VWAPPullback detailed backtest |
+| File/Path | Purpose |
+|-----------|---------|
+| `scripts/fetch_klines.py` | Download 1m candle data from Binance |
+| `scripts/aggregate_klines.py` | Aggregate 1m data to 5m, 15m, 30m, 1h — **run after every download** |
+| `backtest_sweep/target/release/backtest_sweep` | Rust sweep binary (8 strategies: RejS, RejL, MomS, MomL, VWAPPullback, EMAScalp, ORB, PDHL) |
+| `backtest_sweep_v2/target/release/backtest_sweep_v2` | V2 Rust sweep binary (trailing stop, explicit request only) |
+| `scripts/backtest_detail.py` | Detailed backtest for MomShort/Rejection strategies |
+| `scripts/backtest_detail_pullback.py` | Detailed backtest for VWAPPullback (bidirectional + EMA) |
+| `scripts/analyze_sweep.py` | Analyze sweep CSV results, show top configs |
+| `data/klines/` | Historical kline CSVs (`SYMBOL_TF_klines.csv`) |
+| `data/sweeps/` | Sweep result CSVs (`SYMBOL_TF_sweep.csv`) and TXT files |
 | `docs/STRATEGY_*.md` | Per-token strategy documentation |
-| `trader/config.py` | Live trading configuration (MomShort symbols) |
+| `trader/config.py` | Live trading configuration (symbols + interval) |

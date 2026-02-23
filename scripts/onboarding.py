@@ -75,7 +75,7 @@ This script will:
     args = parser.parse_args()
 
     symbol = args.symbol.upper()
-    csv_file = f"{symbol.lower()}_1m_klines.csv"
+    csv_file = f"data/klines/{symbol.lower()}_1m_klines.csv"
 
     print(f"""
 ╔════════════════════════════════════════════════════════════════════════════╗
@@ -89,7 +89,7 @@ This script will:
         print(f"\n✓ Skipping download - {csv_file} already exists")
     else:
         success = run_command(
-            ["python", "fetch_klines.py", symbol, "-d", str(args.days), "-o", csv_file],
+            ["python", "scripts/fetch_klines.py", symbol, "-d", str(args.days), "-o", csv_file],
             f"Downloading {args.days} days of {symbol} data",
             timeout=600
         )
@@ -107,7 +107,7 @@ This script will:
     print("📊 Aggregating 1m candles to multiple timeframes (5m, 15m, 30m, 1h)")
     print(f"{'='*80}")
     success = run_command(
-        ["python", "aggregate_klines.py", csv_file],
+        ["python", "scripts/aggregate_klines.py", csv_file],
         "Aggregating to 5m/15m/30m/1h timeframes",
         timeout=120
     )
@@ -130,13 +130,13 @@ This script will:
         sweep_response = input("\n❓ Run multi-timeframe sweep now? (y/n): ")
         if sweep_response.lower() == 'y':
             # Ensure sweep_results directory exists
-            Path("sweep_results").mkdir(exist_ok=True)
+            Path("data/sweeps").mkdir(parents=True, exist_ok=True)
 
             timeframes = ["1m", "5m", "15m", "30m", "1h"]
             symbol_lower = symbol.lower()
 
             for tf in timeframes:
-                csv_tf = f"{symbol_lower}_{tf}_klines.csv"
+                csv_tf = f"data/klines/{symbol_lower}_{tf}_klines.csv"
                 if not Path(csv_tf).exists():
                     print(f"\n⚠️  Skipping {tf} - file not found")
                     continue
@@ -147,18 +147,19 @@ This script will:
                     timeout=180
                 )
                 if success:
-                    # Move output to sweep_results
                     import shutil
-                    # The sweep outputs to stdout which we're not capturing here
-                    # We'll need to run it differently to capture output
-                    print(f"   Redirecting output to sweep_results/{symbol_lower}_{tf}_sweep.txt")
+                    out_csv = Path("backtest_sweep.csv")
+                    if out_csv.exists():
+                        dest = Path(f"data/sweeps/{symbol_lower}_{tf}_sweep.csv")
+                        shutil.move(str(out_csv), str(dest))
+                        print(f"   Results saved → {dest}")
 
             # Analyze results across all timeframes
             print(f"\n{'='*80}")
             print("📈 Analyzing sweep results across all timeframes")
             print(f"{'='*80}")
             success = run_command(
-                ["python", "analyze_sweep_results.py", symbol, "-n", "3"],
+                ["python", "scripts/analyze_sweep_results.py", symbol, "-n", "3"],
                 "Finding global champion strategy",
                 timeout=60
             )
