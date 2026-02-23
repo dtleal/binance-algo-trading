@@ -139,6 +139,7 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 stop: ## ⛔ Stop all processes (bots + dashboard + redis)
 	@echo "$(YELLOW)⛔ Stopping all processes...$(NC)"
 	@pkill -f "python -m trader" 2>/dev/null || true
+	@pkill -9 -f "trader serve" 2>/dev/null || true
 	@pkill -f "redis-server" 2>/dev/null || true
 	@echo "$(GREEN)✅ All processes stopped$(NC)"
 
