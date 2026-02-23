@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  AreaChart, Area,
+  AreaChart, Area, BarChart, Bar, Cell,
 } from "recharts";
 import { useAccountSummary, useTrades, usePerformance, usePositions, useBotStates } from "../hooks/useApi";
 import { useFilter } from "../contexts/FilterContext";
@@ -26,6 +26,19 @@ function fmtUSD(n: number) {
 
 function fmtDate(ms: number) {
   return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function buildDailyPnl(trades: { time: number; realized_pnl: number }[]) {
+  const byDay: Record<string, number> = {};
+  for (const t of trades) {
+    if (t.realized_pnl === 0) continue;
+    const d = new Date(t.time).toISOString().slice(0, 10);
+    byDay[d] = (byDay[d] ?? 0) + t.realized_pnl;
+  }
+  return Object.entries(byDay).sort().map(([date, pnl]) => ({
+    date: date.slice(5),
+    pnl: parseFloat(pnl.toFixed(2)),
+  }));
 }
 
 function buildPnlCurve(trades: { time: number; realized_pnl: number }[]) {
@@ -63,7 +76,8 @@ export default function Overview() {
   const equityChange24h = summary?.equity_change_24h_pct ?? 0;
   const openPositions = summary?.open_positions ?? 0;
 
-  const pnlCurve = useMemo(() => buildPnlCurve(filteredTrades), [filteredTrades]);
+  const pnlCurve  = useMemo(() => buildPnlCurve(filteredTrades), [filteredTrades]);
+  const dailyPnl  = useMemo(() => buildDailyPnl(filteredTrades), [filteredTrades]);
   const activeBots = Object.values(bots).length;
 
   return (
@@ -171,6 +185,47 @@ export default function Overview() {
             />
           </AreaChart>
         </ResponsiveContainer>
+
+        {/* Daily P&L bars */}
+        <div className="mt-6 pt-5 border-t border-gray-700">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Daily P&L</p>
+          <ResponsiveContainer width="100%" height={120}>
+            <BarChart data={dailyPnl} barCategoryGap="30%">
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
+              <XAxis
+                dataKey="date"
+                tick={{ fill: "#6b7280", fontSize: 11 }}
+                axisLine={{ stroke: "#374151" }}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                tick={{ fill: "#6b7280", fontSize: 11 }}
+                tickFormatter={(v) => `$${v}`}
+                width={65}
+                axisLine={{ stroke: "#374151" }}
+              />
+              <Tooltip
+                content={({ active, payload }) => {
+                  if (!active || !payload?.length) return null;
+                  const d = payload[0].payload;
+                  return (
+                    <div className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 shadow-xl text-xs">
+                      <p className="text-gray-400 mb-1">{d.date}</p>
+                      <span className={`font-bold ${d.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                        {d.pnl >= 0 ? "+" : ""}{fmtUSD(d.pnl)}
+                      </span>
+                    </div>
+                  );
+                }}
+              />
+              <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+                {dailyPnl.map((entry, i) => (
+                  <Cell key={i} fill={entry.pnl >= 0 ? "#10b981" : "#ef4444"} fillOpacity={0.85} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
 
       {/* Performance Report */}
