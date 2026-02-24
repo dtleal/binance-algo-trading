@@ -289,11 +289,13 @@ class MomShortBot:
         prefix = "[DRY-RUN] " if self.dry_run else ""
 
         logger.info(f"{BOLD}{prefix}MomShort Bot — {self.symbol}{RESET}")
+        vwap_dist_label = f" | VWAP dist stop: {self.cfg.vwap_dist_stop*100:.0f}%" if self.cfg.vwap_dist_stop > 0 else ""
         logger.info(
             f"Leverage: {self.leverage}x | "
             f"Interval: {self.cfg.interval} | "
             f"TP: {self.cfg.tp_pct}% | SL: {self.cfg.sl_pct}% | "
             f"Position size: {self.cfg.pos_size_pct * 100:.0f}%"
+            f"{vwap_dist_label}"
         )
         logger.info("-" * 60)
 
@@ -458,6 +460,23 @@ class MomShortBot:
                 asyncio.get_event_loop().create_task(self._enter_short(c))
 
         elif self._state == _State.IN_POSITION:
+            # VWAP distance stop: SHORT exits if price > vwap*(1+dist)
+            if self.cfg.vwap_dist_stop > 0.0 and vwap > 0.0:
+                dist = (c - vwap) / vwap
+                if dist > self.cfg.vwap_dist_stop:
+                    logger.info(
+                        f"{YELLOW}VWAP dist stop: {dist*100:+.2f}% from VWAP "
+                        f"(threshold +{self.cfg.vwap_dist_stop*100:.0f}%) — closing short{RESET}"
+                    )
+                    if self.dry_run:
+                        self._state = _State.COOLDOWN
+                        _registry.update(self._reg_key, {"state": self._state.name})
+                    else:
+                        asyncio.get_event_loop().create_task(
+                            self._eod_close(reason="VWAP dist stop")
+                        )
+                    return
+
             pnl_per_unit = self._entry_price - c
             total_pnl = pnl_per_unit * self._position_qty
             pnl_pct = (pnl_per_unit / self._entry_price) * 100 if self._entry_price else 0
@@ -709,10 +728,13 @@ class MomShortBot:
     # EOD close
     # ------------------------------------------------------------------
 
-    async def _eod_close(self):
-        """Force-close position at end of day (23:50 UTC)."""
+    async def _eod_close(self, reason: str | None = None):
+        """Force-close position at end of day (23:50 UTC), or on VWAP dist stop."""
         prefix = "[DRY-RUN] " if self.dry_run else ""
-        logger.info(f"{BOLD}{prefix}EOD close triggered (23:50 UTC){RESET}")
+        if reason:
+            logger.info(f"{BOLD}{prefix}{reason} — closing position{RESET}")
+        else:
+            logger.info(f"{BOLD}{prefix}EOD close triggered (23:50 UTC){RESET}")
 
         if self._state != _State.IN_POSITION:
             logger.info(f"{prefix}No position to close at EOD (already closed externally)")

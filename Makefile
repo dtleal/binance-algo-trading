@@ -80,22 +80,22 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 	@echo "$(YELLOW)All bots auto-configure from trader/config.py (interval, TP/SL, params)$(NC)"
 	@echo ""
 	@export REDIS_URL=redis://localhost:6379 && \
-		(nohup poetry run python -m trader bot --symbol axsusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader bot --symbol sandusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader bot --symbol manausdt --leverage 20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader bot --symbol solusdt --leverage 20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 20 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol avaxusdt --leverage 20 --tp 7.0 --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 20 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 20 --tp 7.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 20 --tp 10.0 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 5 --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 20 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader bot --symbol axsusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot --symbol sandusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot --symbol manausdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot --symbol solusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol avaxusdt --leverage 30 --tp 7.0 --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 30 --tp 7.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 30 --tp 10.0 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 10 --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 30 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &)
 	@sleep 3
 	@echo "$(GREEN)✅ Bots started! (PEPE skipped - invalid symbol)$(NC)"
 	@echo ""
 	@echo "$(BLUE)Active Strategies (11 bots):$(NC)"
-	@echo "  📊 MomShort (20x leverage):"
+	@echo "  📊 MomShort (30x leverage):"
 	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
 	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%)"
 	@echo ""
@@ -127,8 +127,8 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
 	@echo "$(BLUE)🤖 Active Bots:$(NC) 11 total (PEPE excluded)"
-	@echo "   • 4 MomShort bots (3x 1m + 1x 5m, 20x leverage)"
-	@echo "   • 7 VWAPPullback bots (4x 5m + 3x 1m, 5x-20x leverage)"
+	@echo "   • 4 MomShort bots (3x 1m + 1x 5m, 30x leverage)"
+	@echo "   • 7 VWAPPullback bots (4x 5m + 3x 1m, 10x-30x leverage)"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
 	@echo "   • $(YELLOW)make status-all$(NC)  - Check all processes"
@@ -406,12 +406,12 @@ analyze-best: ## Auto-run detailed backtest on BEST VWAPPullback config
 
 # VWAPPullback bot with OPTIMIZED parameters from sweep
 # Best config for AXS/SAND/GALA/MANA (1min candles): TP=10% SL=5% EMA=200 bars=5 cfm=1 vwap_prox=0.5% vwap_window=10d max_trades=1
-PULLBACK_BEST_PARAMS = --tp 10.0 --sl 5.0 --min-bars 5 --confirm-bars 1 --vwap-prox 0.005 --vwap-window-days 10 --ema-period 200 --pos-size 0.20 --max-trades 1
+PULLBACK_BEST_PARAMS = --tp 10.0 --sl 5.0 --min-bars 5 --confirm-bars 1 --vwap-prox 0.005 --vwap-window-days 10 --ema-period 200 --pos-size 0.40 --max-trades 1
 
 # ETH 5min optimized params: +31.38% return, 281 trades, 49.8% win rate, 6.47% max DD
 # ⚠️  IMPORTANT: ETH strategy uses 5-minute candles (not 1min)!
 # Position size: 30% (min $20 notional - requires $67+ capital)
-PULLBACK_ETH_5M_PARAMS = --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --vwap-window-days 1 --ema-period 100 --pos-size 0.30 --max-trades 2
+PULLBACK_ETH_5M_PARAMS = --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --vwap-window-days 1 --ema-period 100 --pos-size 0.40 --max-trades 2
 
 pullback-best: ## Run VWAPPullback bot for AXSUSDT with BEST parameters (LEVERAGE=5)
 	poetry run python -m trader pullback --symbol axsusdt --leverage $(LEVERAGE) $(PULLBACK_BEST_PARAMS)
@@ -496,66 +496,66 @@ endif
 
 # V2 bots — VWAPPullback with R-multiple trailing stop (same SL params as V1, no TP)
 bot-gala-v2: ## Run VWAPPullback V2 bot for GALAUSDT
-	poetry run python -m trader pullback-v2 --symbol galausdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol galausdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40
 
 bot-gala-v2-dry: ## Run GALAUSDT V2 bot in dry-run mode
-	poetry run python -m trader pullback-v2 --symbol galausdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol galausdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40
 
 bot-avax-v2: ## Run VWAPPullback V2 bot for AVAXUSDT
-	poetry run python -m trader pullback-v2 --symbol avaxusdt --leverage $(LEVERAGE) --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol avaxusdt --leverage $(LEVERAGE) --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40
 
 bot-avax-v2-dry: ## Run AVAXUSDT V2 bot in dry-run mode
-	poetry run python -m trader pullback-v2 --symbol avaxusdt --dry-run --leverage $(LEVERAGE) --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol avaxusdt --dry-run --leverage $(LEVERAGE) --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40
 
 bot-doge-v2: ## Run VWAPPullback V2 bot for DOGEUSDT
-	poetry run python -m trader pullback-v2 --symbol dogeusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol dogeusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40
 
 bot-doge-v2-dry: ## Run DOGEUSDT V2 bot in dry-run mode
-	poetry run python -m trader pullback-v2 --symbol dogeusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol dogeusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40
 
 bot-shib-v2: ## Run VWAPPullback V2 bot for 1000SHIBUSDT
-	poetry run python -m trader pullback-v2 --symbol 1000shibusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol 1000shibusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40
 
 bot-shib-v2-dry: ## Run 1000SHIBUSDT V2 bot in dry-run mode
-	poetry run python -m trader pullback-v2 --symbol 1000shibusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol 1000shibusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40
 
 bot-xrp-v2: ## Run VWAPPullback V2 bot for XRPUSDT
-	poetry run python -m trader pullback-v2 --symbol xrpusdt --leverage $(LEVERAGE) --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol xrpusdt --leverage $(LEVERAGE) --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40
 
 bot-xrp-v2-dry: ## Run XRPUSDT V2 bot in dry-run mode
-	poetry run python -m trader pullback-v2 --symbol xrpusdt --dry-run --leverage $(LEVERAGE) --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol xrpusdt --dry-run --leverage $(LEVERAGE) --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40
 
 bot-eth-v2: ## Run VWAPPullback V2 bot for ETHUSDT (5min candles)
-	poetry run python -m trader pullback-v2 --symbol ethusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 --max-trades 2
+	poetry run python -m trader pullback-v2 --symbol ethusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 --max-trades 2
 
 bot-eth-v2-dry: ## Run ETHUSDT V2 bot in dry-run mode (5min candles)
-	poetry run python -m trader pullback-v2 --symbol ethusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 --max-trades 2
+	poetry run python -m trader pullback-v2 --symbol ethusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 --max-trades 2
 
 bot-xau-v2: ## Run VWAPPullback V2 bot for XAUUSDT (Gold)
-	poetry run python -m trader pullback-v2 --symbol xauusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol xauusdt --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40
 
 bot-xau-v2-dry: ## Run XAUUSDT V2 bot in dry-run mode
-	poetry run python -m trader pullback-v2 --symbol xauusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20
+	poetry run python -m trader pullback-v2 --symbol xauusdt --dry-run --leverage $(LEVERAGE) --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40
 
 # ── Aggressive strategies (EMAScalp / ORB / PDHL) ──────────────────────────
 
 bot-btc-ema: ## Run EMAScalp bot for BTCUSDT (fast=8 slow=21 sl=0.3% leverage=20)
-	poetry run python -m trader ema-scalp --symbol btcusdt --leverage 20 --sl 0.3 --fast-period 8 --slow-period 21 --pos-size 0.20
+	poetry run python -m trader ema-scalp --symbol btcusdt --leverage 30 --sl 0.3 --fast-period 8 --slow-period 21 --pos-size 0.40
 
 bot-btc-ema-dry: ## Run EMAScalp bot for BTCUSDT in dry-run mode
-	poetry run python -m trader ema-scalp --symbol btcusdt --leverage 20 --sl 0.3 --fast-period 8 --slow-period 21 --pos-size 0.20 --dry-run
+	poetry run python -m trader ema-scalp --symbol btcusdt --leverage 30 --sl 0.3 --fast-period 8 --slow-period 21 --pos-size 0.40 --dry-run
 
 bot-btc-orb: ## Run ORB bot for BTCUSDT (range=30min sl=0.5% leverage=20)
-	poetry run python -m trader orb --symbol btcusdt --leverage 20 --sl 0.5 --range-mins 30 --pos-size 0.20
+	poetry run python -m trader orb --symbol btcusdt --leverage 30 --sl 0.5 --range-mins 30 --pos-size 0.40
 
 bot-btc-orb-dry: ## Run ORB bot for BTCUSDT in dry-run mode
-	poetry run python -m trader orb --symbol btcusdt --leverage 20 --sl 0.5 --range-mins 30 --pos-size 0.20 --dry-run
+	poetry run python -m trader orb --symbol btcusdt --leverage 30 --sl 0.5 --range-mins 30 --pos-size 0.40 --dry-run
 
 bot-btc-pdhl: ## Run PDHL bot for BTCUSDT (prox=0.2% sl=0.3% leverage=20)
-	poetry run python -m trader pdhl --symbol btcusdt --leverage 20 --sl 0.3 --prox-pct 0.002 --pos-size 0.20
+	poetry run python -m trader pdhl --symbol btcusdt --leverage 30 --sl 0.3 --prox-pct 0.002 --pos-size 0.40
 
 bot-btc-pdhl-dry: ## Run PDHL bot for BTCUSDT in dry-run mode
-	poetry run python -m trader pdhl --symbol btcusdt --leverage 20 --sl 0.3 --prox-pct 0.002 --pos-size 0.20 --dry-run
+	poetry run python -m trader pdhl --symbol btcusdt --leverage 30 --sl 0.3 --prox-pct 0.002 --pos-size 0.40 --dry-run
 
 bots-v2: redis ## Start all VWAPPullback V2 bots (trailing stop)
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
@@ -563,13 +563,13 @@ bots-v2: redis ## Start all VWAPPullback V2 bots (trailing stop)
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
 	@echo ""
 	@export REDIS_URL=redis://localhost:6379 && \
-		(nohup poetry run python -m trader pullback-v2 --symbol galausdt --leverage 20 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback-v2 --symbol avaxusdt --leverage 20 --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback-v2 --symbol dogeusdt --leverage 20 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback-v2 --symbol 1000shibusdt --leverage 20 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback-v2 --symbol xrpusdt --leverage 20 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback-v2 --symbol ethusdt --leverage 5 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.30 --max-trades 2 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback-v2 --symbol xauusdt --leverage 20 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.20 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader pullback-v2 --symbol galausdt --leverage 30 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol avaxusdt --leverage 30 --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol dogeusdt --leverage 30 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol 1000shibusdt --leverage 30 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol xrpusdt --leverage 30 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol ethusdt --leverage 10 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 --max-trades 2 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback-v2 --symbol xauusdt --leverage 30 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &)
 	@sleep 3
 	@echo "$(GREEN)✅ V2 bots started!$(NC)"
 	@echo ""

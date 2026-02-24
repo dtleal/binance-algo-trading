@@ -297,10 +297,13 @@ def main():
 
     elif args.command == "pullback":
         from trader.bot_vwap_pullback import VWAPPullbackBot
-        # Auto-detect interval from SYMBOL_CONFIGS if available
+        # Auto-detect interval and vwap_dist_stop from SYMBOL_CONFIGS if available
         interval = "1m"
+        vwap_dist_stop = 0.0
         if args.symbol.upper() in SYMBOL_CONFIGS:
-            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
+            cfg = SYMBOL_CONFIGS[args.symbol.upper()]
+            interval = cfg.interval
+            vwap_dist_stop = cfg.vwap_dist_stop
         bot = VWAPPullbackBot(
             symbol=args.symbol,
             leverage=args.leverage,
@@ -316,6 +319,7 @@ def main():
             ema_period=args.ema_period,
             max_trades_per_day=args.max_trades,
             interval=interval,
+            vwap_dist_stop=vwap_dist_stop,
         )
         _run_async(bot.run())
 
@@ -454,6 +458,7 @@ async def _serve(args):
                 pos_size_pct=cfg.pos_size_pct,
                 vol_filter=cfg.vol_filter,
                 interval=cfg.interval,
+                vwap_dist_stop=cfg.vwap_dist_stop,
             )
         else:
             bot = VWAPPullbackBot(symbol=sym, leverage=args.leverage, dry_run=args.dry_run)

@@ -92,6 +92,7 @@ class VWAPPullbackBot:
         max_trades_per_day: int = 4,
         vol_filter: bool = False,
         interval: str = "1m",
+        vwap_dist_stop: float = 0.0,
     ):
         self.symbol = symbol.upper()
         self.leverage = leverage
@@ -101,6 +102,7 @@ class VWAPPullbackBot:
         self.sl_pct = sl_pct
         self.eod_min = eod_min
         self.pos_size_pct = pos_size_pct
+        self.vwap_dist_stop = vwap_dist_stop
         self.min_notional = 5.0  # Binance default minimum
         self.interval = interval
 
@@ -482,6 +484,7 @@ class VWAPPullbackBot:
         prefix = "[DRY-RUN] " if self.dry_run else ""
 
         logger.info(f"{BOLD}{prefix}VWAPPullback Bot — {self.symbol}{RESET}")
+        vwap_dist_label = f" | VWAP dist stop: {self.vwap_dist_stop*100:.0f}%" if self.vwap_dist_stop > 0 else ""
         logger.info(
             f"Leverage: {self.leverage}x | "
             f"Interval: {self.interval} | "
@@ -489,6 +492,7 @@ class VWAPPullbackBot:
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
             f"EMA period: {self._ema.period} | "
             f"Max trades/day: {self._signal.max_trades_per_day}"
+            f"{vwap_dist_label}"
         )
         logger.info("-" * 60)
 
@@ -667,6 +671,27 @@ class VWAPPullbackBot:
                 asyncio.get_event_loop().create_task(self._enter_position("short", c))
 
         elif self._state == _State.IN_POSITION:
+            # VWAP distance stop: exit if price diverged too far from VWAP in wrong direction
+            if self.vwap_dist_stop > 0.0 and vwap > 0.0:
+                dist = (c - vwap) / vwap
+                too_far = (
+                    (self._direction == "short" and dist > self.vwap_dist_stop) or
+                    (self._direction == "long" and dist < -self.vwap_dist_stop)
+                )
+                if too_far:
+                    logger.info(
+                        f"{YELLOW}VWAP dist stop: {dist*100:+.2f}% from VWAP "
+                        f"(threshold ±{self.vwap_dist_stop*100:.0f}%) — closing position{RESET}"
+                    )
+                    if self.dry_run:
+                        self._state = _State.COOLDOWN
+                        self._direction = None
+                    else:
+                        asyncio.get_event_loop().create_task(
+                            self._eod_close(reason="VWAP dist stop")
+                        )
+                    return
+
             if self._direction == "long":
                 pnl = (c - self._entry_price) * self._position_qty
                 pnl_pct = ((c - self._entry_price) / self._entry_price) * 100
@@ -933,9 +958,12 @@ class VWAPPullbackBot:
     # EOD close
     # ------------------------------------------------------------------
 
-    async def _eod_close(self):
+    async def _eod_close(self, reason: str | None = None):
         prefix = "[DRY-RUN] " if self.dry_run else ""
-        logger.info(f"{BOLD}{prefix}EOD close triggered ({self.eod_min // 60:02d}:{self.eod_min % 60:02d} UTC){RESET}")
+        if reason:
+            logger.info(f"{BOLD}{prefix}{reason} — closing position{RESET}")
+        else:
+            logger.info(f"{BOLD}{prefix}EOD close triggered ({self.eod_min // 60:02d}:{self.eod_min % 60:02d} UTC){RESET}")
 
         if self._state != _State.IN_POSITION:
             logger.info(f"{prefix}No position to close at EOD")

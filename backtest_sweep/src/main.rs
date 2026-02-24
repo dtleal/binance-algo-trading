@@ -45,9 +45,9 @@ const ENTRY_WINDOWS: &[(u16, u16)] = &[(60, 1320), (360, 1080)]; // (start, cuto
 const VWAP_PROX_VALUES: &[f64] = &[0.002, 0.005]; // only for momentum strategies
 const MAX_HOLD_VALUES: &[u16] = &[0, 30, 120, 360]; // 0 = EOD
 
-// Adverse bars stop: exit after N consecutive candles where close stays on wrong side of entry
-// 0 = disabled (wait for SL/TP/EOD only)
-const MAX_ADVERSE_VALUES: &[u16] = &[0, 15, 30, 60];
+// VWAP distance stop: exit if price moves more than X% from VWAP in wrong direction
+// 0.0 = disabled; for SHORT: exit if close > vwap*(1+dist); for LONG: exit if close < vwap*(1-dist)
+const VWAP_DIST_VALUES: &[f64] = &[0.0, 0.01, 0.02, 0.03, 0.05, 0.07, 0.10];
 
 // VWAP rolling window in days
 const NUM_VWAP_WINDOWS: usize = 5;
@@ -100,6 +100,7 @@ struct RunResult {
     orb_range_mins: u16,       // ORB (0 for others)
     pdhl_prox_pct: f64,        // PDHL (0.0 for others)
     max_hold: u16,
+    vwap_dist_stop: f64,
     pos_size_pct: f64,
     trades: usize,
     wins: usize,
@@ -110,7 +111,6 @@ struct RunResult {
     final_capital: f64,
     max_dd_pct: f64,
     max_consec_loss: usize,
-    max_adverse_bars: u16,
 }
 
 #[derive(Clone)]
@@ -730,7 +730,7 @@ fn find_entries_pdhl(
     entries
 }
 
-fn evaluate(entries: &[Entry], candles: &[Candle], tp_pct: f64, sl_pct: f64, pos_size: f64, use_entry_direction: bool, default_short: bool, max_hold: u16, max_adverse: u16)
+fn evaluate(entries: &[Entry], candles: &[Candle], tp_pct: f64, sl_pct: f64, pos_size: f64, use_entry_direction: bool, default_short: bool, max_hold: u16, vwap_dist_stop: f64, vwap_idx: usize)
     -> (usize, usize, usize, f64, f64, usize)
 {
     let mut capital = INITIAL_CAPITAL;
@@ -750,7 +750,6 @@ fn evaluate(entries: &[Entry], candles: &[Candle], tp_pct: f64, sl_pct: f64, pos
 
         let mut exit_price = e.eod_close;
         let mut is_eod = true;
-        let mut adverse_bars: u16 = 0;
 
         for j in e.rest_start..e.rest_end {
             let c = &candles[j];
@@ -762,18 +761,17 @@ fn evaluate(entries: &[Entry], candles: &[Candle], tp_pct: f64, sl_pct: f64, pos
                 break;
             }
 
-            // Adverse bars stop: N consecutive candles with close on wrong side of entry
-            if max_adverse > 0 {
-                let is_adverse = (short && c.close > e.entry_price) || (!short && c.close < e.entry_price);
-                if is_adverse {
-                    adverse_bars += 1;
-                    if adverse_bars >= max_adverse {
+            // VWAP distance stop: exit if price diverges too far from VWAP in wrong direction
+            if vwap_dist_stop > 0.0 {
+                let vwap = c.vwaps[vwap_idx];
+                if vwap > 0.0 {
+                    let dist = (c.close - vwap) / vwap;
+                    let too_far = if short { dist > vwap_dist_stop } else { dist < -vwap_dist_stop };
+                    if too_far {
                         exit_price = c.close;
                         is_eod = false;
                         break;
                     }
-                } else {
-                    adverse_bars = 0;
                 }
             }
 
@@ -949,18 +947,18 @@ fn main() {
     println!("  {} entry sets ({} non-empty)", entry_sets.len(), nonempty);
 
     // Phase 2: parallel sweep
-    let combos_per_set = TP_VALUES.len() * SL_VALUES.len() * POS_SIZE_VALUES.len() * MAX_HOLD_VALUES.len() * MAX_ADVERSE_VALUES.len();
+    let combos_per_set = TP_VALUES.len() * SL_VALUES.len() * POS_SIZE_VALUES.len() * MAX_HOLD_VALUES.len() * VWAP_DIST_VALUES.len();
     let total = entry_sets.len() * combos_per_set;
     println!("\nPhase 2 — evaluating {} combinations (parallel)...", total);
 
-    let mut combos: Vec<(usize, f64, f64, f64, u16, u16)> = Vec::with_capacity(total);
+    let mut combos: Vec<(usize, f64, f64, f64, u16, f64)> = Vec::with_capacity(total);
     for (idx, _) in entry_sets.iter().enumerate() {
-        for &tp in TP_VALUES { for &sl in SL_VALUES { for &ps in POS_SIZE_VALUES { for &mh in MAX_HOLD_VALUES { for &ma in MAX_ADVERSE_VALUES {
-            combos.push((idx, tp, sl, ps, mh, ma));
+        for &tp in TP_VALUES { for &sl in SL_VALUES { for &ps in POS_SIZE_VALUES { for &mh in MAX_HOLD_VALUES { for &vd in VWAP_DIST_VALUES {
+            combos.push((idx, tp, sl, ps, mh, vd));
         }}}}}
     }
 
-    let results: Vec<RunResult> = combos.par_iter().map(|&(idx, tp, sl, ps, mh, ma)| {
+    let results: Vec<RunResult> = combos.par_iter().map(|&(idx, tp, sl, ps, mh, vd)| {
         let es = &entry_sets[idx];
         let n = es.entries.len();
         let sname = strategy_name(es.strategy);
@@ -983,15 +981,14 @@ fn main() {
                 fast_period: fast_p, slow_period: slow_p,
                 orb_range_mins: es.orb_range_mins,
                 pdhl_prox_pct: es.pdhl_prox_pct * 100.0,
-                max_hold: mh, pos_size_pct: ps*100.0,
+                max_hold: mh, vwap_dist_stop: vd*100.0, pos_size_pct: ps*100.0,
                 trades: 0, wins: 0, losses: 0, eods: 0,
                 win_rate: 0.0, return_pct: 0.0,
                 final_capital: INITIAL_CAPITAL, max_dd_pct: 0.0, max_consec_loss: 0,
-                max_adverse_bars: ma,
             };
         }
 
-        let (w, l, e, fc, md, mc) = evaluate(&es.entries, &candles, tp, sl, ps, is_pb, short, mh, ma);
+        let (w, l, e, fc, md, mc) = evaluate(&es.entries, &candles, tp, sl, ps, is_pb, short, mh, vd, es.vwap_window_idx);
         RunResult {
             strategy: sname, tp_pct: tp*100.0, sl_pct: sl*100.0,
             rr_ratio: if sl > 0.0 { (tp/sl*100.0).round()/100.0 } else { 0.0 },
@@ -1003,14 +1000,13 @@ fn main() {
             fast_period: fast_p, slow_period: slow_p,
             orb_range_mins: es.orb_range_mins,
             pdhl_prox_pct: es.pdhl_prox_pct * 100.0,
-            max_hold: mh, pos_size_pct: ps*100.0,
+            max_hold: mh, vwap_dist_stop: vd*100.0, pos_size_pct: ps*100.0,
             trades: n, wins: w, losses: l, eods: e,
             win_rate: (w as f64 / n as f64 * 1000.0).round() / 10.0,
             return_pct: ((fc / INITIAL_CAPITAL - 1.0) * 10000.0).round() / 100.0,
             final_capital: (fc * 100.0).round() / 100.0,
             max_dd_pct: (md * 10000.0).round() / 100.0,
             max_consec_loss: mc,
-            max_adverse_bars: ma,
         }
     }).collect();
 
@@ -1022,7 +1018,7 @@ fn main() {
         w.write_record(["strategy","tp_pct","sl_pct","rr_ratio","min_bars","vol_filter",
             "confirm_bars","trend_filter","entry_window","vwap_prox","vwap_window",
             "ema_period","max_trades_per_day","fast_period","slow_period","orb_range_mins","pdhl_prox_pct",
-            "max_hold","max_adverse_bars","pos_size_pct","trades","wins","losses","eods",
+            "max_hold","vwap_dist_stop","pos_size_pct","trades","wins","losses","eods",
             "win_rate","return_pct","final_capital","max_dd_pct","max_consec_loss"]).unwrap();
         let mut csv_rows = 0usize;
         for r in &results {
@@ -1040,7 +1036,7 @@ fn main() {
                 if r.orb_range_mins > 0 { r.orb_range_mins.to_string() } else { "-".to_string() },
                 if r.pdhl_prox_pct > 0.0 { f2(r.pdhl_prox_pct) } else { "-".to_string() },
                 if r.max_hold == 0 { "EOD".to_string() } else { r.max_hold.to_string() },
-                if r.max_adverse_bars == 0 { "-".to_string() } else { r.max_adverse_bars.to_string() },
+                if r.vwap_dist_stop == 0.0 { "-".to_string() } else { f2(r.vwap_dist_stop) },
                 format!("{:.0}", r.pos_size_pct),
                 r.trades.to_string(), r.wins.to_string(), r.losses.to_string(), r.eods.to_string(),
                 format!("{:.1}", r.win_rate), f2(r.return_pct), f2(r.final_capital),
@@ -1128,11 +1124,11 @@ fn main() {
         let a = s.iter().map(|r| r.return_pct).sum::<f64>() / s.len().max(1) as f64;
         println!("  vwap_window={:>2}d: avg_ret={:+6.2}%  (n={})", vw, a, s.len());
     }
-    for &ma in MAX_ADVERSE_VALUES {
-        let label = if ma == 0 { "off".to_string() } else { format!("{}bars", ma) };
-        let s: Vec<&&RunResult> = active.iter().filter(|r| r.max_adverse_bars == ma).collect();
+    for &vd in VWAP_DIST_VALUES {
+        let label = if vd == 0.0 { "  off".to_string() } else { format!("{:.0}%", vd * 100.0) };
+        let s: Vec<&&RunResult> = active.iter().filter(|r| (r.vwap_dist_stop - vd*100.0).abs() < 0.001).collect();
         let a = s.iter().map(|r| r.return_pct).sum::<f64>() / s.len().max(1) as f64;
-        println!("  max_adverse={:>7}: avg_ret={:+6.2}%  (n={})", label, a, s.len());
+        println!("  vwap_dist={:>4}: avg_ret={:+6.2}%  (n={})", label, a, s.len());
     }
 }
 
@@ -1147,30 +1143,30 @@ fn impact_bool(active: &[&RunResult], label: &str, pred: fn(&RunResult) -> bool)
 fn f2(v: f64) -> String { format!("{:.2}", v) }
 
 fn ph() {
-    println!("  {:>8} {:>5} {:>5} {:>5} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4} {:>3} {:>4} {:>3} {:>3} {:>4} {:>3} {:>3} {:>3} {:>5} {:>8} {:>9} {:>6} {:>4}",
-        "strat","TP%","SL%","R:R","bar","vf","cf","tf","wndw","prox","vwD","hold","adv","ps%",
+    println!("  {:>8} {:>5} {:>5} {:>5} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4} {:>3} {:>4} {:>4} {:>3} {:>4} {:>3} {:>3} {:>3} {:>5} {:>8} {:>9} {:>6} {:>4}",
+        "strat","TP%","SL%","R:R","bar","vf","cf","tf","wndw","prox","vwD","hold","vds","ps%",
         "trd","win","los","eod","win%","return%","final$","mxDD%","mCL");
 }
 fn pr(r: &RunResult) {
     let mh = if r.max_hold == 0 { "EOD".to_string() } else { format!("{}", r.max_hold) };
-    let ma = if r.max_adverse_bars == 0 { " - ".to_string() } else { format!("{}", r.max_adverse_bars) };
-    println!("  {:>8} {:>5.2} {:>5.2} {:>5.1} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4.1} {:>3} {:>4} {:>3} {:>3.0} {:>4} {:>3} {:>3} {:>3} {:>4.1}% {:>7.2}% {:>9.2} {:>5.2}% {:>4}",
+    let vd = if r.vwap_dist_stop == 0.0 { "  -".to_string() } else { format!("{:.0}%", r.vwap_dist_stop) };
+    println!("  {:>8} {:>5.2} {:>5.2} {:>5.1} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4.1} {:>3} {:>4} {:>4} {:>3.0} {:>4} {:>3} {:>3} {:>3} {:>4.1}% {:>7.2}% {:>9.2} {:>5.2}% {:>4}",
         r.strategy, r.tp_pct, r.sl_pct, r.rr_ratio, r.min_bars, r.vol_filter,
-        r.confirm_bars, r.trend_filter, r.entry_window, r.vwap_prox, r.vwap_window, mh, ma, r.pos_size_pct,
+        r.confirm_bars, r.trend_filter, r.entry_window, r.vwap_prox, r.vwap_window, mh, vd, r.pos_size_pct,
         r.trades, r.wins, r.losses, r.eods,
         r.win_rate, r.return_pct, r.final_capital, r.max_dd_pct, r.max_consec_loss);
 }
 fn ph2() {
-    println!("  {:>8} {:>5} {:>5} {:>5} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4} {:>3} {:>4} {:>3} {:>3} {:>4} {:>3} {:>3} {:>3} {:>5} {:>8} {:>9} {:>6} {:>4} {:>7}",
-        "strat","TP%","SL%","R:R","bar","vf","cf","tf","wndw","prox","vwD","hold","adv","ps%",
+    println!("  {:>8} {:>5} {:>5} {:>5} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4} {:>3} {:>4} {:>4} {:>3} {:>4} {:>3} {:>3} {:>3} {:>5} {:>8} {:>9} {:>6} {:>4} {:>7}",
+        "strat","TP%","SL%","R:R","bar","vf","cf","tf","wndw","prox","vwD","hold","vds","ps%",
         "trd","win","los","eod","win%","return%","final$","mxDD%","mCL","ret/dd");
 }
 fn pr2(r: &RunResult, ratio: f64) {
     let mh = if r.max_hold == 0 { "EOD".to_string() } else { format!("{}", r.max_hold) };
-    let ma = if r.max_adverse_bars == 0 { " - ".to_string() } else { format!("{}", r.max_adverse_bars) };
-    println!("  {:>8} {:>5.2} {:>5.2} {:>5.1} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4.1} {:>3} {:>4} {:>3} {:>3.0} {:>4} {:>3} {:>3} {:>3} {:>4.1}% {:>7.2}% {:>9.2} {:>5.2}% {:>4} {:>7.2}",
+    let vd = if r.vwap_dist_stop == 0.0 { "  -".to_string() } else { format!("{:.0}%", r.vwap_dist_stop) };
+    println!("  {:>8} {:>5.2} {:>5.2} {:>5.1} {:>3} {:>3} {:>2} {:>3} {:>5} {:>4.1} {:>3} {:>4} {:>4} {:>3.0} {:>4} {:>3} {:>3} {:>3} {:>4.1}% {:>7.2}% {:>9.2} {:>5.2}% {:>4} {:>7.2}",
         r.strategy, r.tp_pct, r.sl_pct, r.rr_ratio, r.min_bars, r.vol_filter,
-        r.confirm_bars, r.trend_filter, r.entry_window, r.vwap_prox, r.vwap_window, mh, ma, r.pos_size_pct,
+        r.confirm_bars, r.trend_filter, r.entry_window, r.vwap_prox, r.vwap_window, mh, vd, r.pos_size_pct,
         r.trades, r.wins, r.losses, r.eods,
         r.win_rate, r.return_pct, r.final_capital, r.max_dd_pct, r.max_consec_loss, ratio);
 }
