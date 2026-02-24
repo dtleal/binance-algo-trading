@@ -281,6 +281,26 @@ XAU_CONFIG = SymbolConfig(
     interval="1m",
 )
 
+LTC_CONFIG = SymbolConfig(
+    symbol="LTCUSDT",
+    asset="LTC",
+    tp_pct=3.0,         # Champion: 1m PDHL, +50.76% return (1003 trades, 57.1% WR, maxDD=15.16%)
+    sl_pct=5.0,
+    min_bars=0,
+    confirm_bars=1,
+    vwap_prox=0.0,
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=2,
+    qty_decimals=3,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="1m",
+    vwap_dist_stop=0.05,  # exit if price >5% from VWAP in wrong direction
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -293,6 +313,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AVAXUSDT": AVAX_CONFIG,
     "XRPUSDT": XRP_CONFIG,
     "XAUUSDT": XAU_CONFIG,
+    "LTCUSDT": LTC_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 

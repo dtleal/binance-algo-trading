@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -90,20 +90,24 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 30 --tp 7.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 30 --tp 10.0 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 10 --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 30 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 30 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl --symbol ltcusdt --leverage 30 --sl 5.0 --prox-pct 0.001 --confirm-bars 1 --pos-size 0.40 > /dev/null 2>&1 &)
 	@sleep 3
 	@echo "$(GREEN)✅ Bots started! (PEPE skipped - invalid symbol)$(NC)"
 	@echo ""
-	@echo "$(BLUE)Active Strategies (11 bots):$(NC)"
+	@echo "$(BLUE)Active Strategies (12 bots):$(NC)"
 	@echo "  📊 MomShort (30x leverage):"
 	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
 	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%)"
 	@echo ""
 	@echo "  📊 VWAPPullback:"
-	@echo "     • GALAUSDT (1m, 20x, +34.85%), AVAXUSDT (1m, 20x, +31.12%)"
-	@echo "     • DOGEUSDT (5m, 20x, +41.28%), 1000SHIBUSDT (5m, 20x, +37.51%)"
-	@echo "     • XRPUSDT (5m, 20x, +29.21%), ETHUSDT (5m, 5x, +31.28%)"
-	@echo "     • XAUUSDT (1m, 20x, +7.67%)"
+	@echo "     • GALAUSDT (1m, 30x, +34.85%), AVAXUSDT (1m, 30x, +31.12%)"
+	@echo "     • DOGEUSDT (5m, 30x, +42.75%), 1000SHIBUSDT (5m, 30x, +37.51%)"
+	@echo "     • XRPUSDT (5m, 30x, +30.15%), ETHUSDT (5m, 10x, +31.87%)"
+	@echo "     • XAUUSDT (1m, 30x, +7.67%)"
+	@echo ""
+	@echo "  📊 PDHL:"
+	@echo "     • LTCUSDT (1m, 30x, +50.76%)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -126,9 +130,10 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo ""
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
-	@echo "$(BLUE)🤖 Active Bots:$(NC) 11 total (PEPE excluded)"
+	@echo "$(BLUE)🤖 Active Bots:$(NC) 12 total (PEPE excluded)"
 	@echo "   • 4 MomShort bots (3x 1m + 1x 5m, 30x leverage)"
 	@echo "   • 7 VWAPPullback bots (4x 5m + 3x 1m, 10x-30x leverage)"
+	@echo "   • 1 PDHL bot (LTCUSDT 1m, 30x leverage)"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
 	@echo "   • $(YELLOW)make status-all$(NC)  - Check all processes"
@@ -556,6 +561,12 @@ bot-btc-pdhl: ## Run PDHL bot for BTCUSDT (prox=0.2% sl=0.3% leverage=20)
 
 bot-btc-pdhl-dry: ## Run PDHL bot for BTCUSDT in dry-run mode
 	poetry run python -m trader pdhl --symbol btcusdt --leverage 30 --sl 0.3 --prox-pct 0.002 --pos-size 0.40 --dry-run
+
+bot-ltc-pdhl: ## Run PDHL bot for LTCUSDT (prox=0.1% sl=5.0% leverage=30, champion +50.76%)
+	poetry run python -m trader pdhl --symbol ltcusdt --leverage 30 --sl 5.0 --prox-pct 0.001 --confirm-bars 1 --pos-size 0.40
+
+bot-ltc-pdhl-dry: ## Run PDHL bot for LTCUSDT in dry-run mode
+	poetry run python -m trader pdhl --symbol ltcusdt --leverage 30 --sl 5.0 --prox-pct 0.001 --confirm-bars 1 --pos-size 0.40 --dry-run
 
 bots-v2: redis ## Start all VWAPPullback V2 bots (trailing stop)
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
