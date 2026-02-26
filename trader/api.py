@@ -14,14 +14,17 @@ Or via CLI (bots co-located):
 
 import asyncio
 import json
+import os
+import re
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from trader.config import BINANCE_API_KEY, BINANCE_SECRET_KEY, SOCKS_PROXY, SYMBOL_CONFIGS
 from trader import events, bot_registry
@@ -493,6 +496,285 @@ async def get_performance():
             "total_pnl": round(total_pnl_all, 2),
         }
     }
+
+
+# ── Chat endpoint ─────────────────────────────────────────────────────────────
+
+_LOGS_DIR = Path(__file__).parent.parent / "logs"
+_SWEEPS_DIR = Path(__file__).parent.parent / "data" / "sweeps"
+
+_CHAT_TOOLS = [
+    {
+        "name": "get_account_summary",
+        "description": "Retorna saldo USDT, equity total, P&L não realizado e P&L das últimas 24h.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_open_positions",
+        "description": "Lista todas as posições abertas com entry price, mark price e P&L não realizado.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_trading_performance",
+        "description": "Analisa performance de trading dos últimos N dias. Retorna P&L por símbolo, win rate, identifica melhor e pior ativo.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "Número de dias (padrão: 7)"},
+                "symbol": {"type": "string", "description": "Símbolo específico (ex: AXSUSDT). Omitir para todos."},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_sweep_results",
+        "description": "Mostra melhores configs de backtest (sweep) por símbolo e timeframe.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Símbolo (ex: axsusdt)"},
+                "timeframe": {"type": "string", "description": "Timeframe (ex: 5m)"},
+                "top_n": {"type": "integer", "description": "Quantas configs retornar (padrão: 10)"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_bot_logs",
+        "description": "Lê logs recentes dos bots e extrai atividade de trading, erros e mudanças de estado.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Símbolo (ex: AXSUSDT)"},
+                "hours": {"type": "integer", "description": "Horas atrás (padrão: 24)"},
+            },
+            "required": [],
+        },
+    },
+]
+
+
+async def _chat_get_trading_performance(days: int = 7, symbol: str | None = None) -> dict:
+    data = await get_trades(symbol=symbol, days=days)
+    by_symbol: dict[str, dict] = {}
+    total_pnl = 0.0
+    total_trades = 0
+
+    for t in data["trades"]:
+        sym = t["symbol"]
+        if sym not in by_symbol:
+            by_symbol[sym] = {
+                "symbol": sym, "realized_pnl_usdt": 0.0, "trades": 0,
+                "closing_trades": 0, "wins": 0, "commission_usdt": 0.0,
+            }
+        entry = by_symbol[sym]
+        entry["trades"] += 1
+        entry["commission_usdt"] += t["commission"]
+        if t["realized_pnl"] != 0:
+            entry["realized_pnl_usdt"] += t["realized_pnl"]
+            entry["closing_trades"] += 1
+            if t["realized_pnl"] > 0:
+                entry["wins"] += 1
+        total_pnl += t["realized_pnl"]
+        total_trades += 1
+
+    ranked = []
+    for entry in by_symbol.values():
+        cl = entry["closing_trades"]
+        entry["win_rate_pct"] = round(entry["wins"] / cl * 100, 1) if cl else 0.0
+        entry["net_pnl_usdt"] = round(entry["realized_pnl_usdt"] - entry["commission_usdt"], 4)
+        entry["realized_pnl_usdt"] = round(entry["realized_pnl_usdt"], 4)
+        entry["commission_usdt"] = round(entry["commission_usdt"], 4)
+        ranked.append(entry)
+
+    ranked.sort(key=lambda x: x["net_pnl_usdt"])
+    return {
+        "period_days": days,
+        "total_realized_pnl_usdt": round(total_pnl, 4),
+        "total_trades": total_trades,
+        "symbols_with_activity": len(ranked),
+        "worst_asset": ranked[0] if ranked else None,
+        "best_asset": ranked[-1] if ranked else None,
+        "by_symbol": ranked,
+    }
+
+
+def _chat_get_sweep_results(
+    symbol: str | None = None,
+    timeframe: str | None = None,
+    top_n: int = 10,
+) -> dict:
+    import pandas as pd
+
+    pattern = "*_sweep.csv"
+    if symbol and timeframe:
+        pattern = f"{symbol.lower()}_{timeframe}_sweep.csv"
+    elif symbol:
+        pattern = f"{symbol.lower()}_*_sweep.csv"
+    elif timeframe:
+        pattern = f"*_{timeframe}_sweep.csv"
+
+    files = list(_SWEEPS_DIR.glob(pattern))
+    if not files:
+        return {
+            "error": "Nenhum arquivo de sweep encontrado.",
+            "hint": "Gere os dados com: make sweep-rust SYMBOL=SYMBOL",
+        }
+
+    summary = []
+    for f in sorted(files):
+        try:
+            df = pd.read_csv(f)
+            best = df.sort_values("return_pct", ascending=False).iloc[0]
+            parts = f.stem.replace("_sweep", "").rsplit("_", 1)
+            sym = parts[0].upper()
+            tf = parts[1] if len(parts) == 2 else "?"
+            summary.append({
+                "symbol": sym, "timeframe": tf,
+                "best_return_pct": float(best.get("return_pct", 0)),
+                "strategy": best.get("strategy"),
+                "win_rate": best.get("win_rate"),
+                "max_dd_pct": best.get("max_dd_pct"),
+                "trades": int(best.get("trades", 0)),
+            })
+        except Exception:
+            pass
+
+    summary.sort(key=lambda x: x.get("best_return_pct") or 0)
+    return {"files_found": len(files), "summary_ranked_by_return": summary}
+
+
+def _chat_get_bot_logs(symbol: str | None = None, hours: int = 24) -> dict:
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    pattern = f"bot_{symbol.upper()}_*.log" if symbol else "bot_*_*.log"
+    files = sorted(_LOGS_DIR.glob(pattern), reverse=True)
+    if not files:
+        return {"error": f"Nenhum log encontrado", "pattern": pattern}
+
+    pnl_re = re.compile(r"P&L: \$([+-]?\d+\.\d+) \(([+-]?\d+\.\d+)%\)")
+    state_re = re.compile(r"\|\s+(IN_POSITION|SCANNING|COOLDOWN|EOD)\s*$")
+    error_re = re.compile(r"(ERROR|Exception|Traceback)", re.IGNORECASE)
+
+    by_symbol: dict[str, dict] = {}
+    for log_file in files:
+        parts = log_file.stem.split("_")
+        if len(parts) < 3:
+            continue
+        sym, date_str = parts[1], parts[2]
+        try:
+            log_date = datetime.strptime(date_str, "%Y%m%d").date()
+        except ValueError:
+            continue
+        if log_date < cutoff.date():
+            continue
+        if sym not in by_symbol:
+            by_symbol[sym] = {
+                "symbol": sym, "last_pnl_usdt": None, "last_pnl_pct": None,
+                "last_state": None, "state_changes": [], "errors": [], "entry_exits": [],
+            }
+        data = by_symbol[sym]
+        try:
+            lines = log_file.read_text(errors="replace").splitlines()[-3000:]
+        except Exception:
+            continue
+        for line in lines:
+            m = pnl_re.search(line)
+            if m:
+                data["last_pnl_usdt"] = float(m.group(1))
+                data["last_pnl_pct"] = float(m.group(2))
+            m = state_re.search(line)
+            if m:
+                state = m.group(1)
+                if state != data["last_state"]:
+                    data["state_changes"].append({"state": state, "line": line.strip()[-100:]})
+                    data["last_state"] = state
+            lower = line.lower()
+            if any(kw in lower for kw in ("entry", "opened", "closed", "exit", "filled")):
+                data["entry_exits"].append(line.strip()[-120:])
+            if error_re.search(line):
+                data["errors"].append(line.strip()[-120:])
+        data["state_changes"] = data["state_changes"][-10:]
+        data["entry_exits"] = data["entry_exits"][-10:]
+        data["errors"] = data["errors"][-5:]
+
+    if not by_symbol:
+        return {"message": f"Nenhuma atividade nos últimos {hours}h"}
+    return {"period_hours": hours, "bots": list(by_symbol.values())}
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
+_CHAT_SYSTEM = (
+    "Você é um assistente especializado em trading de criptomoedas. "
+    "Sempre responda em português brasileiro. "
+    "Use as tools disponíveis para consultar dados reais antes de responder. "
+    "Seja direto e objetivo nas respostas."
+)
+
+
+@app.post("/api/chat")
+async def chat_endpoint(req: ChatRequest):
+    import anthropic as _anthropic
+
+    api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {"response": "⚠️ ANTHROPIC_API_KEY não configurada no .env"}
+
+    client = _anthropic.Anthropic(api_key=api_key)
+    history = req.history[-10:]
+    messages = [*history, {"role": "user", "content": req.message}]
+
+    for _ in range(5):
+        resp = await asyncio.to_thread(
+            lambda msgs=messages: client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1024,
+                system=_CHAT_SYSTEM,
+                tools=_CHAT_TOOLS,
+                messages=msgs,
+            )
+        )
+
+        if resp.stop_reason == "end_turn":
+            text = next((b.text for b in resp.content if hasattr(b, "text")), "")
+            return {"response": text}
+
+        if resp.stop_reason == "tool_use":
+            messages.append({"role": "assistant", "content": resp.content})
+            tool_results = []
+            for block in resp.content:
+                if block.type != "tool_use":
+                    continue
+                try:
+                    inp = block.input
+                    if block.name == "get_account_summary":
+                        result = await get_account_summary()
+                    elif block.name == "get_open_positions":
+                        result = await get_positions()
+                    elif block.name == "get_trading_performance":
+                        result = await _chat_get_trading_performance(**inp)
+                    elif block.name == "get_sweep_results":
+                        result = _chat_get_sweep_results(**inp)
+                    elif block.name == "get_bot_logs":
+                        result = _chat_get_bot_logs(**inp)
+                    else:
+                        result = {"error": f"Tool desconhecida: {block.name}"}
+                except Exception as e:
+                    result = {"error": str(e)}
+
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": json.dumps(result, default=str),
+                })
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            break
+
+    return {"response": "Não foi possível gerar uma resposta."}
 
 
 # ── WebSocket feed ─────────────────────────────────────────────────────────────

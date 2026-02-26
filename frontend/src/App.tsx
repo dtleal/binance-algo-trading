@@ -8,6 +8,7 @@ import Commissions from "./pages/Commissions";
 import { useFeedWebSocket } from "./hooks/useWebSocket";
 import { FilterProvider } from "./contexts/FilterContext";
 import GlobalFilter from "./components/GlobalFilter";
+import ChatBubble from "./components/ChatBubble";
 
 const FILTER_PAGES = ["/", "/positions", "/history", "/commissions"];
 
@@ -28,6 +29,7 @@ function AppInner({ events, connected }: { events: ReturnType<typeof useFeedWebS
           <Route path="/commissions" element={<Commissions />} />
         </Routes>
       </main>
+      <ChatBubble />
     </div>
   );
 }
