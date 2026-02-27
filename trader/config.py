@@ -341,6 +341,25 @@ BCH_CONFIG = SymbolConfig(
     vwap_dist_stop=0.03,  # exit if price >3% from VWAP in wrong direction
 )
 
+XMR_CONFIG = SymbolConfig(
+    symbol="XMRUSDT",
+    asset="XMR",
+    tp_pct=7.0,         # Champion: 1m VWAPPullback, +35.76% return (349 trades, 52.1% WR, maxDD=7.15%)
+    sl_pct=5.0,
+    min_bars=8,
+    confirm_bars=0,
+    vwap_prox=0.002,    # 0.2%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=2,
+    qty_decimals=3,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="1m",
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -356,6 +375,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "LTCUSDT": LTC_CONFIG,
     "LINKUSDT": LINK_CONFIG,
     "BCHUSDT": BCH_CONFIG,
+    "XMRUSDT": XMR_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 
