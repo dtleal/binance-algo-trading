@@ -10,7 +10,7 @@ const ENTRY_START: u16 = 60;   // 01:00 UTC
 const ENTRY_CUTOFF: u16 = 1320; // 22:00 UTC
 
 // ── Parameter grid ─────────────────────────────────────────
-const STRATEGY_VALUES: &[u8] = &[0, 1, 2, 3, 4, 5, 6, 7]; // RejShort, RejLong, MomShort, MomLong, VWAPPullback, EMAScalp, ORB, PDHL
+const STRATEGY_VALUES: &[u8] = &[2, 4, 5, 6, 7]; // MomShort, VWAPPullback, EMAScalp, ORB, PDHL
 
 // VWAPPullback-specific parameters
 const EMA_PERIODS: &[usize] = &[100, 200, 300, 500];
@@ -1022,7 +1022,7 @@ fn main() {
             "win_rate","return_pct","final_capital","max_dd_pct","max_consec_loss"]).unwrap();
         let mut csv_rows = 0usize;
         for r in &results {
-            if r.trades == 0 { continue; }
+            if r.return_pct <= 0.0 { continue; }
             w.write_record([
                 r.strategy.to_string(), f2(r.tp_pct), f2(r.sl_pct), f2(r.rr_ratio),
                 r.min_bars.to_string(), r.vol_filter.to_string(),
@@ -1045,7 +1045,7 @@ fn main() {
             csv_rows += 1;
         }
         w.flush().unwrap();
-        println!("\n  CSV: {} rows (trades>0) -> backtest_sweep.csv", csv_rows);
+        println!("\n  CSV: {} rows (return>0) -> backtest_sweep.csv", csv_rows);
     }
 
     let active: Vec<&RunResult> = results.iter().filter(|r| r.trades > 0).collect();

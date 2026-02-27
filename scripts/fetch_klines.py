@@ -12,6 +12,8 @@ LIMIT = 1000  # max per request
 SPOT_BASE_URL = "https://api.binance.com/api/v3/klines"
 FUTURES_BASE_URL = "https://fapi.binance.com/fapi/v1/klines"
 
+# Default to Futures API — this project trades USDT-M Futures exclusively
+
 HEADERS = [
     "open_time", "open", "high", "low", "close", "volume",
     "close_time", "quote_volume", "trades", "taker_buy_base_vol",
@@ -33,15 +35,15 @@ def main():
     parser.add_argument("-o", "--output", help="Output CSV file (default: <symbol_lower>_1m_klines.csv)")
     parser.add_argument("-d", "--days", type=int, default=365, help="Number of days to fetch (default: 365)")
     parser.add_argument("-i", "--interval", default="1m", help="Candle interval (default: 1m)")
-    parser.add_argument("-f", "--futures", action="store_true", help="Use Futures API (for symbols like 1000SHIBUSDT)")
+    parser.add_argument("--spot", action="store_true", help="Use Spot API instead of Futures (not recommended for this project)")
 
     args = parser.parse_args()
 
     symbol = args.symbol.upper()
     output_file = args.output or f"data/klines/{symbol.lower()}_1m_klines.csv"
 
-    # Auto-detect Futures symbols (start with digits like 1000SHIBUSDT)
-    use_futures = args.futures or symbol[0].isdigit()
+    # Always use Futures API by default (USDT-M Futures project)
+    use_futures = not args.spot
     api_type = "Futures" if use_futures else "Spot"
 
     # Calculate time range
