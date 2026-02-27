@@ -196,6 +196,8 @@ def main():
         help="R multiple at which SL reaches breakeven (default: 2.0)")
     pdhl_parser.add_argument("--trail-step", type=float, default=0.5,
         help="Trailing step size in R after breakeven (default: 0.5)")
+    pdhl_parser.add_argument("--tp", type=float, default=None,
+        help="Fixed take-profit %% (default: None = trailing stop mode)")
 
     # --- plot ---
     plot_parser = subparsers.add_parser("plot", help="Show daily P&L and cumulative charts")
@@ -406,6 +408,7 @@ def main():
             pos_size_pct=args.pos_size,
             be_r=args.be_r,
             trail_step=args.trail_step,
+            tp_pct=args.tp,
             interval=interval,
         )
         _run_async(bot.run())

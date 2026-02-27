@@ -72,6 +72,7 @@ class PDHLBot:
         pos_size_pct: float = 0.20,
         be_r: float = 2.0,
         trail_step: float = 0.5,
+        tp_pct: float | None = None,
         interval: str = "1m",
     ):
         self.symbol = symbol.upper()
@@ -83,6 +84,7 @@ class PDHLBot:
         self.pos_size_pct = pos_size_pct
         self.be_r = be_r
         self.trail_step = trail_step
+        self.tp_pct = tp_pct
         self.min_notional = 5.0
         self.interval = interval
 
@@ -146,6 +148,7 @@ class PDHLBot:
         # Trailing SL state
         self._r_value: float = 0.0
         self._sl_milestone: int = 0
+        self._tp_price: float = 0.0
 
         # Background tasks
         self._eod_task: asyncio.Task | None = None
@@ -440,10 +443,15 @@ class PDHLBot:
         prefix = "[DRY-RUN] " if self.dry_run else ""
 
         logger.info(f"{BOLD}{prefix}PDHL Bot (Trailing SL) — {self.symbol}{RESET}")
+        exit_mode = (
+            f"TP={self.tp_pct}% / SL={self.sl_pct}% (fixed)"
+            if self.tp_pct is not None
+            else f"SL={self.sl_pct}% (trailing R-multiple)"
+        )
         logger.info(
             f"Leverage: {self.leverage}x | "
             f"Interval: {self.interval} | "
-            f"SL: {self.sl_pct}% (trailing R-multiple) | "
+            f"{exit_mode} | "
             f"prox={self._signal.prox_pct*100:.2f}% confirm={self._signal.confirm_bars} | "
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
             f"Max trades/day: {self._signal.max_trades_per_day}"
@@ -600,6 +608,40 @@ class PDHLBot:
                 asyncio.get_event_loop().create_task(self._enter_position("short", c))
 
         elif self._state == _State.IN_POSITION:
+            # Dry-run: simulate fixed TP hit
+            if self.dry_run and self.tp_pct is not None and self._tp_price > 0:
+                tp_hit = (
+                    (self._direction == "long" and h >= self._tp_price) or
+                    (self._direction == "short" and l <= self._tp_price)
+                )
+                if tp_hit:
+                    exit_price = self._tp_price
+                    if self._direction == "long":
+                        pnl = (exit_price - self._entry_price) * self._position_qty
+                    else:
+                        pnl = (self._entry_price - exit_price) * self._position_qty
+                    logger.info(
+                        f"{GREEN}{prefix}[{ts}] TP hit @ ${exit_price:.{pd}f} | "
+                        f"P&L: ${pnl:+.2f}{RESET}"
+                    )
+                    self._emit({"type": "position_closed", "symbol": self.symbol,
+                                "strategy": "pdhl", "reason": "TP"})
+                    self._direction = None
+                    self._tp_price = 0.0
+                    self._r_value = 0.0
+                    self._sl_milestone = 0
+                    if self._signal.traded_today:
+                        self._state = _State.COOLDOWN
+                    else:
+                        self._signal.reset_signal()
+                        self._state = _State.SCANNING
+                    _registry.update(self._reg_key, {
+                        "state": self._state.name, "direction": None,
+                        "entry_price": None, "sl_price": None, "tp_price": None,
+                        "position_qty": 0, "unrealized_pnl": 0,
+                    })
+                    return
+
             self._check_trailing_sl(h, l)
 
             if self._direction == "long":
@@ -621,7 +663,7 @@ class PDHLBot:
                 "unrealized_pnl": round(pnl, 4), "unrealized_pnl_pct": round(pnl_pct, 4),
                 "direction": self._direction,
                 "entry_price": self._entry_price, "sl_price": self._sl_price,
-                "tp_price": None, "position_qty": self._position_qty,
+                "tp_price": self._tp_price or None, "position_qty": self._position_qty,
             })
             logger.info(
                 f"{prefix}[{ts}] C={c:.{pd}f} | "
@@ -649,6 +691,8 @@ class PDHLBot:
         return 2 + steps, steps * self.trail_step * R
 
     def _check_trailing_sl(self, high: float, low: float):
+        if self.tp_pct is not None:
+            return  # Fixed TP mode — no trailing SL
         if self._r_value <= 0 or not self._direction:
             return
 
@@ -786,6 +830,11 @@ class PDHLBot:
             if direction == "long"
             else self._round_price(entry_price * (1 + self.sl_pct / 100))
         )
+        tp_price = (
+            self._round_price(entry_price * (1 + self.tp_pct / 100))
+            if direction == "long"
+            else self._round_price(entry_price * (1 - self.tp_pct / 100))
+        ) if self.tp_pct is not None else None
 
         logger.info(
             f"{prefix}Entering {direction.upper()}: {self._fmt_qty(qty)} {self.symbol} "
@@ -797,22 +846,25 @@ class PDHLBot:
             self._entry_price = entry_price
             self._position_qty = qty
             self._sl_price = sl_price
+            self._tp_price = tp_price or 0.0
             self._r_value = abs(entry_price - sl_price)
             self._sl_milestone = 0
             self._state = _State.IN_POSITION
             color = GREEN if direction == "long" else RED
+            tp_label = f"TP: ${self._tp_price} | " if tp_price else ""
+            exit_label = f"(fixed TP/SL)" if tp_price else f"R=${self._r_value:.{self._price_decimals}f} (trailing)"
             logger.info(
                 f"{color}{prefix}{direction.upper()} opened | "
                 f"Entry: ${self._entry_price:.{self._price_decimals}f} | "
-                f"SL: ${self._sl_price} | R=${self._r_value:.{self._price_decimals}f} (trailing){RESET}"
+                f"{tp_label}SL: ${self._sl_price} | {exit_label}{RESET}"
             )
             self._emit({"type": "order", "symbol": self.symbol, "strategy": "pdhl",
                         "direction": direction, "entry_price": entry_price,
-                        "qty": qty, "sl_price": sl_price, "tp_price": None,
+                        "qty": qty, "sl_price": sl_price, "tp_price": tp_price,
                         "dry_run": True})
             _registry.update(self._reg_key, {
                 "state": self._state.name, "direction": direction,
-                "entry_price": entry_price, "sl_price": sl_price, "tp_price": None,
+                "entry_price": entry_price, "sl_price": sl_price, "tp_price": tp_price,
                 "position_qty": qty,
             })
             return
@@ -864,10 +916,31 @@ class PDHLBot:
                 f"Algo ID: {sl_resp.data().algo_id}{RESET}"
             )
 
+            if tp_price is not None:
+                self._tp_price = tp_price
+                tp_side = "SELL" if direction == "long" else "BUY"
+                tp_resp = self._client.rest_api.new_algo_order(
+                    algo_type="CONDITIONAL",
+                    symbol=self.symbol,
+                    side=tp_side,
+                    type="TAKE_PROFIT_MARKET",
+                    trigger_price=self._tp_price,
+                    close_position="true",
+                )
+                logger.info(
+                    f"{color}TP placed @ ${self._tp_price} | "
+                    f"Algo ID: {tp_resp.data().algo_id}{RESET}"
+                )
+
             self._state = _State.IN_POSITION
+            exit_desc = (
+                f"TP ${self._tp_price} / SL ${self._sl_price} (fixed)"
+                if tp_price
+                else f"SL ${self._sl_price} | Trailing R-multiple active"
+            )
             logger.info(
                 f"{BOLD}{direction.upper()} opened | Entry: ${avg_price:.{self._price_decimals}f} | "
-                f"SL: ${self._sl_price} | Trailing R-multiple active{RESET}"
+                f"{exit_desc}{RESET}"
             )
 
             self._monitor_task = asyncio.get_event_loop().create_task(
@@ -898,14 +971,15 @@ class PDHLBot:
                     continue
                 if pos is None or pos["position_amt"] == 0:
                     logger.info(
-                        f"{YELLOW}{prefix}Position closed (trailing SL filled) | "
+                        f"{YELLOW}{prefix}Position closed (SL or TP filled) | "
                         f"trades today: {self._signal.trades_today}/{self._signal.max_trades_per_day}{RESET}"
                     )
                     self._emit({"type": "position_closed", "symbol": self.symbol,
-                                "strategy": "pdhl", "reason": "Trailing SL"})
+                                "strategy": "pdhl", "reason": "SL or TP"})
                     self._direction = None
                     self._r_value = 0.0
                     self._sl_milestone = 0
+                    self._tp_price = 0.0
                     if self._signal.traded_today:
                         self._state = _State.COOLDOWN
                     else:
@@ -1000,6 +1074,7 @@ class PDHLBot:
         self._direction = None
         self._r_value = 0.0
         self._sl_milestone = 0
+        self._tp_price = 0.0
 
         if self._monitor_task and not self._monitor_task.done():
             self._monitor_task.cancel()

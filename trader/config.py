@@ -301,6 +301,46 @@ LTC_CONFIG = SymbolConfig(
     vwap_dist_stop=0.05,  # exit if price >5% from VWAP in wrong direction
 )
 
+LINK_CONFIG = SymbolConfig(
+    symbol="LINKUSDT",
+    asset="LINK",
+    tp_pct=10.0,        # Champion: 1m PDHL, +115.87% return (876 trades, 49.8% WR, maxDD=15.14%)
+    sl_pct=5.0,
+    min_bars=0,
+    confirm_bars=2,
+    vwap_prox=0.0,
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=3,
+    qty_decimals=2,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="1m",
+    vwap_dist_stop=0.03,  # exit if price >3% from VWAP in wrong direction
+)
+
+BCH_CONFIG = SymbolConfig(
+    symbol="BCHUSDT",
+    asset="BCH",
+    tp_pct=10.0,        # Champion: 5m PDHL, +68.46% return (954 trades, 53.8% WR, maxDD=23.32%)
+    sl_pct=5.0,
+    min_bars=0,
+    confirm_bars=1,
+    vwap_prox=0.005,    # 0.5% proximity
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=2,
+    qty_decimals=3,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="5m",
+    vwap_dist_stop=0.03,  # exit if price >3% from VWAP in wrong direction
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -314,6 +354,8 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "XRPUSDT": XRP_CONFIG,
     "XAUUSDT": XAU_CONFIG,
     "LTCUSDT": LTC_CONFIG,
+    "LINKUSDT": LINK_CONFIG,
+    "BCHUSDT": BCH_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 
