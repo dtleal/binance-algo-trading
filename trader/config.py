@@ -419,6 +419,46 @@ PEPE1000_CONFIG = SymbolConfig(
     interval="5m",
 )
 
+DASH_CONFIG = SymbolConfig(
+    symbol="DASHUSDT",
+    asset="DASH",
+    tp_pct=5.0,         # Champion: 15m VWAPPullback, +22.06% return (171 trades, 53.8% WR, maxDD=2.84%)
+    sl_pct=5.0,
+    min_bars=3,
+    confirm_bars=0,
+    vwap_prox=0.002,    # 0.2%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=2,
+    qty_decimals=3,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="15m",
+    vwap_dist_stop=0.03,
+)
+
+ZEC_CONFIG = SymbolConfig(
+    symbol="ZECUSDT",
+    asset="ZEC",
+    tp_pct=10.0,        # Champion: 5m VWAPPullback, +25.55% return (280 trades, 53.9% WR, maxDD=9.04%, maxCL=6)
+    sl_pct=5.0,
+    min_bars=8,
+    confirm_bars=2,
+    vwap_prox=0.005,    # 0.5%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=2,
+    qty_decimals=3,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="5m",
+    vwap_dist_stop=0.03,  # exit if price >3% from VWAP in wrong direction
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -436,8 +476,10 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "LINKUSDT": LINK_CONFIG,
     "BCHUSDT": BCH_CONFIG,
     "XMRUSDT": XMR_CONFIG,
+    "DASHUSDT": DASH_CONFIG,
     "UNIUSDT": UNI_CONFIG,
     "1000PEPEUSDT": PEPE1000_CONFIG,
+    "ZECUSDT": ZEC_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 
