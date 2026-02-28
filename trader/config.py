@@ -360,6 +360,26 @@ XMR_CONFIG = SymbolConfig(
     interval="1m",
 )
 
+APT_CONFIG = SymbolConfig(
+    symbol="APTUSDT",
+    asset="APT",
+    tp_pct=10.0,        # Champion: 5m VWAPPullback, +19.66% return (65 trades, 64.6% WR, maxDD=2.07%)
+    sl_pct=5.0,
+    min_bars=3,
+    confirm_bars=0,
+    vwap_prox=0.005,    # 0.5%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=5,
+    qty_decimals=1,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="5m",
+    vwap_dist_stop=0.07,  # exit if price >7% from VWAP in wrong direction
+)
+
 UNI_CONFIG = SymbolConfig(
     symbol="UNIUSDT",
     asset="UNI",
@@ -409,6 +429,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "ETHUSDT": ETH_CONFIG,
     "SOLUSDT": SOL_CONFIG,
     "AVAXUSDT": AVAX_CONFIG,
+    "APTUSDT": APT_CONFIG,
     "XRPUSDT": XRP_CONFIG,
     "XAUUSDT": XAU_CONFIG,
     "LTCUSDT": LTC_CONFIG,
