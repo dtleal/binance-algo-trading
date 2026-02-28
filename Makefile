@@ -94,11 +94,12 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 		(nohup poetry run python -m trader pdhl --symbol ltcusdt --leverage 30 --sl 5.0 --prox-pct 0.001 --confirm-bars 1 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pdhl --symbol linkusdt --leverage 30 --sl 5.0 --prox-pct 0.0 --confirm-bars 2 --pos-size 0.40 --tp 10.0 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pdhl --symbol bchusdt --leverage 30 --sl 5.0 --prox-pct 0.005 --confirm-bars 1 --pos-size 0.40 --tp 10.0 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xmrusdt --leverage 30 --tp 7.0 --sl 5.0 --min-bars 8 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader pullback --symbol xmrusdt --leverage 30 --tp 7.0 --sl 5.0 --min-bars 8 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol 1000pepeusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 5 --confirm-bars 2 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &)
 	@sleep 3
-	@echo "$(GREEN)✅ Bots started! (PEPE skipped - invalid symbol)$(NC)"
+	@echo "$(GREEN)✅ Bots started!$(NC)"
 	@echo ""
-	@echo "$(BLUE)Active Strategies (15 bots):$(NC)"
+	@echo "$(BLUE)Active Strategies (16 bots):$(NC)"
 	@echo "  📊 MomShort (30x leverage):"
 	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
 	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%)"
@@ -108,6 +109,7 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 	@echo "     • DOGEUSDT (5m, 30x, +42.75%), 1000SHIBUSDT (5m, 30x, +37.51%)"
 	@echo "     • XRPUSDT (5m, 30x, +30.15%), ETHUSDT (5m, 10x, +31.87%)"
 	@echo "     • XAUUSDT (1m, 30x, +7.67%), XMRUSDT (1m, 30x, +35.76%)"
+	@echo "     • 1000PEPEUSDT (5m, 30x, +38.86%)"
 	@echo ""
 	@echo "  📊 PDHL:"
 	@echo "     • LTCUSDT (1m, 30x, +50.76%), LINKUSDT (1m, 30x, +115.87%)"
@@ -134,10 +136,10 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo ""
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
-	@echo "$(BLUE)🤖 Active Bots:$(NC) 13 total (PEPE excluded)"
+	@echo "$(BLUE)🤖 Active Bots:$(NC) 16 total"
 	@echo "   • 4 MomShort bots (3x 1m + 1x 5m, 30x leverage)"
-	@echo "   • 7 VWAPPullback bots (4x 5m + 3x 1m, 10x-30x leverage)"
-	@echo "   • 2 PDHL bots (LTCUSDT + LINKUSDT, 1m, 30x leverage)"
+	@echo "   • 9 VWAPPullback bots (5x 5m + 4x 1m, 10x-30x leverage)"
+	@echo "   • 3 PDHL bots (1x 1m + 2x 5m, 30x leverage)"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
 	@echo "   • $(YELLOW)make status-all$(NC)  - Check all processes"
@@ -250,6 +252,12 @@ bot-xau: ## Run VWAPPullback trading bot for XAUUSDT (Gold)
 
 bot-xau-dry: ## Run XAUUSDT bot in dry-run mode
 	poetry run python -m trader pullback --symbol xauusdt --dry-run --leverage $(LEVERAGE)
+
+bot-pepe: ## Run VWAPPullback trading bot for 1000PEPEUSDT
+	poetry run python -m trader pullback --symbol 1000pepeusdt --leverage $(LEVERAGE)
+
+bot-pepe-dry: ## Run 1000PEPEUSDT bot in dry-run mode
+	poetry run python -m trader pullback --symbol 1000pepeusdt --dry-run --leverage $(LEVERAGE)
 
 logs: ## Tail the latest log file
 	@ls -t logs/*.log 2>/dev/null | head -1 | xargs -r tail -f || echo "No log files found"

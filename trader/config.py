@@ -360,6 +360,25 @@ XMR_CONFIG = SymbolConfig(
     interval="1m",
 )
 
+PEPE1000_CONFIG = SymbolConfig(
+    symbol="1000PEPEUSDT",
+    asset="PEPE",
+    tp_pct=10.0,        # Champion: 5m VWAPPullback, +38.86% return (198 trades, 58.1% WR, maxDD=3.36%)
+    sl_pct=5.0,
+    min_bars=5,
+    confirm_bars=2,
+    vwap_prox=0.002,    # 0.2%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=8,
+    qty_decimals=0,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="5m",
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -376,6 +395,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "LINKUSDT": LINK_CONFIG,
     "BCHUSDT": BCH_CONFIG,
     "XMRUSDT": XMR_CONFIG,
+    "1000PEPEUSDT": PEPE1000_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 

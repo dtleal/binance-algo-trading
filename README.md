@@ -19,7 +19,7 @@ Exits are checked every candle in order: stop-loss (5% above entry), take-profit
 
 The strategy is configured per-symbol in `trader/config.py` — parameters like TP/SL, min consolidation bars, confirmation bars, and VWAP proximity threshold vary per asset.
 
-## Active Portfolio (11 Bots)
+## Active Portfolio (12 Bots)
 
 ### MomShort Strategy
 | Symbol     | Timeframe | Return  | TP   | SL   | Leverage | Config               |
@@ -36,6 +36,7 @@ The strategy is configured per-symbol in `trader/config.py` — parameters like 
 | AVAXUSDT     | 1m        | +31.12% | 7%   | 2%   | 20x      | bars=30, cfm=0       |
 | DOGEUSDT     | 5m        | +41.28% | 10%  | 5%   | 20x      | bars=3, cfm=0        |
 | 1000SHIBUSDT | 5m        | +37.51% | 7%   | 5%   | 20x      | bars=3, cfm=0        |
+| 1000PEPEUSDT | 5m        | +38.86% | 10%  | 5%   | 20x      | bars=5, cfm=2        |
 | ETHUSDT      | 5m        | +31.28% | 10%  | 5%   | 5x       | bars=20, cfm=0       |
 | XRPUSDT      | 5m        | +29.21% | 10%  | 2%   | 20x      | bars=3, cfm=0        |
 | XAUUSDT      | 1m        | +7.67%  | 5%   | 5%   | 20x      | bars=3, cfm=1        |
