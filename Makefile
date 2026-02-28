@@ -80,7 +80,6 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 	@echo "$(YELLOW)All bots auto-configure from trader/config.py (interval, TP/SL, params)$(NC)"
 	@echo ""
 	@export REDIS_URL=redis://localhost:6379 && \
-		(nohup poetry run python -m trader pdhl --symbol btcusdt --leverage 30 --sl 1.5 --prox-pct 0.002 --confirm-bars 3 --pos-size 0.40 --tp 5.0 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot --symbol axsusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot --symbol sandusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot --symbol manausdt --leverage 30 > /dev/null 2>&1 &) && \
@@ -102,7 +101,7 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 	@sleep 3
 	@echo "$(GREEN)✅ Bots started!$(NC)"
 	@echo ""
-	@echo "$(BLUE)Active Strategies (19 bots):$(NC)"
+	@echo "$(BLUE)Active Strategies (18 bots):$(NC)"
 	@echo "  📊 MomShort (30x leverage):"
 	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
 	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%)"
@@ -116,7 +115,6 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 	@echo "     • 1000PEPEUSDT (5m, 30x, +38.86%)"
 	@echo ""
 	@echo "  📊 PDHL:"
-	@echo "     • BTCUSDT (1m, 30x, +13.93%) ⭐"
 	@echo "     • LTCUSDT (1m, 30x, +50.76%), LINKUSDT (1m, 30x, +115.87%)"
 	@echo "     • BCHUSDT (5m, 30x, +68.46%)"
 	@echo ""
@@ -269,12 +267,6 @@ bot-uni: ## Run VWAPPullback trading bot for UNIUSDT
 
 bot-uni-dry: ## Run UNIUSDT bot in dry-run mode
 	poetry run python -m trader pullback --symbol uniusdt --dry-run --leverage $(LEVERAGE)
-
-bot-btc: ## Run PDHL trading bot for BTCUSDT
-	poetry run python -m trader pdhl --symbol btcusdt --leverage $(LEVERAGE)
-
-bot-btc-dry: ## Run BTCUSDT bot in dry-run mode
-	poetry run python -m trader pdhl --symbol btcusdt --dry-run --leverage $(LEVERAGE)
 
 bot-apt: ## Run VWAPPullback trading bot for APTUSDT
 	poetry run python -m trader pullback --symbol aptusdt --leverage $(LEVERAGE)
