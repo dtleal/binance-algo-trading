@@ -20,7 +20,7 @@ Exits are checked every candle in order: stop-loss (5% above entry), take-profit
 
 The strategy is configured per-symbol in `trader/config.py` — parameters like TP/SL, min consolidation bars, confirmation bars, and VWAP proximity threshold vary per asset.
 
-## Active Portfolio (18 Bots)
+## Active Portfolio (19 Bots)
 
 ### MomShort Strategy
 | Symbol     | Timeframe | Return  | TP   | SL   | Leverage | Config               |
@@ -48,6 +48,7 @@ The strategy is configured per-symbol in `trader/config.py` — parameters like 
 ### PDHL Strategy
 | Symbol     | Timeframe | Return   | TP   | SL   | Leverage | Config               |
 |------------|-----------|----------|------|------|----------|----------------------|
+| BTCUSDT    | 1m        | +13.93%  | 5%   | 1.5% | 20x      | cfm=3                |
 | LTCUSDT    | 1m        | +50.76%  | 3%   | 5%   | 20x      | cfm=1                |
 | LINKUSDT   | 1m        | +115.87% | 10%  | 5%   | 20x      | cfm=2                |
 | BCHUSDT    | 5m        | +68.46%  | 10%  | 5%   | 20x      | cfm=1                |
@@ -72,7 +73,7 @@ SECRET_KEY=your_secret_key
 ### Quick Start (Recommended)
 
 ```bash
-# Start everything: 18 bots + dashboard
+# Start everything: 19 bots + dashboard
 make start
 
 # Stop everything
@@ -97,7 +98,7 @@ poetry run python -m trader serve --port 8080
 Access at http://localhost:8080
 
 **Features:**
-- Real-time bot status (all 18 bots always visible, even in COOLDOWN)
+- Real-time bot status (all 19 bots always visible, even in COOLDOWN)
 - Live price, VWAP, and P&L tracking
 - Position monitoring and trade history
 - WebSocket updates with heartbeat (bots publish state every candle)

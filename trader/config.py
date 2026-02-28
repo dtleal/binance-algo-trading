@@ -360,6 +360,26 @@ XMR_CONFIG = SymbolConfig(
     interval="1m",
 )
 
+BTC_CONFIG = SymbolConfig(
+    symbol="BTCUSDT",
+    asset="BTC",
+    tp_pct=5.0,         # Champion: 1m PDHL, +13.93% return (426 trades, 45.3% WR, maxDD=5.57%)
+    sl_pct=1.5,
+    min_bars=0,
+    confirm_bars=3,
+    vwap_prox=0.0,      # PDHL doesn't use VWAP proximity
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=2,
+    qty_decimals=3,
+    vol_filter=False,
+    min_notional=10.0,
+    interval="1m",
+    vwap_dist_stop=0.02,  # exit if price >2% from VWAP in wrong direction
+)
+
 APT_CONFIG = SymbolConfig(
     symbol="APTUSDT",
     asset="APT",
@@ -420,6 +440,7 @@ PEPE1000_CONFIG = SymbolConfig(
 )
 
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
+    "BTCUSDT": BTC_CONFIG,
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
     "MANAUSDT": MANA_CONFIG,
