@@ -2,11 +2,12 @@
 
 Async Python bot for automated USDT-M futures trading on Binance.
 
-The bot implements two strategies:
+The bot implements three strategies:
 - **MomShort** (Momentum Short): Intraday VWAP-breakdown strategy for short-selling
 - **VWAPPullback**: Bidirectional VWAP pullback with EMA trend filter (supports long and short positions)
+- **PDHL** (Previous Day High/Low): Bidirectional breakout strategy using previous day's high/low levels
 
-Both strategies support **configurable timeframes** (1m, 5m, 15m, 30m, 1h) via WebSocket kline streams.
+All strategies support **configurable timeframes** (1m, 5m, 15m, 30m, 1h) via WebSocket kline streams.
 
 ## How the Strategy Works
 
@@ -19,7 +20,7 @@ Exits are checked every candle in order: stop-loss (5% above entry), take-profit
 
 The strategy is configured per-symbol in `trader/config.py` — parameters like TP/SL, min consolidation bars, confirmation bars, and VWAP proximity threshold vary per asset.
 
-## Active Portfolio (13 Bots)
+## Active Portfolio (17 Bots)
 
 ### MomShort Strategy
 | Symbol     | Timeframe | Return  | TP   | SL   | Leverage | Config               |
@@ -40,7 +41,15 @@ The strategy is configured per-symbol in `trader/config.py` — parameters like 
 | ETHUSDT      | 5m        | +31.28% | 10%  | 5%   | 5x       | bars=20, cfm=0       |
 | XRPUSDT      | 5m        | +29.21% | 10%  | 2%   | 20x      | bars=3, cfm=0        |
 | UNIUSDT      | 15m       | +31.71% | 10%  | 2%   | 20x      | bars=3, cfm=1        |
+| XMRUSDT      | 1m        | +35.76% | 7%   | 5%   | 20x      | bars=8, cfm=0        |
 | XAUUSDT      | 1m        | +7.67%  | 5%   | 5%   | 20x      | bars=3, cfm=1        |
+
+### PDHL Strategy
+| Symbol     | Timeframe | Return   | TP   | SL   | Leverage | Config               |
+|------------|-----------|----------|------|------|----------|----------------------|
+| LTCUSDT    | 1m        | +50.76%  | 3%   | 5%   | 20x      | cfm=1                |
+| LINKUSDT   | 1m        | +115.87% | 10%  | 5%   | 20x      | cfm=2                |
+| BCHUSDT    | 5m        | +68.46%  | 10%  | 5%   | 20x      | cfm=1                |
 
 ## Setup
 
@@ -62,7 +71,7 @@ SECRET_KEY=your_secret_key
 ### Quick Start (Recommended)
 
 ```bash
-# Start everything: 10 bots + dashboard
+# Start everything: 17 bots + dashboard
 make start
 
 # Stop everything
@@ -87,7 +96,7 @@ poetry run python -m trader serve --port 8080
 Access at http://localhost:8080
 
 **Features:**
-- Real-time bot status (all 10 bots always visible, even in COOLDOWN)
+- Real-time bot status (all 17 bots always visible, even in COOLDOWN)
 - Live price, VWAP, and P&L tracking
 - Position monitoring and trade history
 - WebSocket updates with heartbeat (bots publish state every candle)
