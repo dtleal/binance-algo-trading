@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -101,11 +101,12 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 		(nohup poetry run python -m trader pullback --symbol dashusdt --leverage 30 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol zecusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 8 --confirm-bars 2 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader orb --symbol ksmusdt --leverage 30 --sl 5.0 --range-mins 60 --be-r 2.0 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol magicusdt --leverage 30 --sl 5.0 --prox-pct 0.0 --confirm-bars 1 --pos-size 0.40 --tp 10.0 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader pdhl --symbol magicusdt --leverage 30 --sl 5.0 --prox-pct 0.0 --confirm-bars 1 --pos-size 0.40 --tp 10.0 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol aaveusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 2 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &)
 	@sleep 3
 	@echo "$(GREEN)✅ Bots started!$(NC)"
 	@echo ""
-	@echo "$(BLUE)Active Strategies (22 bots):$(NC)"
+	@echo "$(BLUE)Active Strategies (23 bots):$(NC)"
 	@echo "  📊 MomShort (30x leverage):"
 	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
 	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%)"
@@ -125,6 +126,7 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 	@echo "  📊 PDHL:"
 	@echo "     • LTCUSDT (1m, 30x, +50.76%), LINKUSDT (1m, 30x, +115.87%)"
 	@echo "     • BCHUSDT (5m, 30x, +68.46%), MAGICUSDT (1h, 30x, +90.75%)"
+	@echo "     • AAVEUSDT (5m, 30x, +42.04%)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -632,6 +634,12 @@ bot-magic-pdhl: ## Run PDHL bot for MAGICUSDT (tp=10% sl=5% cf=1 1h leverage=30,
 
 bot-magic-pdhl-dry: ## Run PDHL bot for MAGICUSDT in dry-run mode
 	poetry run python -m trader pdhl --symbol magicusdt --leverage 30 --sl 5.0 --prox-pct 0.0 --confirm-bars 1 --pos-size 0.40 --tp 10.0 --dry-run
+
+bot-aave: ## Run VWAPPullback bot for AAVEUSDT (5m, tp=10% sl=5% cf=2 prox=0.2%, champion +42.04%)
+	poetry run python -m trader pullback --symbol aaveusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 2 --vwap-prox 0.002 --pos-size 0.40
+
+bot-aave-dry: ## Run AAVEUSDT bot in dry-run mode
+	poetry run python -m trader pullback --symbol aaveusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 2 --vwap-prox 0.002 --pos-size 0.40 --dry-run
 
 bots-v2: redis ## Start all VWAPPullback V2 bots (trailing stop)
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"

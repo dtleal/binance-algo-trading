@@ -29,7 +29,7 @@ const CHAMPION: Record<string, { wr: number; trades: number; ret: number; tf: st
   DASHUSDT:     { wr: 53.8, trades: 171, ret: 22.06, tf: "15m", strat: "VWAPPullback" },
   ZECUSDT:      { wr: 53.9, trades: 280, ret: 25.55, tf: "5m",  strat: "VWAPPullback" },
   KSMUSDT:      { wr: 49.6, trades: 468, ret: 31.95, tf: "1h",  strat: "ORB"          },
-  AAVEUSDT:     { wr: 48.5, trades:1040, ret: 56.24, tf: "1m",  strat: "PDHL"         },
+  AAVEUSDT:     { wr: 57.4, trades: 310, ret: 42.04, tf: "5m",  strat: "VWAPPullback" },
   MAGICUSDT:    { wr: 53.9, trades: 618, ret: 90.75, tf: "1h",  strat: "PDHL"         },
 };
 
