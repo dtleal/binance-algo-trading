@@ -33,6 +33,7 @@ _EQUITY_STREAM = "equity:history"
 _EQUITY_MAXLEN = 2016   # 7 days × 24h × 12 snapshots/h (5 min interval)
 
 
+
 async def _equity_snapshot_loop() -> None:
     """Background task: snapshot account equity every 5 minutes into Redis."""
     import os
@@ -205,47 +206,32 @@ async def get_trades(symbol: str | None = None, days: int = 7):
 
     symbols = [symbol.upper()] if symbol else list(SYMBOL_CONFIGS.keys())
 
-    window_ms = 7 * 86_400_000  # Binance API max window per request
+    async def _fetch_symbol(sym: str) -> list[dict]:
+        try:
+            resp = await asyncio.to_thread(
+                lambda s=sym: client.rest_api.account_trade_list(symbol=s, limit=500)
+            )
+            return [
+                {
+                    "symbol":           t.symbol,
+                    "side":             t.side,
+                    "price":            _safe_float(t.price),
+                    "qty":              _safe_float(t.qty),
+                    "realized_pnl":     _safe_float(t.realized_pnl),
+                    "commission":       _safe_float(t.commission),
+                    "commission_asset": t.commission_asset,
+                    "time":             int(t.time),
+                    "order_id":         t.order_id,
+                    "buyer":            t.buyer,
+                }
+                for t in resp.data()
+                if int(t.time) >= cutoff_ms
+            ]
+        except Exception:
+            return []
 
-    # Build list of (symbol, win_start, win_end) tasks covering the full range
-    tasks: list[tuple[str, int, int]] = []
-    for sym in symbols:
-        win_start = cutoff_ms
-        while win_start < now_ms:
-            tasks.append((sym, win_start, min(win_start + window_ms, now_ms)))
-            win_start = min(win_start + window_ms, now_ms) + 1
-
-    sem = asyncio.Semaphore(5)  # max 5 concurrent Binance requests
-
-    async def _fetch_window(sym: str, st: int, et: int) -> list[dict]:
-        async with sem:
-            try:
-                resp = await asyncio.to_thread(
-                    lambda s=sym, a=st, b=et: client.rest_api.account_trade_list(
-                        symbol=s, start_time=a, end_time=b, limit=1000
-                    )
-                )
-                return [
-                    {
-                        "symbol":           t.symbol,
-                        "side":             t.side,
-                        "price":            _safe_float(t.price),
-                        "qty":              _safe_float(t.qty),
-                        "realized_pnl":     _safe_float(t.realized_pnl),
-                        "commission":       _safe_float(t.commission),
-                        "commission_asset": t.commission_asset,
-                        "time":             int(t.time),
-                        "order_id":         t.order_id,
-                        "buyer":            t.buyer,
-                    }
-                    for t in resp.data()
-                ]
-            except Exception:
-                return []
-
-    results = await asyncio.gather(*[_fetch_window(s, st, et) for s, st, et in tasks])
+    results = await asyncio.gather(*[_fetch_symbol(s) for s in symbols])
     all_trades: list[dict] = [t for batch in results for t in batch]
-
     all_trades.sort(key=lambda x: x["time"], reverse=True)
     return {"trades": all_trades}
 
