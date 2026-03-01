@@ -479,6 +479,25 @@ ZEC_CONFIG = SymbolConfig(
     vwap_dist_stop=0.03,  # exit if price >3% from VWAP in wrong direction
 )
 
+MAGIC_CONFIG = SymbolConfig(
+    symbol="MAGICUSDT",
+    asset="MAGIC",
+    tp_pct=10.0,        # Champion: 1h PDHL, +90.75% return (618 trades, 53.9% WR, maxDD=11.76%, maxCL=14)
+    sl_pct=5.0,
+    min_bars=0,
+    confirm_bars=1,
+    vwap_prox=0.0,
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=4,
+    qty_decimals=0,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="1h",
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -501,6 +520,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "1000PEPEUSDT": PEPE1000_CONFIG,
     "ZECUSDT": ZEC_CONFIG,
     "KSMUSDT": KSM_CONFIG,
+    "MAGICUSDT": MAGIC_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 

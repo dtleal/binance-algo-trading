@@ -30,6 +30,7 @@ const CHAMPION: Record<string, { wr: number; trades: number; ret: number; tf: st
   ZECUSDT:      { wr: 53.9, trades: 280, ret: 25.55, tf: "5m",  strat: "VWAPPullback" },
   KSMUSDT:      { wr: 49.6, trades: 468, ret: 31.95, tf: "1h",  strat: "ORB"          },
   AAVEUSDT:     { wr: 48.5, trades:1040, ret: 56.24, tf: "1m",  strat: "PDHL"         },
+  MAGICUSDT:    { wr: 53.9, trades: 618, ret: 90.75, tf: "1h",  strat: "PDHL"         },
 };
 
 const STATE_STYLE: Record<string, string> = {
