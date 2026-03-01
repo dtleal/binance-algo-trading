@@ -90,10 +90,13 @@ export default function Overview() {
   }, [trades, filter.symbol]);
 
   const totalEquity = summary?.total_equity ?? 0;
-  const unrealizedPnl = summary?.unrealized_pnl ?? 0;
   const pnl24h = summary?.pnl_24h ?? 0;
   const equityChange24h = summary?.equity_change_24h_pct ?? 0;
-  const openPositions = summary?.open_positions ?? 0;
+
+  // Open P&L computed from bot states (WebSocket) — no REST API needed
+  const botsInPosition = Object.values(bots).filter(b => b.state === "IN_POSITION");
+  const unrealizedPnl = botsInPosition.reduce((sum, b) => sum + (b.unrealized_pnl ?? 0), 0);
+  const openPositions = botsInPosition.length;
 
   const pnlCurveDaily    = useMemo(() => buildPnlCurve(filteredTrades), [filteredTrades]);
   const pnlCurvePerTrade = useMemo(() => buildPnlCurvePerTrade(filteredTrades), [filteredTrades]);
