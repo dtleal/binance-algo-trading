@@ -1,7 +1,36 @@
 import { useEffect, useState, useMemo } from "react";
-import { useBotStates } from "../hooks/useApi";
+import { useBotStates, useTrades } from "../hooks/useApi";
 import { WsEvent, BotState } from "../types";
 import BotLogsModal from "../components/BotLogsModal";
+
+type WinRateStat = { wins: number; total: number; rate: number };
+
+// Champion backtest win rates from onboarding sweeps
+// Format: { SYMBOL: { wr: win_rate_pct, trades: n_trades, ret: return_pct, tf: timeframe, strategy } }
+const CHAMPION: Record<string, { wr: number; trades: number; ret: number; tf: string; strat: string }> = {
+  AXSUSDT:      { wr: 52.3, trades: 285, ret: 40.10, tf: "1m",  strat: "MomShort"     },
+  SANDUSDT:     { wr: 34.0, trades: 250, ret: 27.61, tf: "5m",  strat: "MomShort"     },
+  MANAUSDT:     { wr: 52.9, trades: 295, ret: 30.54, tf: "1m",  strat: "MomShort"     },
+  GALAUSDT:     { wr: 52.1, trades: 357, ret: 34.85, tf: "1m",  strat: "VWAPPullback" },
+  DOGEUSDT:     { wr: 52.5, trades: 322, ret: 42.75, tf: "5m",  strat: "VWAPPullback" },
+  "1000SHIBUSDT":{ wr: 53.1, trades: 354, ret: 37.51, tf: "5m",  strat: "VWAPPullback" },
+  ETHUSDT:      { wr: 51.0, trades: 251, ret: 31.87, tf: "5m",  strat: "VWAPPullback" },
+  SOLUSDT:      { wr: 53.3, trades: 302, ret: 28.13, tf: "1m",  strat: "MomShort"     },
+  AVAXUSDT:     { wr: 50.6, trades: 246, ret: 31.12, tf: "1m",  strat: "VWAPPullback" },
+  XRPUSDT:      { wr: 45.0, trades: 351, ret: 30.15, tf: "5m",  strat: "VWAPPullback" },
+  XAUUSDT:      { wr: 49.1, trades:  53, ret:  7.67, tf: "1m",  strat: "VWAPPullback" },
+  LTCUSDT:      { wr: 57.1, trades:1003, ret: 50.76, tf: "1m",  strat: "PDHL"         },
+  LINKUSDT:     { wr: 49.8, trades: 876, ret:115.87, tf: "1m",  strat: "PDHL"         },
+  BCHUSDT:      { wr: 53.8, trades: 954, ret: 68.46, tf: "5m",  strat: "PDHL"         },
+  XMRUSDT:      { wr: 52.1, trades: 349, ret: 35.76, tf: "1m",  strat: "VWAPPullback" },
+  APTUSDT:      { wr: 64.6, trades:  65, ret: 19.66, tf: "5m",  strat: "VWAPPullback" },
+  UNIUSDT:      { wr: 43.2, trades: 287, ret: 31.71, tf: "15m", strat: "VWAPPullback" },
+  "1000PEPEUSDT":{ wr: 58.1, trades: 198, ret: 38.86, tf: "5m",  strat: "VWAPPullback" },
+  DASHUSDT:     { wr: 53.8, trades: 171, ret: 22.06, tf: "15m", strat: "VWAPPullback" },
+  ZECUSDT:      { wr: 53.9, trades: 280, ret: 25.55, tf: "5m",  strat: "VWAPPullback" },
+  KSMUSDT:      { wr: 49.6, trades: 468, ret: 31.95, tf: "1h",  strat: "ORB"          },
+  AAVEUSDT:     { wr: 48.5, trades:1040, ret: 56.24, tf: "1m",  strat: "PDHL"         },
+};
 
 const STATE_STYLE: Record<string, string> = {
   SCANNING:    "bg-blue-900/40 text-blue-300 border border-blue-700/50",
@@ -25,10 +54,12 @@ function fmtPrice(n: number | undefined, decimals = 4) {
 function BotCard({
   state,
   liveEvents,
+  winRate,
   onClick
 }: {
   state: BotState;
   liveEvents: WsEvent[];
+  winRate?: WinRateStat;  // live WR from actual trades
   onClick: () => void;
 }) {
   const lastCandle = [...liveEvents]
@@ -49,16 +80,53 @@ function BotCard({
       className="bg-gray-800 border border-gray-700 rounded-xl p-5 space-y-4 cursor-pointer hover:border-emerald-600 transition-colors"
     >
       {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-base font-bold text-white">
-            {state.symbol}
-            <span className="ml-2 text-xs font-normal text-emerald-400 bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-700/50">
-              {state.strategy}
-            </span>
+      <div className="flex items-start justify-between gap-2">
+        {/* Left: symbol + strategy */}
+        <div className="flex-1 min-w-0">
+          <p className="text-base font-bold text-white truncate">
+            {state.symbol.replace("1000", "1000 ")}
           </p>
+          <span className="text-xs font-normal text-emerald-400 bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-700/50">
+            {state.strategy}
+          </span>
         </div>
-        <div className="flex items-center gap-2">
+
+        {/* Middle: win rate (backtest champion + live comparison) */}
+        {(() => {
+          const champ = CHAMPION[state.symbol];
+          const wr = champ?.wr ?? null;
+          const liveWr = winRate && winRate.total >= 5 ? winRate.rate : null;
+          return (
+            <div className="flex flex-col items-center flex-shrink-0 min-w-[60px]">
+              {/* Backtest WR (primary) */}
+              {wr !== null ? (
+                <>
+                  <p className={`text-sm font-bold leading-tight ${
+                    wr >= 50 ? "text-emerald-400" : wr >= 40 ? "text-amber-400" : "text-red-400"
+                  }`}>
+                    {wr.toFixed(0)}%
+                  </p>
+                  <p className="text-[10px] text-gray-500 leading-tight">
+                    BT WR
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm font-bold text-gray-600 leading-tight">—</p>
+              )}
+              {/* Live WR (secondary, only if ≥5 trades) */}
+              {liveWr !== null && (
+                <p className={`text-[10px] leading-tight mt-0.5 font-medium ${
+                  liveWr >= 50 ? "text-emerald-300" : liveWr >= 40 ? "text-amber-300" : "text-red-300"
+                }`}>
+                  {liveWr.toFixed(0)}% live
+                </p>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* Right: status */}
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
           {state.dry_run && (
             <span className="text-[10px] px-2 py-0.5 rounded bg-gray-700 text-gray-400">
               DRY RUN
@@ -246,9 +314,24 @@ function SectionHeader({ label, count, color }: { label: string; count: number; 
 
 export default function Bots({ events }: { events: WsEvent[] }) {
   const { bots } = useBotStates();
+  const { trades } = useTrades(30);
   const [log, setLog] = useState<{ ts: string; msg: string; color: string }[]>([]);
   const [selectedBot, setSelectedBot] = useState<{ key: string; symbol: string } | null>(null);
   const [activeFilter, setActiveFilter] = useState<BotFilter>("all");
+
+  const winRateBySymbol = useMemo(() => {
+    const result: Record<string, WinRateStat> = {};
+    for (const t of trades) {
+      if (t.realized_pnl === 0) continue;
+      if (!result[t.symbol]) result[t.symbol] = { wins: 0, total: 0, rate: 0 };
+      result[t.symbol].total++;
+      if (t.realized_pnl > 0) result[t.symbol].wins++;
+    }
+    for (const sym in result) {
+      result[sym].rate = (result[sym].wins / result[sym].total) * 100;
+    }
+    return result;
+  }, [trades]);
 
   useEffect(() => {
     const last = events[0];
@@ -379,6 +462,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
                     key={`${b.symbol}:${b.strategy}`}
                     state={b}
                     liveEvents={events}
+                    winRate={winRateBySymbol[b.symbol]}
                     onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
                   />
                 ))}
@@ -394,6 +478,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
                     key={`${b.symbol}:${b.strategy}`}
                     state={b}
                     liveEvents={events}
+                    winRate={winRateBySymbol[b.symbol]}
                     onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
                   />
                 ))}
@@ -409,6 +494,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
                     key={`${b.symbol}:${b.strategy}`}
                     state={b}
                     liveEvents={events}
+                    winRate={winRateBySymbol[b.symbol]}
                     onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
                   />
                 ))}
@@ -423,6 +509,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
               key={`${b.symbol}:${b.strategy}`}
               state={b}
               liveEvents={events}
+              winRate={winRateBySymbol[b.symbol]}
               onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
             />
           ))}
