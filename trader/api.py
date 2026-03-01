@@ -215,30 +215,33 @@ async def get_trades(symbol: str | None = None, days: int = 7):
             tasks.append((sym, win_start, min(win_start + window_ms, now_ms)))
             win_start = min(win_start + window_ms, now_ms) + 1
 
+    sem = asyncio.Semaphore(5)  # max 5 concurrent Binance requests
+
     async def _fetch_window(sym: str, st: int, et: int) -> list[dict]:
-        try:
-            resp = await asyncio.to_thread(
-                lambda s=sym, a=st, b=et: client.rest_api.account_trade_list(
-                    symbol=s, startTime=a, endTime=b, limit=1000
+        async with sem:
+            try:
+                resp = await asyncio.to_thread(
+                    lambda s=sym, a=st, b=et: client.rest_api.account_trade_list(
+                        symbol=s, start_time=a, end_time=b, limit=1000
+                    )
                 )
-            )
-            return [
-                {
-                    "symbol":           t.symbol,
-                    "side":             t.side,
-                    "price":            _safe_float(t.price),
-                    "qty":              _safe_float(t.qty),
-                    "realized_pnl":     _safe_float(t.realized_pnl),
-                    "commission":       _safe_float(t.commission),
-                    "commission_asset": t.commission_asset,
-                    "time":             int(t.time),
-                    "order_id":         t.order_id,
-                    "buyer":            t.buyer,
-                }
-                for t in resp.data()
-            ]
-        except Exception:
-            return []
+                return [
+                    {
+                        "symbol":           t.symbol,
+                        "side":             t.side,
+                        "price":            _safe_float(t.price),
+                        "qty":              _safe_float(t.qty),
+                        "realized_pnl":     _safe_float(t.realized_pnl),
+                        "commission":       _safe_float(t.commission),
+                        "commission_asset": t.commission_asset,
+                        "time":             int(t.time),
+                        "order_id":         t.order_id,
+                        "buyer":            t.buyer,
+                    }
+                    for t in resp.data()
+                ]
+            except Exception:
+                return []
 
     results = await asyncio.gather(*[_fetch_window(s, st, et) for s, st, et in tasks])
     all_trades: list[dict] = [t for batch in results for t in batch]
