@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   AreaChart, Area, BarChart, Bar, Cell,
@@ -51,7 +51,25 @@ function buildPnlCurve(trades: { time: number; realized_pnl: number }[]) {
   let running = 0;
   return Object.entries(byDay).sort().map(([date, dp]) => {
     running += dp;
-    return { date: date.slice(5), pnl: parseFloat(running.toFixed(2)) };
+    return { date: date.slice(5), pnl: parseFloat(running.toFixed(2)), tradePnl: null as number | null, symbol: null as string | null };
+  });
+}
+
+function buildPnlCurvePerTrade(trades: { time: number; realized_pnl: number; symbol?: string }[]) {
+  const sorted = [...trades]
+    .filter(t => t.realized_pnl !== 0)
+    .sort((a, b) => a.time - b.time);
+  let running = 0;
+  return sorted.map(t => {
+    running += t.realized_pnl;
+    const dt = new Date(t.time);
+    const date = `${(dt.getMonth() + 1).toString().padStart(2, "0")}/${dt.getDate().toString().padStart(2, "0")} ${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`;
+    return {
+      date,
+      pnl: parseFloat(running.toFixed(2)),
+      tradePnl: parseFloat(t.realized_pnl.toFixed(2)),
+      symbol: t.symbol ?? null,
+    };
   });
 }
 
@@ -62,6 +80,7 @@ export default function Overview() {
   const { performance }  = usePerformance();
   const { positions }    = usePositions();
   const { bots }         = useBotStates();
+  const [pnlView, setPnlView] = useState<"trade" | "daily">("trade");
 
   const filteredTrades = useMemo(() => {
     return trades.filter(t => {
@@ -76,7 +95,9 @@ export default function Overview() {
   const equityChange24h = summary?.equity_change_24h_pct ?? 0;
   const openPositions = summary?.open_positions ?? 0;
 
-  const pnlCurve  = useMemo(() => buildPnlCurve(filteredTrades), [filteredTrades]);
+  const pnlCurveDaily    = useMemo(() => buildPnlCurve(filteredTrades), [filteredTrades]);
+  const pnlCurvePerTrade = useMemo(() => buildPnlCurvePerTrade(filteredTrades), [filteredTrades]);
+  const pnlCurve  = pnlView === "trade" ? pnlCurvePerTrade : pnlCurveDaily;
   const dailyPnl  = useMemo(() => buildDailyPnl(filteredTrades), [filteredTrades]);
   const activeBots = Object.values(bots).length;
 
@@ -124,17 +145,42 @@ export default function Overview() {
             <p className="text-sm font-semibold text-gray-300">Cumulative P&L</p>
             <p className="text-xs text-gray-500 mt-1">Realized P&L · Last 30 days</p>
           </div>
-          {pnlCurve.length > 0 && (
-            <div className="text-right">
-              <p className={`text-2xl font-bold ${
-                pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "text-emerald-400" : "text-red-400"
-              }`}>
-                {pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "+" : ""}
-                {fmtUSD(pnlCurve[pnlCurve.length - 1].pnl)}
-              </p>
-              <p className="text-xs text-gray-500">Realized</p>
+          <div className="flex items-center gap-3">
+            {/* View toggle */}
+            <div className="flex items-center bg-gray-900 border border-gray-700 rounded-lg p-0.5 text-xs">
+              <button
+                onClick={() => setPnlView("trade")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  pnlView === "trade"
+                    ? "bg-emerald-600 text-white"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Per Trade
+              </button>
+              <button
+                onClick={() => setPnlView("daily")}
+                className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
+                  pnlView === "daily"
+                    ? "bg-emerald-600 text-white"
+                    : "text-gray-400 hover:text-gray-200"
+                }`}
+              >
+                Daily
+              </button>
             </div>
-          )}
+            {pnlCurve.length > 0 && (
+              <div className="text-right">
+                <p className={`text-2xl font-bold ${
+                  pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "text-emerald-400" : "text-red-400"
+                }`}>
+                  {pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "+" : ""}
+                  {fmtUSD(pnlCurve[pnlCurve.length - 1].pnl)}
+                </p>
+                <p className="text-xs text-gray-500">Realized</p>
+              </div>
+            )}
+          </div>
         </div>
         <ResponsiveContainer width="100%" height={280}>
           <AreaChart data={pnlCurve}>
@@ -168,8 +214,16 @@ export default function Overview() {
                 return (
                   <div className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 shadow-xl text-xs">
                     <p className="text-gray-400 mb-1">{d.date}</p>
+                    {d.symbol && (
+                      <p className="text-gray-500 mb-1">{d.symbol.replace("USDT", "").replace("1000", "")}</p>
+                    )}
+                    {d.tradePnl !== null && (
+                      <p className={`mb-1 ${d.tradePnl >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+                        Trade: {d.tradePnl >= 0 ? "+" : ""}{fmtUSD(d.tradePnl)}
+                      </p>
+                    )}
                     <span className={`font-bold ${d.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {d.pnl >= 0 ? "+" : ""}{fmtUSD(d.pnl)}
+                      Cumul: {d.pnl >= 0 ? "+" : ""}{fmtUSD(d.pnl)}
                     </span>
                   </div>
                 );
@@ -181,7 +235,8 @@ export default function Overview() {
               stroke={pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "#10b981" : "#ef4444"}
               strokeWidth={2}
               fill={pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "url(#colorPnl)" : "url(#colorPnlNeg)"}
-              dot={false}
+              dot={pnlView === "trade" ? { r: 3, fill: pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "#10b981" : "#ef4444", strokeWidth: 0 } : false}
+              activeDot={{ r: 5 }}
             />
           </AreaChart>
         </ResponsiveContainer>

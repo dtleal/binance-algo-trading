@@ -439,6 +439,26 @@ DASH_CONFIG = SymbolConfig(
     vwap_dist_stop=0.03,
 )
 
+KSM_CONFIG = SymbolConfig(
+    symbol="KSMUSDT",
+    asset="KSM",
+    tp_pct=10.0,        # Champion: 1h ORB, +31.95% return (468 trades, 49.6% WR, maxDD=5.63%, maxCL=6)
+    sl_pct=5.0,
+    min_bars=0,
+    confirm_bars=0,
+    vwap_prox=0.0,
+    entry_start_min=360,   # 06:00 UTC
+    entry_cutoff_min=1080, # 18:00 UTC
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=2,
+    qty_decimals=2,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="1h",
+    vwap_dist_stop=0.02,  # vds=2% from champion config
+)
+
 ZEC_CONFIG = SymbolConfig(
     symbol="ZECUSDT",
     asset="ZEC",
@@ -480,6 +500,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "UNIUSDT": UNI_CONFIG,
     "1000PEPEUSDT": PEPE1000_CONFIG,
     "ZECUSDT": ZEC_CONFIG,
+    "KSMUSDT": KSM_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 
