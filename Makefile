@@ -87,7 +87,7 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol avaxusdt --leverage 30 --tp 7.0 --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 30 --tp 7.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 5 --tp 7.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.03 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 30 --tp 10.0 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 10 --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 30 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
@@ -113,7 +113,7 @@ bots: redis ## Start all validated bots with optimal configurations (auto-reads 
 	@echo ""
 	@echo "  📊 VWAPPullback:"
 	@echo "     • GALAUSDT (1m, 30x, +34.85%), AVAXUSDT (1m, 30x, +31.12%)"
-	@echo "     • DOGEUSDT (5m, 30x, +42.75%), 1000SHIBUSDT (5m, 30x, +37.51%)"
+	@echo "     • DOGEUSDT (5m, 30x, +42.75%), 1000SHIBUSDT (5m, 5x, pos=3%)"
 	@echo "     • XRPUSDT (5m, 30x, +30.15%), ETHUSDT (5m, 10x, +31.87%)"
 	@echo "     • XAUUSDT (1m, 30x, +7.67%), XMRUSDT (1m, 30x, +35.76%)"
 	@echo "     • UNIUSDT (15m, 30x, +31.71%), APTUSDT (5m, 30x, +19.66%)"
