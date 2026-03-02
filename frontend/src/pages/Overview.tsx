@@ -7,6 +7,7 @@ import { useAccountSummary, useTrades, usePositions, useBotStates } from "../hoo
 import { useFilter } from "../contexts/FilterContext";
 import PerformanceMetrics from "../components/PerformanceMetrics";
 import PerformanceRankings from "../components/PerformanceRankings";
+import AlertSettings from "../components/AlertSettings";
 
 function Card({
   label, value, sub, color = "text-white",
@@ -189,6 +190,8 @@ export default function Overview() {
           sub={`${activeBots} bot${activeBots !== 1 ? "s" : ""} active`}
         />
       </div>
+
+      <AlertSettings />
 
       {/* Filtered Analysis — responds to symbol / strategy / date filters */}
       <SectionHeader title="Filtered Analysis" />
