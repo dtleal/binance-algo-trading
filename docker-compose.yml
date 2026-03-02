@@ -18,6 +18,41 @@ services:
     networks:
       - trader-network
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: binance-trader-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-trader}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trader_password}
+      POSTGRES_DB: ${POSTGRES_DB:-binance_trader}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-trader}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trader-network
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: binance-trader-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@trader.com
+      PGADMIN_DEFAULT_PASSWORD: ${POSTGRES_PASSWORD:-trader_password}
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - trader-network
+
   backend:
     build:
       context: .
@@ -30,11 +65,18 @@ services:
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_SECRET_KEY=${BINANCE_SECRET_KEY}
       - SOCKS_PROXY=${SOCKS_PROXY:-}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER:-trader}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-trader_password}
+      - POSTGRES_DB=${POSTGRES_DB:-binance_trader}
     volumes:
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
     depends_on:
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     restart: unless-stopped
     networks:
@@ -42,6 +84,8 @@ services:
 
 volumes:
   redis-data:
+    driver: local
+  pg_data:
     driver: local
 
 networks:

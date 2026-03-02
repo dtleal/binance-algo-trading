@@ -6,6 +6,56 @@ from trader.config import DEFAULT_SYMBOL, DEFAULT_STOP_LOSS_PCT, DEFAULT_LEVERAG
 from trader.monitor import run_monitor
 
 
+def _load_symbol_config(symbol: str, strategy_name: str):
+    """Load (SymbolConfig, extras) from DB; fallback to Python config if DB unavailable.
+
+    Also checks active flag — exits with 0 if symbol or strategy is disabled.
+    extras dict has: ema_period, max_trades_per_day, fast_period, slow_period,
+                     range_mins, pdhl_prox_pct, be_r, trail_step, leverage, active.
+    """
+    from dotenv import load_dotenv as _ld
+    _ld()
+
+    async def _fetch():
+        try:
+            import db
+            from db.queries.symbol_config import get_symbol_config as _db_cfg
+            from db.queries.strategy import is_bot_active
+            await db.init_pool()
+            pool = db.get_pool()
+            active, reason = await is_bot_active(pool, symbol, strategy_name)
+            if not active:
+                await db.close_pool()
+                return None, reason
+            cfg, extras = await _db_cfg(pool, symbol)
+            await db.close_pool()
+            return (cfg, extras), ""
+        except Exception as e:
+            return "fallback", str(e)
+
+    result, reason = asyncio.run(_fetch())
+
+    if result is None:
+        print(f"⛔ {symbol} ({strategy_name}): {reason} — bot não iniciado")
+        raise SystemExit(0)
+
+    if result == "fallback":
+        # DB unavailable or symbol not found — use Python config
+        from trader.config import get_symbol_config
+        cfg = get_symbol_config(symbol)
+        extras = {
+            "strategy_name": strategy_name,
+            "ema_period": None, "max_trades_per_day": None,
+            "fast_period": None, "slow_period": None,
+            "range_mins": None, "pdhl_prox_pct": None,
+            "be_r": None, "trail_step": None,
+            "leverage": DEFAULT_LEVERAGE, "active": True,
+        }
+        return cfg, extras
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="Binance AXS Trader")
     subparsers = parser.add_subparsers(dest="command")
@@ -298,118 +348,104 @@ def main():
         _run_async(_serve(args))
 
     elif args.command == "pullback":
+        cfg, extras = _load_symbol_config(args.symbol.upper(), "VWAPPullback")
         from trader.bot_vwap_pullback import VWAPPullbackBot
-        # Auto-detect interval and vwap_dist_stop from SYMBOL_CONFIGS if available
-        interval = "1m"
-        vwap_dist_stop = 0.0
-        if args.symbol.upper() in SYMBOL_CONFIGS:
-            cfg = SYMBOL_CONFIGS[args.symbol.upper()]
-            interval = cfg.interval
-            vwap_dist_stop = cfg.vwap_dist_stop
         bot = VWAPPullbackBot(
             symbol=args.symbol,
-            leverage=args.leverage,
+            leverage=args.leverage or extras["leverage"],
             capital=args.capital,
             dry_run=args.dry_run,
-            tp_pct=args.tp,
-            sl_pct=args.sl,
-            min_bars=args.min_bars,
-            confirm_bars=args.confirm_bars,
-            vwap_prox=args.vwap_prox,
+            tp_pct=args.tp or cfg.tp_pct,
+            sl_pct=args.sl or cfg.sl_pct,
+            min_bars=args.min_bars if args.min_bars != 0 else cfg.min_bars,
+            confirm_bars=args.confirm_bars if args.confirm_bars != 0 else cfg.confirm_bars,
+            vwap_prox=args.vwap_prox or cfg.vwap_prox,
             vwap_window_days=args.vwap_window_days,
-            pos_size_pct=args.pos_size,
-            ema_period=args.ema_period,
-            max_trades_per_day=args.max_trades,
-            interval=interval,
-            vwap_dist_stop=vwap_dist_stop,
+            pos_size_pct=args.pos_size or cfg.pos_size_pct,
+            ema_period=args.ema_period or extras.get("ema_period") or 200,
+            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
+            interval=cfg.interval,
+            vwap_dist_stop=cfg.vwap_dist_stop,
         )
         _run_async(bot.run())
 
     elif args.command == "pullback-v2":
+        cfg, extras = _load_symbol_config(args.symbol.upper(), "VWAPPullback")
         from trader.bot_vwap_pullback_v2 import VWAPPullbackBotV2
-        interval = "1m"
-        if args.symbol.upper() in SYMBOL_CONFIGS:
-            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
         bot = VWAPPullbackBotV2(
             symbol=args.symbol,
-            leverage=args.leverage,
+            leverage=args.leverage or extras["leverage"],
             capital=args.capital,
             dry_run=args.dry_run,
-            sl_pct=args.sl,
-            min_bars=args.min_bars,
-            confirm_bars=args.confirm_bars,
-            vwap_prox=args.vwap_prox,
+            sl_pct=args.sl or cfg.sl_pct,
+            min_bars=args.min_bars if args.min_bars != 0 else cfg.min_bars,
+            confirm_bars=args.confirm_bars if args.confirm_bars != 0 else cfg.confirm_bars,
+            vwap_prox=args.vwap_prox or cfg.vwap_prox,
             vwap_window_days=args.vwap_window_days,
-            pos_size_pct=args.pos_size,
-            ema_period=args.ema_period,
-            max_trades_per_day=args.max_trades,
-            interval=interval,
+            pos_size_pct=args.pos_size or cfg.pos_size_pct,
+            ema_period=args.ema_period or extras.get("ema_period") or 200,
+            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
+            interval=cfg.interval,
         )
         _run_async(bot.run())
 
     elif args.command == "ema-scalp":
+        cfg, extras = _load_symbol_config(args.symbol.upper(), "EMAScalp")
         from trader.bot_ema_scalp import EMAScalpBot
-        interval = "1m"
-        if args.symbol.upper() in SYMBOL_CONFIGS:
-            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
         bot = EMAScalpBot(
             symbol=args.symbol,
-            leverage=args.leverage,
+            leverage=args.leverage or extras["leverage"],
             capital=args.capital,
             dry_run=args.dry_run,
-            sl_pct=args.sl,
-            fast_period=args.fast_period,
-            slow_period=args.slow_period,
-            vol_filter=args.vol_filter,
-            max_trades_per_day=args.max_trades,
-            pos_size_pct=args.pos_size,
-            be_r=args.be_r,
-            trail_step=args.trail_step,
-            interval=interval,
+            sl_pct=args.sl or cfg.sl_pct,
+            fast_period=args.fast_period or extras.get("fast_period") or 8,
+            slow_period=args.slow_period or extras.get("slow_period") or 21,
+            vol_filter=args.vol_filter if args.vol_filter else cfg.vol_filter,
+            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
+            pos_size_pct=args.pos_size or cfg.pos_size_pct,
+            be_r=args.be_r or extras.get("be_r") or 2.0,
+            trail_step=args.trail_step or extras.get("trail_step") or 0.5,
+            interval=cfg.interval,
         )
         _run_async(bot.run())
 
     elif args.command == "orb":
+        cfg, extras = _load_symbol_config(args.symbol.upper(), "ORB")
         from trader.bot_orb import ORBBot
-        interval = "1m"
-        if args.symbol.upper() in SYMBOL_CONFIGS:
-            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
         bot = ORBBot(
             symbol=args.symbol,
-            leverage=args.leverage,
+            leverage=args.leverage or extras["leverage"],
             capital=args.capital,
             dry_run=args.dry_run,
-            sl_pct=args.sl,
-            range_mins=args.range_mins,
+            sl_pct=args.sl or cfg.sl_pct,
+            range_mins=args.range_mins or extras.get("range_mins") or 30,
             buffer_pct=args.buffer_pct,
-            vol_filter=args.vol_filter,
-            max_trades_per_day=args.max_trades,
-            pos_size_pct=args.pos_size,
-            be_r=args.be_r,
-            trail_step=args.trail_step,
-            interval=interval,
+            vol_filter=args.vol_filter if args.vol_filter else cfg.vol_filter,
+            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
+            pos_size_pct=args.pos_size or cfg.pos_size_pct,
+            be_r=args.be_r or extras.get("be_r") or 2.0,
+            trail_step=args.trail_step or extras.get("trail_step") or 0.5,
+            interval=cfg.interval,
         )
         _run_async(bot.run())
 
     elif args.command == "pdhl":
+        cfg, extras = _load_symbol_config(args.symbol.upper(), "PDHL")
         from trader.bot_pdhl import PDHLBot
-        interval = "1m"
-        if args.symbol.upper() in SYMBOL_CONFIGS:
-            interval = SYMBOL_CONFIGS[args.symbol.upper()].interval
         bot = PDHLBot(
             symbol=args.symbol,
-            leverage=args.leverage,
+            leverage=args.leverage or extras["leverage"],
             capital=args.capital,
             dry_run=args.dry_run,
-            sl_pct=args.sl,
-            prox_pct=args.prox_pct,
-            confirm_bars=args.confirm_bars,
-            max_trades_per_day=args.max_trades,
-            pos_size_pct=args.pos_size,
-            be_r=args.be_r,
-            trail_step=args.trail_step,
-            tp_pct=args.tp,
-            interval=interval,
+            sl_pct=args.sl or cfg.sl_pct,
+            prox_pct=args.prox_pct or extras.get("pdhl_prox_pct") or 0.002,
+            confirm_bars=args.confirm_bars if args.confirm_bars != 0 else cfg.confirm_bars,
+            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
+            pos_size_pct=args.pos_size or cfg.pos_size_pct,
+            be_r=args.be_r or extras.get("be_r") or 2.0,
+            trail_step=args.trail_step or extras.get("trail_step") or 0.5,
+            tp_pct=args.tp or cfg.tp_pct or None,
+            interval=cfg.interval,
         )
         _run_async(bot.run())
 
@@ -420,12 +456,11 @@ def main():
         plot_pnl(days=args.days)
 
     elif args.command == "bot":
+        cfg, extras = _load_symbol_config(args.symbol.upper(), "MomShort")
         from trader.bot import MomShortBot
-        from trader.config import get_symbol_config
-        cfg = get_symbol_config(args.symbol)
         bot = MomShortBot(
             cfg=cfg,
-            leverage=args.leverage,
+            leverage=args.leverage or extras["leverage"],
             capital=args.capital,
             dry_run=args.dry_run,
         )

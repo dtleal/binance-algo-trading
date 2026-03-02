@@ -35,7 +35,7 @@ _EQUITY_MAXLEN = 2016   # 7 days × 24h × 12 snapshots/h (5 min interval)
 
 
 async def _equity_snapshot_loop() -> None:
-    """Background task: snapshot account equity every 5 minutes into Redis."""
+    """Background task: snapshot account equity every 5 minutes into Redis and DB."""
     import os
     import redis.asyncio as aioredis
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
@@ -44,7 +44,10 @@ async def _equity_snapshot_loop() -> None:
     while True:
         try:
             summary = await get_account_summary()
-            ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+            now = datetime.now(timezone.utc)
+            ts = int(now.timestamp() * 1000)
+
+            # Write to Redis stream (short-term, 7-day window)
             await r.xadd(
                 _EQUITY_STREAM,
                 {
@@ -56,6 +59,25 @@ async def _equity_snapshot_loop() -> None:
                 maxlen=_EQUITY_MAXLEN,
                 approximate=True,
             )
+
+            # Write to DB (persistent, long-term)
+            try:
+                import db
+                pool = db.get_pool()
+                await pool.execute(
+                    """
+                    INSERT INTO equity_snapshots (snapshot_time, total_equity, unrealized_pnl, total_balance)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (snapshot_time) DO NOTHING
+                    """,
+                    now,
+                    summary["total_equity"],
+                    summary["unrealized_pnl"],
+                    summary["total_balance"],
+                )
+            except Exception:
+                pass  # DB write failure is non-fatal
+
         except Exception:
             pass
         await asyncio.sleep(300)
@@ -73,7 +95,26 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def _startup():
+    import db
+    import db.migrate as db_migrate
+    import db.sync_trades as db_sync
+
+    try:
+        await db.init_pool()
+        await db_migrate.run()
+        asyncio.create_task(db_sync.run_sync_loop(db.get_pool(), await get_client()))
+    except Exception as e:
+        # DB unavailable — log and continue (Binance fallback still works)
+        import logging
+        logging.getLogger("trader.api").warning("DB init failed: %s — falling back to Binance API", e)
+
     asyncio.create_task(_equity_snapshot_loop())
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    import db
+    await db.close_pool()
 
 # ── Binance client (lazy, shared) ────────────────────────────────────────────
 
@@ -159,79 +200,39 @@ async def get_positions():
 
 @app.get("/api/test_trades")
 async def test_trades_endpoint():
-    """Test endpoint to verify what symbols have trades"""
-    import asyncio
-    from datetime import datetime, timezone
-
-    client = await get_client()
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    start_ms = now_ms - 90 * 86_400_000  # 90 days
-
-    result = {"symbols_tested": [], "total_trades": 0}
-
-    # Test each configured symbol (no time filter to get all trades)
-    for sym in SYMBOL_CONFIGS.keys():
-        try:
-            resp = await asyncio.to_thread(
-                lambda s=sym: client.rest_api.account_trade_list(
-                    symbol=s, limit=500
-                )
-            )
-            trades_data = resp.data()
-            count = len(trades_data)
-            sample = None
-            if count > 0:
-                # Get first trade details
-                t = trades_data[0]
-                sample = {
-                    "time": int(t.time),
-                    "date": datetime.fromtimestamp(int(t.time)/1000, tz=timezone.utc).isoformat(),
-                    "side": t.side,
-                    "price": _safe_float(t.price),
-                    "qty": _safe_float(t.qty),
-                    "pnl": _safe_float(t.realized_pnl),
-                }
-            result["symbols_tested"].append({"symbol": sym, "count": count, "sample": sample})
-            result["total_trades"] += count
-        except Exception as e:
-            result["symbols_tested"].append({"symbol": sym, "error": str(e)})
-
-    return result
+    """Summary of trades per symbol from DB."""
+    import db
+    pool = db.get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT symbol,
+               COUNT(*) AS total_fills,
+               SUM(CASE WHEN realized_pnl != 0 THEN 1 ELSE 0 END) AS closing_fills,
+               MIN(trade_time) AS earliest,
+               MAX(trade_time) AS latest
+        FROM trades
+        GROUP BY symbol
+        ORDER BY symbol
+        """
+    )
+    symbols = [
+        {
+            "symbol":        r["symbol"],
+            "total_fills":   r["total_fills"],
+            "closing_fills": r["closing_fills"],
+            "earliest":      r["earliest"].isoformat() if r["earliest"] else None,
+            "latest":        r["latest"].isoformat() if r["latest"] else None,
+        }
+        for r in rows
+    ]
+    return {"symbols": symbols, "total_fills": sum(r["total_fills"] for r in symbols)}
 
 @app.get("/api/trades")
 async def get_trades(symbol: str | None = None, days: int = 7):
-    client = await get_client()
-    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    cutoff_ms = now_ms - days * 86_400_000
-
-    symbols = [symbol.upper()] if symbol else list(SYMBOL_CONFIGS.keys())
-
-    async def _fetch_symbol(sym: str) -> list[dict]:
-        try:
-            resp = await asyncio.to_thread(
-                lambda s=sym: client.rest_api.account_trade_list(symbol=s, limit=500)
-            )
-            return [
-                {
-                    "symbol":           t.symbol,
-                    "side":             t.side,
-                    "price":            _safe_float(t.price),
-                    "qty":              _safe_float(t.qty),
-                    "realized_pnl":     _safe_float(t.realized_pnl),
-                    "commission":       _safe_float(t.commission),
-                    "commission_asset": t.commission_asset,
-                    "time":             int(t.time),
-                    "order_id":         t.order_id,
-                    "buyer":            t.buyer,
-                }
-                for t in resp.data()
-                if int(t.time) >= cutoff_ms
-            ]
-        except Exception:
-            return []
-
-    results = await asyncio.gather(*[_fetch_symbol(s) for s in symbols])
-    all_trades: list[dict] = [t for batch in results for t in batch]
+    import db
+    from db.queries.trades import get_trades as db_get_trades
+    pool = db.get_pool()
+    all_trades = await db_get_trades(pool, symbol=symbol, days=days)
     all_trades.sort(key=lambda x: x["time"], reverse=True)
     return {"trades": all_trades}
 
@@ -263,33 +264,10 @@ async def get_klines(symbol: str, interval: str = "1m", limit: int = 500):
 
 @app.get("/api/commissions")
 async def get_commissions(days: int = 30):
-    data = await get_trades(days=days)
-    by_asset: dict[str, float] = {}
-    by_symbol: dict[str, float] = {}
-    daily: dict[str, float] = {}
-
-    for t in data["trades"]:
-        asset = t["commission_asset"]
-        amt   = t["commission"]
-        sym   = t["symbol"]
-        date  = datetime.fromtimestamp(t["time"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
-
-        by_asset[asset]   = by_asset.get(asset, 0.0)   + amt
-        by_symbol[sym]    = by_symbol.get(sym, 0.0)    + amt
-        if asset == "USDT":
-            daily[date] = daily.get(date, 0.0) + amt
-
-    sorted_daily = [
-        {"date": d, "commission": round(v, 6)}
-        for d, v in sorted(daily.items())
-    ]
-    return {
-        "by_asset":       {k: round(v, 6) for k, v in by_asset.items()},
-        "by_symbol":      {k: round(v, 6) for k, v in by_symbol.items()},
-        "daily":          sorted_daily,
-        "total_usdt":     round(by_asset.get("USDT", 0.0), 6),
-        "days":           days,
-    }
+    import db
+    from db.queries.trades import get_commissions as db_get_commissions
+    pool = db.get_pool()
+    return await db_get_commissions(pool, days=days)
 
 
 @app.get("/api/bot_states")
@@ -380,26 +358,56 @@ async def get_account_summary():
 
 @app.get("/api/equity_history")
 async def get_equity_history(days: int = 7):
-    """Return equity snapshots (5-min interval) stored in Redis Stream."""
+    """Return equity snapshots (5-min interval) — DB-first, Redis fallback."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # DB path (persistent, long-term history)
+    try:
+        import db
+        pool = db.get_pool()
+        rows = await pool.fetch(
+            """
+            SELECT snapshot_time, total_equity, unrealized_pnl, total_balance
+            FROM equity_snapshots
+            WHERE snapshot_time >= $1
+            ORDER BY snapshot_time ASC
+            """,
+            cutoff,
+        )
+        if rows:
+            return {
+                "snapshots": [
+                    {
+                        "time":           int(r["snapshot_time"].timestamp() * 1000),
+                        "equity":         float(r["total_equity"]),
+                        "unrealized_pnl": float(r["unrealized_pnl"]),
+                        "balance":        float(r["total_balance"]),
+                    }
+                    for r in rows
+                ]
+            }
+    except Exception:
+        pass
+
+    # Redis fallback (recent window only)
     import os
     import redis.asyncio as aioredis
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     r = await aioredis.from_url(redis_url, decode_responses=True)
-
-    cutoff_ms = int(datetime.now(timezone.utc).timestamp() * 1000) - days * 86_400_000
-    min_id = f"{cutoff_ms}-0"
+    cutoff_ms = int(cutoff.timestamp() * 1000)
     try:
-        messages = await r.xrange(_EQUITY_STREAM, min=min_id)
-        snapshots = [
-            {
-                "time":           int(data["time"]),
-                "equity":         float(data["equity"]),
-                "unrealized_pnl": float(data["unrealized_pnl"]),
-                "balance":        float(data["balance"]),
-            }
-            for _, data in messages
-        ]
-        return {"snapshots": snapshots}
+        messages = await r.xrange(_EQUITY_STREAM, min=f"{cutoff_ms}-0")
+        return {
+            "snapshots": [
+                {
+                    "time":           int(data["time"]),
+                    "equity":         float(data["equity"]),
+                    "unrealized_pnl": float(data["unrealized_pnl"]),
+                    "balance":        float(data["balance"]),
+                }
+                for _, data in messages
+            ]
+        }
     except Exception as e:
         return {"snapshots": [], "error": str(e)}
 
@@ -448,7 +456,11 @@ async def get_performance():
     Shows per-bot statistics and overall portfolio performance.
     """
     bot_states = bot_registry.get_states()
-    trades_data = await get_trades(days=30)
+
+    import db
+    from db.queries.trades import get_trades as db_get_trades
+    pool = db.get_pool()
+    trades_data = {"trades": await db_get_trades(pool, days=30)}
 
     # Calculate per-bot metrics from trades
     bot_metrics = {}
@@ -552,7 +564,10 @@ _CHAT_TOOLS = [
 
 
 async def _chat_get_trading_performance(days: int = 7, symbol: str | None = None) -> dict:
-    data = await get_trades(symbol=symbol, days=days)
+    import db
+    from db.queries.trades import get_trades as db_get_trades
+    pool = db.get_pool()
+    data = {"trades": await db_get_trades(pool, symbol=symbol, days=days)}
     by_symbol: dict[str, dict] = {}
     total_pnl = 0.0
     total_trades = 0

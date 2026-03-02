@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -72,61 +72,38 @@ dashboard: redis build-frontend ## Start dashboard server only
 	@export REDIS_URL=redis://localhost:6379 && \
 		poetry run python -m trader serve --port 8080 --host 0.0.0.0
 
-bots: redis ## Start all validated bots with optimal configurations (auto-reads from trader/config.py)
+bots: redis ## Start all trading bots — strategy params auto-loaded from DB (fallback: trader/config.py)
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
 	@echo "$(GREEN)  Starting Trading Bots$(NC)"
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
-	@echo ""
-	@echo "$(YELLOW)All bots auto-configure from trader/config.py (interval, TP/SL, params)$(NC)"
+	@echo "$(YELLOW)All bots load TP/SL/params from DB (symbol_configs). Fallback: trader/config.py$(NC)"
 	@echo ""
 	@export REDIS_URL=redis://localhost:6379 && \
 		(nohup poetry run python -m trader bot --symbol axsusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot --symbol sandusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot --symbol manausdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot --symbol solusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol avaxusdt --leverage 30 --tp 7.0 --sl 2.0 --min-bars 30 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 5 --tp 7.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.03 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 30 --tp 10.0 --sl 2.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 10 --tp 10.0 --sl 5.0 --min-bars 20 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 30 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol ltcusdt --leverage 30 --sl 5.0 --prox-pct 0.001 --confirm-bars 1 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol linkusdt --leverage 30 --sl 5.0 --prox-pct 0.0 --confirm-bars 2 --pos-size 0.40 --tp 10.0 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol bchusdt --leverage 30 --sl 5.0 --prox-pct 0.005 --confirm-bars 1 --pos-size 0.40 --tp 10.0 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xmrusdt --leverage 30 --tp 7.0 --sl 5.0 --min-bars 8 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol uniusdt --leverage 30 --tp 10.0 --sl 2.0 --min-bars 3 --confirm-bars 1 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol aptusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol 1000pepeusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 5 --confirm-bars 2 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol dashusdt --leverage 30 --tp 5.0 --sl 5.0 --min-bars 3 --confirm-bars 0 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol zecusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 8 --confirm-bars 2 --vwap-prox 0.005 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader orb --symbol ksmusdt --leverage 30 --sl 5.0 --range-mins 60 --be-r 2.0 --pos-size 0.40 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol magicusdt --leverage 30 --sl 5.0 --prox-pct 0.0 --confirm-bars 1 --pos-size 0.40 --tp 10.0 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol aaveusdt --leverage 30 --tp 10.0 --sl 5.0 --min-bars 3 --confirm-bars 2 --vwap-prox 0.002 --pos-size 0.40 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol avaxusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 5 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 10 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl --symbol ltcusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl --symbol linkusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl --symbol bchusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xmrusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol uniusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol aptusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol 1000pepeusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol dashusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol zecusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader orb --symbol ksmusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl --symbol magicusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol aaveusdt --leverage 30 > /dev/null 2>&1 &)
 	@sleep 3
-	@echo "$(GREEN)✅ Bots started!$(NC)"
-	@echo ""
-	@echo "$(BLUE)Active Strategies (23 bots):$(NC)"
-	@echo "  📊 MomShort (30x leverage):"
-	@echo "     • AXSUSDT (1m, +40.10%), SANDUSDT (5m, +27.61%)"
-	@echo "     • MANAUSDT (1m, +30.54%), SOLUSDT (1m, +28.13%)"
-	@echo ""
-	@echo "  📊 VWAPPullback:"
-	@echo "     • GALAUSDT (1m, 30x, +34.85%), AVAXUSDT (1m, 30x, +31.12%)"
-	@echo "     • DOGEUSDT (5m, 30x, +42.75%), 1000SHIBUSDT (5m, 5x, pos=3%)"
-	@echo "     • XRPUSDT (5m, 30x, +30.15%), ETHUSDT (5m, 10x, +31.87%)"
-	@echo "     • XAUUSDT (1m, 30x, +7.67%), XMRUSDT (1m, 30x, +35.76%)"
-	@echo "     • UNIUSDT (15m, 30x, +31.71%), APTUSDT (5m, 30x, +19.66%)"
-	@echo "     • 1000PEPEUSDT (5m, 30x, +38.86%), DASHUSDT (15m, 30x, +22.06%)"
-	@echo "     • ZECUSDT (5m, 30x, +25.55%)"
-	@echo ""
-	@echo "  📊 ORB:"
-	@echo "     • KSMUSDT (1h, 30x, +31.95%)"
-	@echo ""
-	@echo "  📊 PDHL:"
-	@echo "     • LTCUSDT (1m, 30x, +50.76%), LINKUSDT (1m, 30x, +115.87%)"
-	@echo "     • BCHUSDT (5m, 30x, +68.46%), MAGICUSDT (1h, 30x, +90.75%)"
-	@echo "     • AAVEUSDT (5m, 30x, +42.04%)"
+	@echo "$(GREEN)✅ Bots started — 23 bots loading config from DB$(NC)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -302,6 +279,37 @@ logs: ## Tail the latest log file
 clean: ## Remove log files
 	rm -rf logs/*.log
 
+# ── Database commands ─────────────────────────────────────────────────────────
+db-migrate: ## Apply pending SQL migrations to PostgreSQL
+	poetry run python -m db.migrate
+
+db-sync: ## Run one-shot trade sync from Binance to PostgreSQL
+	poetry run python -m db.sync_trades --once
+
+db-fetch-klines: ## Download klines directly to DB (SYMBOL=dogeusdt DAYS=365)
+	poetry run python -m db.fetch_klines --symbol $(shell echo $(SYMBOL) | tr '[:lower:]' '[:upper:]') --days $(or $(DAYS),365)
+
+db-aggregate-klines: ## Aggregate 1m klines to 5m/15m/30m/1h in DB (SYMBOL=dogeusdt or ALL)
+	poetry run python -m db.aggregate_klines --symbol $(or $(SYMBOL),ALL)
+
+db-export-sweep-csv: ## Export klines from DB to temp CSV for Rust sweep (SYMBOL=x TF=5m)
+	poetry run python -m db.export_sweep_csv --symbol $(shell echo $(SYMBOL) | tr '[:lower:]' '[:upper:]') --timeframe $(or $(TF),1m)
+
+db-apply-champion: ## Apply best sweep champion to symbol_configs (SYMBOL=dogeusdt)
+	poetry run python -m db.apply_champion --symbol $(shell echo $(SYMBOL) | tr '[:lower:]' '[:upper:]')
+
+db-import-klines: ## Import all kline CSVs from data/klines/ into PostgreSQL (legacy)
+	poetry run python -m db.import_klines
+
+db-import-sweeps: ## Import sweep result CSVs from data/sweeps/ into PostgreSQL
+	poetry run python -m db.import_sweeps
+
+db-seed: ## Seed strategies and symbol configs from trader/config.py
+	poetry run python -m db.seed_configs
+
+db-shell: ## Open a psql shell to the PostgreSQL container
+	docker compose exec postgres psql -U $${POSTGRES_USER:-trader} $${POSTGRES_DB:-binance_trader}
+
 # Backtest commands
 fetch-data: ## Download historical kline data (SYMBOL=axsusdt DAYS=365)
 	poetry run python scripts/fetch_klines.py $(shell echo $(SYMBOL) | tr '[:lower:]' '[:upper:]') -d $(DAYS) -o data/klines/$(SYMBOL)_1m_klines.csv
@@ -386,6 +394,51 @@ else
 	mkdir -p data/klines; \
 	echo "$(YELLOW)📥 Downloading $(or $(DAYS),365) days of $$SYMBOL_UPPER data...$(NC)"; \
 	poetry run python scripts/fetch_klines.py $$SYMBOL_UPPER $(if $(DAYS),-d $(DAYS),) -o data/klines/$(SYMBOL)_1m_klines.csv
+endif
+
+onboarding-db: ## DB-first onboarding: download → aggregate → sweep → apply champion (SYMBOL=x DAYS=365)
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make onboarding-db SYMBOL=dogeusdt$(NC)"; exit 1
+else
+	@SYMBOL_UPPER=$$(echo "$(SYMBOL)" | tr '[:lower:]' '[:upper:]'); \
+	FETCH_DAYS=$$([ "$(DAYS)" = "7" ] && echo "365" || echo "$(or $(DAYS),365)"); \
+	BINARY=./backtest_sweep/target/release/backtest_sweep; \
+	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
+	echo "$(GREEN)  DB-First Onboarding: $$SYMBOL_UPPER  ($$FETCH_DAYS days)$(NC)"; \
+	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
+	echo ""; \
+	echo "$(YELLOW)── Step 1: Download 1m klines → DB ──$(NC)"; \
+	poetry run python -m db.fetch_klines --symbol $$SYMBOL_UPPER --days $$FETCH_DAYS; \
+	echo ""; \
+	echo "$(YELLOW)── Step 2: Aggregate 1m → 5m/15m/30m/1h in DB ──$(NC)"; \
+	poetry run python -m db.aggregate_klines --symbol $$SYMBOL_UPPER; \
+	echo ""; \
+	if [ ! -f "$$BINARY" ]; then \
+		echo "$(RED)❌ Sweep binary not found. Run: make build-sweep$(NC)"; exit 1; \
+	fi; \
+	mkdir -p data/sweeps; \
+	echo "$(YELLOW)── Step 3: Parameter sweep — all timeframes ──$(NC)"; \
+	for TF in 1m 5m 15m 30m 1h; do \
+		TMP_CSV=/tmp/$(SYMBOL)_$${TF}_klines.csv; \
+		poetry run python -m db.export_sweep_csv --symbol $$SYMBOL_UPPER --timeframe $$TF --output $$TMP_CSV 2>/dev/null || \
+			{ echo "  ⏭  No $$TF data in DB, skipping"; continue; }; \
+		echo "$(YELLOW)━━━━ Sweep: $$TF ━━━━$(NC)"; \
+		$$BINARY $$TMP_CSV; \
+		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep.csv" 2>/dev/null || true; \
+		rm -f $$TMP_CSV; \
+		echo "  📄 Results → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
+	done; \
+	echo ""; \
+	echo "$(YELLOW)── Step 4: Import sweep results → DB ──$(NC)"; \
+	poetry run python -m db.import_sweeps --symbol $$SYMBOL_UPPER; \
+	echo ""; \
+	echo "$(YELLOW)── Step 5: Apply champion → symbol_configs ──$(NC)"; \
+	poetry run python -m db.apply_champion --symbol $$SYMBOL_UPPER; \
+	echo ""; \
+	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
+	echo "$(GREEN)  ✅ Onboarding complete — $$SYMBOL_UPPER$(NC)"; \
+	echo "$(GREEN)  Config written to symbol_configs table$(NC)"; \
+	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"
 endif
 
 # ══════════════════════════════════════════════════════════════════════════════
