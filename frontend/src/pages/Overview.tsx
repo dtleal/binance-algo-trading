@@ -55,32 +55,45 @@ function buildDailyPnl(trades: { time: number; realized_pnl: number }[]) {
   }));
 }
 
-function buildPnlCurve(trades: { time: number; realized_pnl: number }[]) {
-  const byDay: Record<string, number> = {};
+function buildPnlCurve(trades: { time: number; realized_pnl: number; commission: number }[]) {
+  const byDay: Record<string, { pnl: number; net: number }> = {};
   for (const t of trades) {
     if (t.realized_pnl === 0) continue;
     const d = new Date(t.time).toISOString().slice(0, 10);
-    byDay[d] = (byDay[d] ?? 0) + t.realized_pnl;
+    if (!byDay[d]) byDay[d] = { pnl: 0, net: 0 };
+    byDay[d].pnl += t.realized_pnl;
+    byDay[d].net += t.realized_pnl - t.commission;
   }
-  let running = 0;
+  let runningPnl = 0;
+  let runningNet = 0;
   return Object.entries(byDay).sort().map(([date, dp]) => {
-    running += dp;
-    return { date: date.slice(5), pnl: parseFloat(running.toFixed(2)), tradePnl: null as number | null, symbol: null as string | null };
+    runningPnl += dp.pnl;
+    runningNet += dp.net;
+    return {
+      date: date.slice(5),
+      pnl: parseFloat(runningPnl.toFixed(2)),
+      net: parseFloat(runningNet.toFixed(2)),
+      tradePnl: null as number | null,
+      symbol: null as string | null,
+    };
   });
 }
 
-function buildPnlCurvePerTrade(trades: { time: number; realized_pnl: number; symbol?: string }[]) {
+function buildPnlCurvePerTrade(trades: { time: number; realized_pnl: number; commission: number; symbol?: string }[]) {
   const sorted = [...trades]
     .filter(t => t.realized_pnl !== 0)
     .sort((a, b) => a.time - b.time);
-  let running = 0;
+  let runningPnl = 0;
+  let runningNet = 0;
   return sorted.map(t => {
-    running += t.realized_pnl;
+    runningPnl += t.realized_pnl;
+    runningNet += t.realized_pnl - t.commission;
     const dt = new Date(t.time);
     const date = `${(dt.getMonth() + 1).toString().padStart(2, "0")}/${dt.getDate().toString().padStart(2, "0")} ${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`;
     return {
       date,
-      pnl: parseFloat(running.toFixed(2)),
+      pnl: parseFloat(runningPnl.toFixed(2)),
+      net: parseFloat(runningNet.toFixed(2)),
       tradePnl: parseFloat(t.realized_pnl.toFixed(2)),
       symbol: t.symbol ?? null,
     };
@@ -240,14 +253,29 @@ export default function Overview() {
               </button>
             </div>
             {pnlCurve.length > 0 && (
-              <div className="text-right">
-                <p className={`text-2xl font-bold ${
-                  pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "text-emerald-400" : "text-red-400"
-                }`}>
-                  {pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "+" : ""}
-                  {fmtUSD(pnlCurve[pnlCurve.length - 1].pnl)}
-                </p>
-                <p className="text-xs text-gray-500">Realized</p>
+              <div className="flex gap-4 items-end">
+                <div className="text-right">
+                  <p className={`text-lg font-bold ${
+                    pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "text-emerald-400" : "text-red-400"
+                  }`}>
+                    {pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "+" : ""}
+                    {fmtUSD(pnlCurve[pnlCurve.length - 1].pnl)}
+                  </p>
+                  <p className="text-[10px] text-gray-500 flex items-center gap-1 justify-end">
+                    <span className="inline-block w-3 h-0.5 bg-emerald-400 rounded"/>Gross
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className={`text-lg font-bold ${
+                    pnlCurve[pnlCurve.length - 1].net >= 0 ? "text-indigo-400" : "text-red-400"
+                  }`}>
+                    {pnlCurve[pnlCurve.length - 1].net >= 0 ? "+" : ""}
+                    {fmtUSD(pnlCurve[pnlCurve.length - 1].net)}
+                  </p>
+                  <p className="text-[10px] text-gray-500 flex items-center gap-1 justify-end">
+                    <span className="inline-block w-3 h-0.5 bg-indigo-400 rounded"/>Net
+                  </p>
+                </div>
               </div>
             )}
           </div>
@@ -262,6 +290,10 @@ export default function Overview() {
               <linearGradient id="colorPnlNeg" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%"  stopColor="#ef4444" stopOpacity={0.25}/>
                 <stop offset="95%" stopColor="#ef4444" stopOpacity={0}/>
+              </linearGradient>
+              <linearGradient id="colorNet" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor="#818cf8" stopOpacity={0.15}/>
+                <stop offset="95%" stopColor="#818cf8" stopOpacity={0}/>
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
@@ -283,18 +315,21 @@ export default function Overview() {
                 const d = payload[0].payload;
                 return (
                   <div className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 shadow-xl text-xs">
-                    <p className="text-gray-400 mb-1">{d.date}</p>
+                    <p className="text-gray-400 mb-2">{d.date}</p>
                     {d.symbol && (
                       <p className="text-gray-500 mb-1">{d.symbol.replace("USDT", "").replace("1000", "")}</p>
                     )}
                     {d.tradePnl !== null && (
-                      <p className={`mb-1 ${d.tradePnl >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+                      <p className={`mb-2 ${d.tradePnl >= 0 ? "text-emerald-300" : "text-red-300"}`}>
                         Trade: {d.tradePnl >= 0 ? "+" : ""}{fmtUSD(d.tradePnl)}
                       </p>
                     )}
-                    <span className={`font-bold ${d.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      Cumul: {d.pnl >= 0 ? "+" : ""}{fmtUSD(d.pnl)}
-                    </span>
+                    <p className={`${d.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                      Gross: {d.pnl >= 0 ? "+" : ""}{fmtUSD(d.pnl)}
+                    </p>
+                    <p className={`font-bold mt-0.5 ${d.net >= 0 ? "text-indigo-400" : "text-red-400"}`}>
+                      Net: {d.net >= 0 ? "+" : ""}{fmtUSD(d.net)}
+                    </p>
                   </div>
                 );
               }}
@@ -307,6 +342,16 @@ export default function Overview() {
               fill={pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "url(#colorPnl)" : "url(#colorPnlNeg)"}
               dot={pnlView === "trade" ? { r: 3, fill: pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "#10b981" : "#ef4444", strokeWidth: 0 } : false}
               activeDot={{ r: 5 }}
+            />
+            <Area
+              type="monotone"
+              dataKey="net"
+              stroke="#818cf8"
+              strokeWidth={2}
+              strokeDasharray="4 2"
+              fill="url(#colorNet)"
+              dot={false}
+              activeDot={{ r: 4 }}
             />
           </AreaChart>
         </ResponsiveContainer>
