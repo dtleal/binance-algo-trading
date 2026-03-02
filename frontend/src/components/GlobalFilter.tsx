@@ -29,6 +29,7 @@ export default function GlobalFilter() {
   const isFiltered =
     filter.symbol !== "ALL" ||
     filter.strategy !== "ALL" ||
+    filter.side !== "ALL" ||
     filter.dateRange !== 30 ||
     filter.dateFrom !== null ||
     filter.dateTo !== null;
@@ -71,6 +72,32 @@ export default function GlobalFilter() {
               </option>
             ))}
           </select>
+        </div>
+
+        {/* Side filter */}
+        <div>
+          <label className="block text-xs text-gray-400 uppercase tracking-wider mb-2">
+            Side
+          </label>
+          <div className="flex gap-1 bg-gray-900 border border-gray-700 rounded-lg p-1">
+            {(["ALL", "LONG", "SHORT"] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => updateFilter({ side: s })}
+                className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                  filter.side === s
+                    ? s === "LONG"
+                      ? "bg-emerald-700 text-white"
+                      : s === "SHORT"
+                      ? "bg-red-700 text-white"
+                      : "bg-emerald-600 text-white"
+                    : "text-gray-400 hover:text-white hover:bg-gray-800"
+                }`}
+              >
+                {s === "ALL" ? "All" : s}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Date range presets */}
@@ -151,6 +178,13 @@ export default function GlobalFilter() {
           {filter.strategy !== "ALL" && (
             <span className="px-2 py-1 bg-blue-900/40 text-blue-400 rounded">
               {filter.strategy}
+            </span>
+          )}
+          {filter.side !== "ALL" && (
+            <span className={`px-2 py-1 rounded ${
+              filter.side === "LONG" ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"
+            }`}>
+              {filter.side}
             </span>
           )}
           {hasCustomRange ? (

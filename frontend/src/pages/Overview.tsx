@@ -111,9 +111,16 @@ export default function Overview() {
 
   const filteredTrades = useMemo(() => {
     return trades.filter(t => {
-      return filter.symbol === "ALL" || t.symbol === filter.symbol;
+      if (filter.symbol !== "ALL" && t.symbol !== filter.symbol) return false;
+      // Side filter applies to closing trades only; non-closing (pnl=0) are excluded from stats regardless
+      if (filter.side !== "ALL" && t.realized_pnl !== 0) {
+        // closing LONG = SELL side; closing SHORT = BUY side
+        if (filter.side === "LONG" && t.side !== "SELL") return false;
+        if (filter.side === "SHORT" && t.side !== "BUY") return false;
+      }
+      return true;
     });
-  }, [trades, filter.symbol]);
+  }, [trades, filter.symbol, filter.side]);
 
   const totalEquity = summary?.total_equity ?? 0;
   const pnl24h = summary?.pnl_24h ?? 0;
@@ -161,7 +168,12 @@ export default function Overview() {
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <h1 className="text-lg md:text-xl font-bold text-white">Overview</h1>
+      <div className="flex items-center justify-between gap-4">
+        <h1 className="text-lg md:text-xl font-bold text-white shrink-0">Overview</h1>
+        <div className="flex-1 min-w-0">
+          <AlertSettings />
+        </div>
+      </div>
 
       {/* Live Account — real-time, not affected by filters */}
       <SectionHeader title="Live Account" badge="Real-time · Not filtered" />
@@ -191,8 +203,6 @@ export default function Overview() {
         />
       </div>
 
-      <AlertSettings />
-
       {/* Filtered Analysis — responds to symbol / strategy / date filters */}
       <SectionHeader title="Filtered Analysis" />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
@@ -212,7 +222,9 @@ export default function Overview() {
           label="Net P&L"
           value={closingTrades.length ? fmtUSD(filteredNetPnl) : "—"}
           color={filteredNetPnl >= 0 ? "text-emerald-400" : "text-red-400"}
-          sub={closingTrades.length ? `Avg ${fmtUSD(filteredNetPnl / closingTrades.length)}/trade` : undefined}
+          sub={closingTrades.length && totalEquity > 0
+            ? `${filteredNetPnl >= 0 ? "+" : ""}${((filteredNetPnl / totalEquity) * 100).toFixed(2)}% ROI · Avg ${fmtUSD(filteredNetPnl / closingTrades.length)}/trade`
+            : undefined}
         />
         <Card
           label="Win Rate"

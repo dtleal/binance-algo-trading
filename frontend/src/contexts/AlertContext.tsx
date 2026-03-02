@@ -5,14 +5,17 @@ import { usePositions } from "../hooks/useApi";
 
 interface AlertSettings {
   enabled: boolean;
-  peakTrigger: number;  // arm when unrealized >= this
-  alertBelow: number;   // fire when unrealized drops below this
+  peakTrigger: number;      // arm when unrealized >= this
+  alertBelow: number;       // fire when unrealized drops below this (drawdown alert)
+  absoluteEnabled: boolean; // enable absolute threshold alert
+  absoluteThreshold: number; // fire directly when unrealized < this (no arm needed)
 }
 
 interface AlertStatus {
   armed: boolean;
   peakSeen: number;
   triggered: boolean;
+  triggeredAbsolute: boolean;
   currentPnl: number;
 }
 
@@ -24,7 +27,10 @@ interface AlertContextValue {
   reset: () => void;
 }
 
-const DEFAULT_SETTINGS: AlertSettings = { enabled: false, peakTrigger: 3, alertBelow: 0.5 };
+const DEFAULT_SETTINGS: AlertSettings = {
+  enabled: false, peakTrigger: 3, alertBelow: 0.5,
+  absoluteEnabled: false, absoluteThreshold: -2,
+};
 const STORAGE_KEY = "pnl_alert_settings";
 
 const AlertContext = createContext<AlertContextValue | null>(null);
@@ -45,7 +51,7 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
   const { positions } = usePositions();
   const [settings, setSettings] = useState<AlertSettings>(loadSettings);
   const [status, setStatus] = useState<AlertStatus>({
-    armed: false, peakSeen: 0, triggered: false, currentPnl: 0,
+    armed: false, peakSeen: 0, triggered: false, triggeredAbsolute: false, currentPnl: 0,
   });
   // Use ref for status inside the effect to avoid stale closures
   const statusRef = useRef(status);
@@ -60,11 +66,11 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const dismiss = useCallback(() => {
-    setStatus(prev => ({ ...prev, triggered: false }));
+    setStatus(prev => ({ ...prev, triggered: false, triggeredAbsolute: false }));
   }, []);
 
   const reset = useCallback(() => {
-    setStatus({ armed: false, peakSeen: 0, triggered: false, currentPnl: 0 });
+    setStatus({ armed: false, peakSeen: 0, triggered: false, triggeredAbsolute: false, currentPnl: 0 });
   }, []);
 
   // Request browser notification permission when user enables alerts
@@ -80,8 +86,8 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
     const s = statusRef.current;
 
     // Auto-reset when all positions close
-    if (positions.length === 0 && s.armed) {
-      setStatus({ armed: false, peakSeen: 0, triggered: false, currentPnl: 0 });
+    if (positions.length === 0 && (s.armed || s.triggeredAbsolute)) {
+      setStatus({ armed: false, peakSeen: 0, triggered: false, triggeredAbsolute: false, currentPnl: 0 });
       return;
     }
 
@@ -90,7 +96,7 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    let { armed, peakSeen, triggered } = s;
+    let { armed, peakSeen, triggered, triggeredAbsolute } = s;
 
     // Arm: unrealized reached peak trigger
     if (!armed && total >= settings.peakTrigger) {
@@ -103,14 +109,13 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
       peakSeen = total;
     }
 
-    // Fire alert: armed and dropped below alertBelow
+    // Fire drawdown alert: armed and dropped below alertBelow
     if (armed && !triggered && total < settings.alertBelow) {
       triggered = true;
 
-      // Browser notification
       if ("Notification" in window && Notification.permission === "granted") {
         try {
-          new Notification("⚠️ Alerta P&L", {
+          new Notification("⚠️ Alerta P&L — Drawdown", {
             body: `P&L caiu para ${fmt(total)} (pico: ${fmt(peakSeen)})`,
             icon: "/favicon.ico",
           });
@@ -118,8 +123,22 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    setStatus({ armed, peakSeen, triggered, currentPnl: total });
-  }, [positions, settings.enabled, settings.peakTrigger, settings.alertBelow]);
+    // Fire absolute alert: P&L dropped below absolute threshold (no arm needed)
+    if (settings.absoluteEnabled && !triggeredAbsolute && total < settings.absoluteThreshold) {
+      triggeredAbsolute = true;
+
+      if ("Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification("⚠️ Alerta P&L — Limite Absoluto", {
+            body: `P&L abaixo do limite: ${fmt(total)} (limite: ${fmt(settings.absoluteThreshold)})`,
+            icon: "/favicon.ico",
+          });
+        } catch {}
+      }
+    }
+
+    setStatus({ armed, peakSeen, triggered, triggeredAbsolute, currentPnl: total });
+  }, [positions, settings.enabled, settings.peakTrigger, settings.alertBelow, settings.absoluteEnabled, settings.absoluteThreshold]);
 
   return (
     <AlertContext.Provider value={{ settings, status, updateSettings, dismiss, reset }}>

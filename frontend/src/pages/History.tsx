@@ -56,9 +56,14 @@ export default function History() {
 
   const filtered = useMemo(() => {
     return trades.filter((t) => {
-      return globalFilter.symbol === "ALL" || t.symbol === globalFilter.symbol;
+      if (globalFilter.symbol !== "ALL" && t.symbol !== globalFilter.symbol) return false;
+      if (globalFilter.side !== "ALL" && t.realized_pnl !== 0) {
+        if (globalFilter.side === "LONG" && t.side !== "SELL") return false;
+        if (globalFilter.side === "SHORT" && t.side !== "BUY") return false;
+      }
+      return true;
     });
-  }, [trades, globalFilter.symbol]);
+  }, [trades, globalFilter.symbol, globalFilter.side]);
 
   const [sort, setSort] = useState<{ key: keyof Trade; dir: 1 | -1 }>({
     key: "time", dir: -1,
