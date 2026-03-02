@@ -118,6 +118,8 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo "$(YELLOW)📊 Starting dashboard...$(NC)"
 	@export REDIS_URL=redis://localhost:6379 && \
 		nohup poetry run python -m trader serve --port 8080 --host 0.0.0.0 > /dev/null 2>&1 &
+	@echo "$(YELLOW)🔄 Starting trade sync daemon...$(NC)"
+	@nohup poetry run python -m db.sync_trades > logs/sync.log 2>&1 &
 	@sleep 2
 	@echo ""
 	@echo "$(GREEN)╔════════════════════════════════════════════╗$(NC)"
@@ -141,6 +143,7 @@ stop: ## ⛔ Stop all processes (bots + dashboard + redis)
 	@echo "$(YELLOW)⛔ Stopping all processes...$(NC)"
 	@pkill -f "python -m trader" 2>/dev/null || true
 	@pkill -9 -f "trader serve" 2>/dev/null || true
+	@pkill -f "db.sync_trades" 2>/dev/null || true
 	@pkill -f "redis-server" 2>/dev/null || true
 	@echo "$(GREEN)✅ All processes stopped$(NC)"
 

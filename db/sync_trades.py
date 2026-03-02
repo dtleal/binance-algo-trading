@@ -73,19 +73,23 @@ async def _insert_trades(
         for t in trades
     ]
 
-    result = await conn.executemany(
-        """
-        INSERT INTO trades
-            (symbol, order_id, side, price, qty, realized_pnl,
-             commission, commission_asset, buyer, trade_time)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        ON CONFLICT (symbol, order_id) DO NOTHING
-        """,
-        rows,
-    )
-    # executemany returns "INSERT 0 N" string — just count inserted rows from result
-    inserted = sum(1 for t in trades if True)  # will use returning count below
-    return len(rows)  # approximate — exact count needs RETURNING or manual tracking
+    # Use RETURNING to count actually-inserted rows (ON CONFLICT DO NOTHING skips dups)
+    inserted = 0
+    for row in rows:
+        result = await conn.fetchval(
+            """
+            INSERT INTO trades
+                (symbol, order_id, side, price, qty, realized_pnl,
+                 commission, commission_asset, buyer, trade_time)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (symbol, order_id) DO NOTHING
+            RETURNING 1
+            """,
+            *row,
+        )
+        if result:
+            inserted += 1
+    return inserted
 
 
 async def _refresh_daily_performance(
@@ -120,67 +124,113 @@ async def _refresh_daily_performance(
         )
 
 
+async def handle_order_trade_update(pool: asyncpg.Pool, event) -> None:
+    """Process a UserDataStream OrderTradeUpdate event and insert into DB immediately.
+
+    Called from api.py's UDS callback — gives real-time trade capture the moment
+    any order is filled, without waiting for the polling sync loop.
+    """
+    try:
+        from binance_sdk_derivatives_trading_usds_futures.websocket_streams.models import OrderTradeUpdate
+    except ImportError:
+        return
+
+    actual = getattr(event, "actual_instance", None)
+    if not isinstance(actual, OrderTradeUpdate) or not actual.o:
+        return
+
+    o = actual.o
+    # Only process FILLED or PARTIALLY_FILLED — skip NEW/CANCELED/etc.
+    order_status = getattr(o, "X", None)
+    if order_status not in ("FILLED", "PARTIALLY_FILLED"):
+        return
+
+    trade_time_ms = getattr(o, "T", None) or getattr(actual, "T", None)
+    if not trade_time_ms:
+        trade_time_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    trade = {
+        "symbol":          getattr(o, "s", None),
+        "orderId":         getattr(o, "i", None),
+        "side":            getattr(o, "S", None),   # uppercase S = BUY/SELL
+        "price":           getattr(o, "L", None) or getattr(o, "ap", "0"),  # last fill price
+        "qty":             getattr(o, "l", None) or "0",   # last fill qty
+        "realizedPnl":     getattr(o, "rp", None) or "0",
+        "commission":      getattr(o, "n", None) or "0",
+        "commissionAsset": getattr(o, "N", None) or "USDT",
+        "buyer":           getattr(o, "S", None) == "BUY",
+        "time":            trade_time_ms,
+    }
+
+    if not trade["symbol"] or trade["orderId"] is None:
+        return
+
+    affected_date = datetime.fromtimestamp(int(trade_time_ms) / 1000, tz=timezone.utc).date()
+
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await _insert_trades(conn, [trade])
+                await _refresh_daily_performance(conn, trade["symbol"], {affected_date})
+        pnl = float(trade["realizedPnl"])
+        if pnl != 0:
+            log.info("UDS trade: %s %s qty=%s pnl=%.4f", trade["symbol"], trade["side"],
+                     trade["qty"], pnl)
+    except Exception as e:
+        log.warning("handle_order_trade_update failed for %s: %s", trade["symbol"], e)
+
+
 async def sync_symbol(pool: asyncpg.Pool, client, symbol: str) -> int:
-    """Sync all new trades for one symbol.  Returns count of new trades inserted."""
-    from trader.config import SYMBOL_CONFIGS
+    """Sync all new trades for one symbol.  Returns count of new trades inserted.
 
-    last_order_id = 0
+    Uses start_time anchored to the last known trade_time in the DB.
+    ON CONFLICT DO NOTHING handles any overlap without creating duplicates.
+    """
+    # Find the timestamp of the most recent trade already in DB for this symbol
     async with pool.acquire() as conn:
-        last_order_id = await _get_last_order_id(conn, symbol)
+        row = await conn.fetchrow(
+            "SELECT (EXTRACT(epoch FROM MAX(trade_time)) * 1000)::bigint AS last_ms "
+            "FROM trades WHERE symbol = $1",
+            symbol,
+        )
+    last_ms = row["last_ms"] if row and row["last_ms"] else None
 
-    # Binance fromId is inclusive — start from next unsynced order
-    from_id = last_order_id + 1 if last_order_id > 0 else None
+    kwargs: dict = {"symbol": symbol, "limit": 1000}
+    if last_ms:
+        # Start 1 second before the last known trade to ensure no gap
+        kwargs["start_time"] = last_ms - 1000
 
     all_new_trades: list[dict] = []
-    max_order_id = last_order_id
 
-    # Paginate with fromId until we get an empty page
-    while True:
-        try:
-            kwargs = {"symbol": symbol, "limit": 1000}
-            if from_id is not None:
-                kwargs["fromId"] = str(from_id)
+    try:
+        resp = await asyncio.to_thread(
+            lambda kw=kwargs: client.rest_api.account_trade_list(**kw)
+        )
+        batch = resp.data()
+    except Exception as e:
+        log.warning("sync_symbol %s failed: %s", symbol, e)
+        return 0
 
-            resp = await asyncio.to_thread(
-                lambda kw=kwargs: client.rest_api.account_trade_list(**kw)
-            )
-            batch = resp.data()
-        except Exception as e:
-            log.warning("sync_symbol %s failed: %s", symbol, e)
-            break
+    if not batch:
+        return 0
 
-        if not batch:
-            break
-
-        for t in batch:
-            oid = int(t.order_id)
-            if oid > max_order_id:
-                max_order_id = oid
-            all_new_trades.append({
-                "symbol":         t.symbol,
-                "orderId":        t.order_id,
-                "side":           t.side,
-                "price":          t.price,
-                "qty":            t.qty,
-                "realizedPnl":    t.realized_pnl,
-                "commission":     t.commission,
-                "commissionAsset": t.commission_asset,
-                "buyer":          t.buyer,
-                "time":           t.time,
-            })
-
-        # If we got fewer than the page limit, we're done
-        if len(batch) < 1000:
-            break
-
-        # Advance fromId to the highest orderId + 1 in this batch
-        batch_max = max(int(t.order_id) for t in batch)
-        from_id = batch_max + 1
+    for t in batch:
+        all_new_trades.append({
+            "symbol":          t.symbol,
+            "orderId":         t.order_id,
+            "side":            t.side,
+            "price":           t.price,
+            "qty":             t.qty,
+            "realizedPnl":     t.realized_pnl,
+            "commission":      t.commission,
+            "commissionAsset": t.commission_asset,
+            "buyer":           t.buyer,
+            "time":            t.time,
+        })
 
     if not all_new_trades:
         return 0
 
-    # Determine which calendar dates are affected
     affected_dates: set[date] = set()
     for t in all_new_trades:
         ts = datetime.fromtimestamp(int(t["time"]) / 1000, tz=timezone.utc)
@@ -188,13 +238,15 @@ async def sync_symbol(pool: asyncpg.Pool, client, symbol: str) -> int:
 
     async with pool.acquire() as conn:
         async with conn.transaction():
-            await _insert_trades(conn, all_new_trades)
+            inserted = await _insert_trades(conn, all_new_trades)
+            max_order_id = max(int(t["orderId"]) for t in all_new_trades)
             await _upsert_sync_state(conn, symbol, max_order_id)
-            await _refresh_daily_performance(conn, symbol, affected_dates)
+            if affected_dates:
+                await _refresh_daily_performance(conn, symbol, affected_dates)
 
-    log.info("sync_symbol %s: %d new trades, max_order_id=%d",
-             symbol, len(all_new_trades), max_order_id)
-    return len(all_new_trades)
+    if inserted > 0:
+        log.info("sync_symbol %s: %d new trades inserted", symbol, inserted)
+    return inserted
 
 
 # ── Loop ──────────────────────────────────────────────────────────────────────

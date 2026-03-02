@@ -93,6 +93,30 @@ app.add_middleware(
 )
 
 
+async def _run_trade_uds(pool, client) -> None:
+    """User Data Stream in the API server: real-time trade inserts on every order fill."""
+    try:
+        from binance_sdk_derivatives_trading_usds_futures import DerivativesTradingUsdsFutures
+        from binance_common.configuration import ConfigurationWebSocketStreams
+        from binance_sdk_derivatives_trading_usds_futures.websocket_streams.client import (
+            DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
+        )
+        from trader.user_data_stream import UserDataStream
+        from db.sync_trades import handle_order_trade_update
+
+        uds = UserDataStream(
+            client,
+            DerivativesTradingUsdsFutures,
+            DERIVATIVES_TRADING_USDS_FUTURES_WS_STREAMS_PROD_URL,
+            ConfigurationWebSocketStreams,
+        )
+        uds.register(lambda e: handle_order_trade_update(pool, e))
+        await uds.run()
+    except Exception as e:
+        import logging
+        logging.getLogger("trader.api").warning("Trade UDS failed: %s", e)
+
+
 @app.on_event("startup")
 async def _startup():
     import db
@@ -102,7 +126,10 @@ async def _startup():
     try:
         await db.init_pool()
         await db_migrate.run()
-        asyncio.create_task(db_sync.run_sync_loop(db.get_pool(), await get_client()))
+        client = await get_client()
+        pool = db.get_pool()
+        asyncio.create_task(db_sync.run_sync_loop(pool, client))
+        asyncio.create_task(_run_trade_uds(pool, client))
     except Exception as e:
         # DB unavailable — log and continue (Binance fallback still works)
         import logging
