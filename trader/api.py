@@ -227,6 +227,17 @@ async def test_trades_endpoint():
     ]
     return {"symbols": symbols, "total_fills": sum(r["total_fills"] for r in symbols)}
 
+@app.get("/api/strategies")
+async def get_strategies():
+    """Return all strategies from DB."""
+    import db
+    pool = db.get_pool()
+    rows = await pool.fetch(
+        "SELECT name, bot_command, direction, active FROM strategies ORDER BY name"
+    )
+    return {"strategies": [dict(r) for r in rows]}
+
+
 @app.get("/api/trades")
 async def get_trades(symbol: str | None = None, days: int = 7):
     import db
@@ -313,22 +324,19 @@ async def get_account_summary():
         # Calculate total equity
         total_equity = total_balance + total_unrealized_pnl
 
-        # Get 24h account metrics (from income history)
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        day_ago_ms = now_ms - 86_400_000
-
+        # Get 24h P&L from DB (closing fills only)
         try:
-            income_resp = await asyncio.to_thread(
-                lambda: client.rest_api.income_history(
-                    start_time=day_ago_ms,
-                    limit=1000
-                )
+            import db
+            pool = db.get_pool()
+            pnl_24h = await pool.fetchval(
+                """
+                SELECT COALESCE(SUM(realized_pnl), 0)
+                FROM trades
+                WHERE realized_pnl != 0
+                  AND trade_time >= NOW() - INTERVAL '24 hours'
+                """
             )
-            pnl_24h = sum(
-                _safe_float(i.income)
-                for i in income_resp.data()
-                if i.income_type in ("REALIZED_PNL", "FUNDING_FEE")
-            )
+            pnl_24h = float(pnl_24h)
         except Exception:
             pnl_24h = 0
 

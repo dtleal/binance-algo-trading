@@ -22,11 +22,13 @@ async def get_trades(
     if symbol:
         rows = await pool.fetch(
             """
-            SELECT symbol, order_id, side, price, qty, realized_pnl,
-                   commission, commission_asset, buyer, trade_time
-            FROM trades
-            WHERE symbol = $1 AND trade_time >= $2
-            ORDER BY trade_time DESC
+            SELECT t.symbol, t.order_id, t.side, t.price, t.qty, t.realized_pnl,
+                   t.commission, t.commission_asset, t.buyer, t.trade_time,
+                   COALESCE(sc.strategy_name, 'Unknown') AS strategy_name
+            FROM trades t
+            LEFT JOIN symbol_configs sc ON sc.symbol = t.symbol
+            WHERE t.symbol = $1 AND t.trade_time >= $2
+            ORDER BY t.trade_time DESC
             """,
             symbol.upper(),
             cutoff_ts,
@@ -34,11 +36,13 @@ async def get_trades(
     else:
         rows = await pool.fetch(
             """
-            SELECT symbol, order_id, side, price, qty, realized_pnl,
-                   commission, commission_asset, buyer, trade_time
-            FROM trades
-            WHERE trade_time >= $1
-            ORDER BY trade_time DESC
+            SELECT t.symbol, t.order_id, t.side, t.price, t.qty, t.realized_pnl,
+                   t.commission, t.commission_asset, t.buyer, t.trade_time,
+                   COALESCE(sc.strategy_name, 'Unknown') AS strategy_name
+            FROM trades t
+            LEFT JOIN symbol_configs sc ON sc.symbol = t.symbol
+            WHERE t.trade_time >= $1
+            ORDER BY t.trade_time DESC
             """,
             cutoff_ts,
         )
@@ -54,6 +58,7 @@ async def get_trades(
             "commission":       float(r["commission"]),
             "commission_asset": r["commission_asset"],
             "buyer":            r["buyer"],
+            "strategy":         r["strategy_name"],
             # Keep ms-epoch integer for backwards-compat with frontend
             "time":             int(r["trade_time"].timestamp() * 1000),
         }

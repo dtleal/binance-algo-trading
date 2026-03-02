@@ -1,12 +1,13 @@
 import { useFilter } from "../contexts/FilterContext";
-import { useBotStates } from "../hooks/useApi";
+import { useBotStates, useStrategies } from "../hooks/useApi";
 
 export default function GlobalFilter() {
   const { filter, updateFilter, resetFilter } = useFilter();
   const { bots } = useBotStates();
+  const { strategies: dbStrategies } = useStrategies();
 
   const symbols = ["ALL", ...Array.from(new Set(Object.values(bots).map(b => b.symbol)))];
-  const strategies = ["ALL", "momshort", "pullback"];
+  const strategies = ["ALL", ...dbStrategies.map(s => s.name)];
   const dateRanges = [1, 7, 30, 90];
   const today = new Date().toISOString().slice(0, 10);
 
@@ -66,7 +67,7 @@ export default function GlobalFilter() {
           >
             {strategies.map(s => (
               <option key={s} value={s}>
-                {s === "ALL" ? "All Strategies" : s.charAt(0).toUpperCase() + s.slice(1)}
+                {s === "ALL" ? "All Strategies" : s}
               </option>
             ))}
           </select>

@@ -21,6 +21,7 @@ export function useTrades(
   days = 7,
   dateFrom: string | null = null,
   dateTo: string | null = null,
+  strategy: string = "ALL",
 ) {
   // When a custom range is set, fetch enough days to cover dateFrom
   const fetchDays = dateFrom
@@ -34,16 +35,26 @@ export function useTrades(
   );
 
   const allTrades = data?.trades ?? [];
-  const trades = (dateFrom || dateTo)
-    ? allTrades.filter(t => {
-        const d = new Date(t.time).toISOString().slice(0, 10);
-        if (dateFrom && d < dateFrom) return false;
-        if (dateTo   && d > dateTo)   return false;
-        return true;
-      })
-    : allTrades;
+  const trades = allTrades.filter(t => {
+    if (dateFrom || dateTo) {
+      const d = new Date(t.time).toISOString().slice(0, 10);
+      if (dateFrom && d < dateFrom) return false;
+      if (dateTo   && d > dateTo)   return false;
+    }
+    if (strategy !== "ALL" && t.strategy !== strategy) return false;
+    return true;
+  });
 
   return { trades, error, isLoading };
+}
+
+export function useStrategies() {
+  const { data, error, isLoading } = useSWR<{ strategies: { name: string; bot_command: string; direction: string; active: boolean }[] }>(
+    "/api/strategies",
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  return { strategies: data?.strategies ?? [], error, isLoading };
 }
 
 export function useKlines(symbol: string, interval = "15m", limit = 200) {

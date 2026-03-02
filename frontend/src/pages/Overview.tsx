@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  AreaChart, Area, BarChart, Bar, Cell,
+  AreaChart, Area, BarChart, Bar, Cell, LabelList,
 } from "recharts";
-import { useAccountSummary, useTrades, usePerformance, usePositions, useBotStates } from "../hooks/useApi";
+import { useAccountSummary, useTrades, usePositions, useBotStates } from "../hooks/useApi";
 import { useFilter } from "../contexts/FilterContext";
 import PerformanceMetrics from "../components/PerformanceMetrics";
 import PerformanceRankings from "../components/PerformanceRankings";
@@ -16,6 +16,20 @@ function Card({
       <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">{label}</p>
       <p className={`text-2xl font-bold ${color}`}>{value}</p>
       {sub && <p className="text-xs text-gray-500 mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+function SectionHeader({ title, badge }: { title: string; badge?: string }) {
+  return (
+    <div className="flex items-center gap-3 pt-2">
+      <span className="text-xs font-semibold text-gray-400 uppercase tracking-widest whitespace-nowrap">{title}</span>
+      {badge && (
+        <span className="text-[10px] font-medium px-2 py-0.5 rounded-full text-blue-400 bg-blue-900/30 whitespace-nowrap">
+          {badge}
+        </span>
+      )}
+      <div className="h-px flex-1 bg-gray-700/40" />
     </div>
   );
 }
@@ -75,17 +89,15 @@ function buildPnlCurvePerTrade(trades: { time: number; realized_pnl: number; sym
 
 export default function Overview() {
   const { filter } = useFilter();
-  const { summary }      = useAccountSummary();
-  const { trades }       = useTrades(filter.dateRange, filter.dateFrom, filter.dateTo);
-  const { performance }  = usePerformance();
-  const { positions }    = usePositions();
-  const { bots }         = useBotStates();
+  const { summary }   = useAccountSummary();
+  const { trades }    = useTrades(filter.dateRange, filter.dateFrom, filter.dateTo, filter.strategy);
+  const { positions } = usePositions();
+  const { bots }      = useBotStates();
   const [pnlView, setPnlView] = useState<"trade" | "daily">("trade");
 
   const filteredTrades = useMemo(() => {
     return trades.filter(t => {
-      const symbolMatch = filter.symbol === "ALL" || t.symbol === filter.symbol;
-      return symbolMatch;
+      return filter.symbol === "ALL" || t.symbol === filter.symbol;
     });
   }, [trades, filter.symbol]);
 
@@ -93,10 +105,37 @@ export default function Overview() {
   const pnl24h = summary?.pnl_24h ?? 0;
   const equityChange24h = summary?.equity_change_24h_pct ?? 0;
 
-  // Open P&L computed from bot states (WebSocket) — no REST API needed
-  const botsInPosition = Object.values(bots).filter(b => b.state === "IN_POSITION");
-  const unrealizedPnl = botsInPosition.reduce((sum, b) => sum + (b.unrealized_pnl ?? 0), 0);
-  const openPositions = botsInPosition.length;
+  // Open P&L from Binance live positions (source of truth — reflects manual closes immediately)
+  const unrealizedPnl = positions.reduce((sum, p) => sum + p.unrealized_pnl, 0);
+  const openPositions = positions.length;
+
+  // Filtered period stats (responds to active filters)
+  const closingTrades  = useMemo(() => filteredTrades.filter(t => t.realized_pnl !== 0), [filteredTrades]);
+  const filteredPnl    = useMemo(() => closingTrades.reduce((s, t) => s + t.realized_pnl, 0), [closingTrades]);
+  const filteredWins   = useMemo(() => closingTrades.filter(t => t.realized_pnl > 0).length, [closingTrades]);
+  const filteredWinRate = closingTrades.length
+    ? ((filteredWins / closingTrades.length) * 100).toFixed(1)
+    : null;
+
+  // P&L grouped by strategy
+  const strategyPnl = useMemo(() => {
+    const byStrategy: Record<string, { pnl: number; wins: number; total: number }> = {};
+    for (const t of closingTrades) {
+      const s = t.strategy || "Unknown";
+      if (!byStrategy[s]) byStrategy[s] = { pnl: 0, wins: 0, total: 0 };
+      byStrategy[s].pnl += t.realized_pnl;
+      byStrategy[s].total += 1;
+      if (t.realized_pnl > 0) byStrategy[s].wins += 1;
+    }
+    return Object.entries(byStrategy)
+      .map(([strategy, d]) => ({
+        strategy,
+        pnl: parseFloat(d.pnl.toFixed(2)),
+        winRate: parseFloat(((d.wins / d.total) * 100).toFixed(1)),
+        trades: d.total,
+      }))
+      .sort((a, b) => b.pnl - a.pnl);
+  }, [closingTrades]);
 
   const pnlCurveDaily    = useMemo(() => buildPnlCurve(filteredTrades), [filteredTrades]);
   const pnlCurvePerTrade = useMemo(() => buildPnlCurvePerTrade(filteredTrades), [filteredTrades]);
@@ -108,8 +147,9 @@ export default function Overview() {
     <div className="space-y-4 md:space-y-6">
       <h1 className="text-lg md:text-xl font-bold text-white">Overview</h1>
 
-      {/* Metric cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 md:gap-4">
+      {/* Live Account — real-time, not affected by filters */}
+      <SectionHeader title="Live Account" badge="Real-time · Not filtered" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <Card
           label="Open P&L"
           value={summary ? fmtUSD(unrealizedPnl) : "—"}
@@ -129,15 +169,32 @@ export default function Overview() {
           sub={`${equityChange24h >= 0 ? "+" : ""}${equityChange24h.toFixed(2)}%`}
         />
         <Card
-          label="P&L 30 Days"
-          value={performance ? fmtUSD(performance.portfolio.total_pnl) : fmtUSD(0)}
-          color={(performance?.portfolio.total_pnl ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}
-          sub={performance ? `Win rate: ${performance.portfolio.win_rate}%` : undefined}
-        />
-        <Card
           label="Open Positions"
           value={String(openPositions)}
-          sub={performance ? `${performance.portfolio.total_trades} total trades` : undefined}
+          sub={`${activeBots} bot${activeBots !== 1 ? "s" : ""} active`}
+        />
+      </div>
+
+      {/* Filtered Analysis — responds to symbol / strategy / date filters */}
+      <SectionHeader title="Filtered Analysis" />
+      <div className="grid grid-cols-3 gap-3 md:gap-4">
+        <Card
+          label="Realized P&L"
+          value={closingTrades.length ? fmtUSD(filteredPnl) : "—"}
+          color={filteredPnl >= 0 ? "text-emerald-400" : "text-red-400"}
+          sub={closingTrades.length ? `${closingTrades.length} closed trade${closingTrades.length !== 1 ? "s" : ""}` : "No closed trades"}
+        />
+        <Card
+          label="Win Rate"
+          value={filteredWinRate ? `${filteredWinRate}%` : "—"}
+          color={filteredWinRate && parseFloat(filteredWinRate) >= 50 ? "text-emerald-400" : "text-amber-400"}
+          sub={filteredWinRate ? `${filteredWins}W / ${closingTrades.length - filteredWins}L` : undefined}
+        />
+        <Card
+          label="Avg Trade"
+          value={closingTrades.length ? fmtUSD(filteredPnl / closingTrades.length) : "—"}
+          color={(closingTrades.length ? filteredPnl / closingTrades.length : 0) >= 0 ? "text-emerald-400" : "text-red-400"}
+          sub={filter.symbol !== "ALL" ? filter.symbol : filter.strategy !== "ALL" ? filter.strategy : `Last ${filter.dateRange}d`}
         />
       </div>
 
@@ -146,7 +203,9 @@ export default function Overview() {
         <div className="flex items-center justify-between mb-4">
           <div>
             <p className="text-sm font-semibold text-gray-300">Cumulative P&L</p>
-            <p className="text-xs text-gray-500 mt-1">Realized P&L · Last 30 days</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Realized P&L · {filter.dateFrom ? `${filter.dateFrom} → ${filter.dateTo ?? "today"}` : `Last ${filter.dateRange}d`}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             {/* View toggle */}
@@ -284,6 +343,63 @@ export default function Overview() {
             </BarChart>
           </ResponsiveContainer>
         </div>
+
+        {/* P&L by Strategy */}
+        {strategyPnl.length > 0 && (
+          <div className="mt-6 pt-5 border-t border-gray-700">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-4">P&L by Strategy</p>
+            <ResponsiveContainer width="100%" height={strategyPnl.length * 52 + 8}>
+              <BarChart
+                data={strategyPnl}
+                layout="vertical"
+                margin={{ left: 0, right: 80, top: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" horizontal={false} />
+                <XAxis
+                  type="number"
+                  tick={{ fill: "#6b7280", fontSize: 11 }}
+                  tickFormatter={(v) => `$${v}`}
+                  axisLine={{ stroke: "#374151" }}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="strategy"
+                  tick={{ fill: "#9ca3af", fontSize: 12 }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={120}
+                />
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0].payload;
+                    return (
+                      <div className="bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 shadow-xl text-xs">
+                        <p className="text-gray-300 font-semibold mb-2">{d.strategy}</p>
+                        <p className={`font-bold mb-1 ${d.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                          {d.pnl >= 0 ? "+" : ""}{fmtUSD(d.pnl)}
+                        </p>
+                        <p className="text-gray-400">Win Rate: {d.winRate}%</p>
+                        <p className="text-gray-500">{d.trades} trades</p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="pnl" radius={[0, 3, 3, 0]}>
+                  {strategyPnl.map((e, i) => (
+                    <Cell key={i} fill={e.pnl >= 0 ? "#10b981" : "#ef4444"} fillOpacity={0.85} />
+                  ))}
+                  <LabelList
+                    dataKey="pnl"
+                    position="right"
+                    formatter={(v: number) => `${v >= 0 ? "+" : ""}${fmtUSD(v)}`}
+                    style={{ fill: "#9ca3af", fontSize: 11 }}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
 
       {/* Performance Report */}

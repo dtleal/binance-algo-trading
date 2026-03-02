@@ -25,6 +25,7 @@ export interface Trade {
   time: number;
   order_id: string;
   buyer: boolean;
+  strategy: string;
 }
 
 export interface BotState {

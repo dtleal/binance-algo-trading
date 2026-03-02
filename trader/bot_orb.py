@@ -148,6 +148,7 @@ class ORBBot:
         # Background tasks
         self._eod_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
+        self._uds_task: asyncio.Task | None = None
 
         self._reg_key = f"{self.symbol}:orb"
 
@@ -513,12 +514,20 @@ class ORBBot:
             logger.info(f"State: {self._state.name} | Waiting for candles...")
             logger.info("-" * 60)
 
+            if not self.dry_run:
+                from trader.user_data_stream import UserDataStream
+                uds = UserDataStream(self._client, self._ws_factory, self._ws_url, self._ConfigWS)
+                uds.register(self._on_user_data)
+                self._uds_task = asyncio.create_task(uds.run())
+
             while True:
                 await asyncio.sleep(1)
 
         except asyncio.CancelledError:
             logger.info("\nBot shutting down...")
         finally:
+            if self._uds_task and not self._uds_task.done():
+                self._uds_task.cancel()
             if self._eod_task and not self._eod_task.done():
                 self._eod_task.cancel()
             if self._monitor_task and not self._monitor_task.done():
@@ -872,6 +881,42 @@ class ORBBot:
     # ------------------------------------------------------------------
     # Position monitoring
     # ------------------------------------------------------------------
+
+    async def _on_user_data(self, event) -> None:
+        """Handle real-time account events from the user data stream."""
+        from binance_sdk_derivatives_trading_usds_futures.websocket_streams.models import AccountUpdate
+        actual = getattr(event, "actual_instance", None)
+        if not isinstance(actual, AccountUpdate) or not actual.a or not actual.a.P:
+            return
+        for pos in actual.a.P:
+            if pos.s != self.symbol:
+                continue
+            pa = float(pos.pa)
+            up = float(pos.up)
+            if pa == 0.0 and self._state == _State.IN_POSITION:
+                logger.info(
+                    f"{YELLOW}[UserData] Position closed for {self.symbol} "
+                    f"(SL/TP or manual){RESET}"
+                )
+                if self._monitor_task and not self._monitor_task.done():
+                    self._monitor_task.cancel()
+                self._emit({"type": "position_closed", "symbol": self.symbol,
+                            "strategy": "orb", "reason": "SL/TP or manual"})
+                self._direction = None
+                self._r_value = 0.0
+                self._sl_milestone = 0
+                if self._signal.traded_today:
+                    self._state = _State.COOLDOWN
+                else:
+                    self._signal.reset_signal()
+                    self._state = _State.SCANNING
+                _registry.update(self._reg_key, {
+                    "state": self._state.name, "direction": None,
+                    "entry_price": None, "sl_price": None, "tp_price": None,
+                    "position_qty": 0, "unrealized_pnl": 0,
+                })
+            elif pa != 0.0 and self._state == _State.IN_POSITION:
+                _registry.update(self._reg_key, {"unrealized_pnl": round(up, 4)})
 
     async def _monitor_position_fill(self):
         prefix = "[DRY-RUN] " if self.dry_run else ""

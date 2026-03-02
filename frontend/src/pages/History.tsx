@@ -47,7 +47,7 @@ const PnlTooltip = ({ active, payload, label }: any) => {
 
 export default function History() {
   const { filter: globalFilter } = useFilter();
-  const { trades, isLoading } = useTrades(globalFilter.dateRange, globalFilter.dateFrom, globalFilter.dateTo);
+  const { trades, isLoading } = useTrades(globalFilter.dateRange, globalFilter.dateFrom, globalFilter.dateTo, globalFilter.strategy);
   const { bots } = useBotStates();
   const { positions } = usePositions();
 
@@ -56,8 +56,7 @@ export default function History() {
 
   const filtered = useMemo(() => {
     return trades.filter((t) => {
-      const symbolMatch = globalFilter.symbol === "ALL" || t.symbol === globalFilter.symbol;
-      return symbolMatch;
+      return globalFilter.symbol === "ALL" || t.symbol === globalFilter.symbol;
     });
   }, [trades, globalFilter.symbol]);
 
