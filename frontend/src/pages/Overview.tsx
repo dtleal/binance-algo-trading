@@ -113,7 +113,7 @@ export default function Overview() {
   const closingTrades      = useMemo(() => filteredTrades.filter(t => t.realized_pnl !== 0), [filteredTrades]);
   const filteredPnl        = useMemo(() => closingTrades.reduce((s, t) => s + t.realized_pnl, 0), [closingTrades]);
   const filteredCommission = useMemo(() => closingTrades.reduce((s, t) => s + t.commission, 0), [closingTrades]);
-  const filteredNetPnl     = filteredPnl + filteredCommission; // commission is already negative
+  const filteredNetPnl     = filteredPnl - filteredCommission;
   const filteredWins       = useMemo(() => closingTrades.filter(t => t.realized_pnl > 0).length, [closingTrades]);
   const filteredWinRate    = closingTrades.length
     ? ((filteredWins / closingTrades.length) * 100).toFixed(1)
