@@ -110,10 +110,12 @@ export default function Overview() {
   const openPositions = positions.length;
 
   // Filtered period stats (responds to active filters)
-  const closingTrades  = useMemo(() => filteredTrades.filter(t => t.realized_pnl !== 0), [filteredTrades]);
-  const filteredPnl    = useMemo(() => closingTrades.reduce((s, t) => s + t.realized_pnl, 0), [closingTrades]);
-  const filteredWins   = useMemo(() => closingTrades.filter(t => t.realized_pnl > 0).length, [closingTrades]);
-  const filteredWinRate = closingTrades.length
+  const closingTrades      = useMemo(() => filteredTrades.filter(t => t.realized_pnl !== 0), [filteredTrades]);
+  const filteredPnl        = useMemo(() => closingTrades.reduce((s, t) => s + t.realized_pnl, 0), [closingTrades]);
+  const filteredCommission = useMemo(() => closingTrades.reduce((s, t) => s + t.commission, 0), [closingTrades]);
+  const filteredNetPnl     = filteredPnl + filteredCommission; // commission is already negative
+  const filteredWins       = useMemo(() => closingTrades.filter(t => t.realized_pnl > 0).length, [closingTrades]);
+  const filteredWinRate    = closingTrades.length
     ? ((filteredWins / closingTrades.length) * 100).toFixed(1)
     : null;
 
@@ -177,24 +179,30 @@ export default function Overview() {
 
       {/* Filtered Analysis — responds to symbol / strategy / date filters */}
       <SectionHeader title="Filtered Analysis" />
-      <div className="grid grid-cols-3 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <Card
-          label="Realized P&L"
+          label="Gross P&L"
           value={closingTrades.length ? fmtUSD(filteredPnl) : "—"}
           color={filteredPnl >= 0 ? "text-emerald-400" : "text-red-400"}
           sub={closingTrades.length ? `${closingTrades.length} closed trade${closingTrades.length !== 1 ? "s" : ""}` : "No closed trades"}
+        />
+        <Card
+          label="Commissions"
+          value={closingTrades.length ? fmtUSD(filteredCommission) : "—"}
+          color="text-amber-400"
+          sub="Fees paid"
+        />
+        <Card
+          label="Net P&L"
+          value={closingTrades.length ? fmtUSD(filteredNetPnl) : "—"}
+          color={filteredNetPnl >= 0 ? "text-emerald-400" : "text-red-400"}
+          sub={closingTrades.length ? `Avg ${fmtUSD(filteredNetPnl / closingTrades.length)}/trade` : undefined}
         />
         <Card
           label="Win Rate"
           value={filteredWinRate ? `${filteredWinRate}%` : "—"}
           color={filteredWinRate && parseFloat(filteredWinRate) >= 50 ? "text-emerald-400" : "text-amber-400"}
           sub={filteredWinRate ? `${filteredWins}W / ${closingTrades.length - filteredWins}L` : undefined}
-        />
-        <Card
-          label="Avg Trade"
-          value={closingTrades.length ? fmtUSD(filteredPnl / closingTrades.length) : "—"}
-          color={(closingTrades.length ? filteredPnl / closingTrades.length : 0) >= 0 ? "text-emerald-400" : "text-red-400"}
-          sub={filter.symbol !== "ALL" ? filter.symbol : filter.strategy !== "ALL" ? filter.strategy : `Last ${filter.dateRange}d`}
         />
       </div>
 
