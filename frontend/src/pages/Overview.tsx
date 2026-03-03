@@ -59,7 +59,6 @@ function buildDailyPnl(trades: { time: number; realized_pnl: number }[]) {
 function buildPnlCurve(trades: { time: number; realized_pnl: number; commission: number }[]) {
   const byDay: Record<string, { pnl: number; net: number }> = {};
   for (const t of trades) {
-    if (t.realized_pnl === 0) continue;
     const d = new Date(t.time).toISOString().slice(0, 10);
     if (!byDay[d]) byDay[d] = { pnl: 0, net: 0 };
     byDay[d].pnl += t.realized_pnl;
@@ -81,24 +80,35 @@ function buildPnlCurve(trades: { time: number; realized_pnl: number; commission:
 }
 
 function buildPnlCurvePerTrade(trades: { time: number; realized_pnl: number; commission: number; symbol?: string }[]) {
-  const sorted = [...trades]
-    .filter(t => t.realized_pnl !== 0)
-    .sort((a, b) => a.time - b.time);
+  const sorted = [...trades].sort((a, b) => a.time - b.time);
   let runningPnl = 0;
   let runningNet = 0;
-  return sorted.map(t => {
+  let pendingCommission = 0;
+  const points = [];
+  for (const t of sorted) {
+    if (t.realized_pnl === 0) {
+      pendingCommission += t.commission;
+      continue;
+    }
     runningPnl += t.realized_pnl;
-    runningNet += t.realized_pnl - t.commission;
+    runningNet += t.realized_pnl - t.commission - pendingCommission;
+    pendingCommission = 0;
     const dt = new Date(t.time);
     const date = `${(dt.getMonth() + 1).toString().padStart(2, "0")}/${dt.getDate().toString().padStart(2, "0")} ${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`;
-    return {
+    points.push({
       date,
       pnl: parseFloat(runningPnl.toFixed(2)),
       net: parseFloat(runningNet.toFixed(2)),
       tradePnl: parseFloat(t.realized_pnl.toFixed(2)),
       symbol: t.symbol ?? null,
-    };
-  });
+    });
+  }
+  // Apply any remaining entry commissions (open position not yet closed) to the last point
+  if (pendingCommission > 0 && points.length > 0) {
+    const last = points[points.length - 1];
+    last.net = parseFloat((last.net - pendingCommission).toFixed(2));
+  }
+  return points;
 }
 
 export default function Overview() {
