@@ -60,7 +60,7 @@ class UserDataStream:
         """Called synchronously by the SDK for each incoming WS message."""
         for cb in self._callbacks:
             try:
-                asyncio.get_event_loop().create_task(cb(event))
+                asyncio.get_running_loop().create_task(cb(event))
             except Exception as e:
                 logger.error(f"User data stream callback error: {e}")
 

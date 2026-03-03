@@ -595,7 +595,78 @@ _CHAT_TOOLS = [
             "required": [],
         },
     },
+    {
+        "name": "query_trades",
+        "description": (
+            "Consulta a tabela de trades no banco de dados. Use para responder perguntas detalhadas sobre "
+            "operações específicas, listar trades de um período ou símbolo, calcular P&L, comissões, "
+            "identificar melhores/piores trades, etc. "
+            "Colunas disponíveis: id, symbol, side (BUY/SELL), price, qty, realized_pnl, commission, "
+            "commission_asset, trade_time (timestamp), order_id, strategy. "
+            "Nota: trades de abertura têm realized_pnl=0; trades de fechamento têm realized_pnl≠0. "
+            "Em futuros, fechar LONG = side BUY com realized_pnl≠0; fechar SHORT = side SELL com realized_pnl≠0."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {"type": "integer", "description": "Filtrar pelos últimos N dias (padrão: 30)"},
+                "symbol": {"type": "string", "description": "Filtrar por símbolo (ex: AXSUSDT). Omitir para todos."},
+                "side": {"type": "string", "description": "Filtrar por lado: BUY ou SELL. Omitir para ambos."},
+                "only_closing": {"type": "boolean", "description": "Se true, retorna só trades com realized_pnl≠0 (fechamentos). Padrão: false."},
+                "limit": {"type": "integer", "description": "Máximo de registros retornados (padrão: 200)"},
+                "order_by": {"type": "string", "description": "Coluna para ordenar (padrão: trade_time DESC)"},
+            },
+            "required": [],
+        },
+    },
 ]
+
+
+async def _chat_query_trades(
+    days: int = 30,
+    symbol: str | None = None,
+    side: str | None = None,
+    only_closing: bool = False,
+    limit: int = 200,
+    order_by: str = "trade_time DESC",
+) -> dict:
+    import db
+    pool = db.get_pool()
+    conditions = ["trade_time >= NOW() - make_interval(days => $1)"]
+    params: list = [days]
+    if symbol:
+        params.append(symbol.upper())
+        conditions.append(f"symbol = ${len(params)}")
+    if side:
+        params.append(side.upper())
+        conditions.append(f"side = ${len(params)}")
+    if only_closing:
+        conditions.append("realized_pnl != 0")
+    where = " AND ".join(conditions)
+    # Whitelist order_by to prevent injection
+    allowed_orders = {
+        "trade_time DESC", "trade_time ASC",
+        "realized_pnl DESC", "realized_pnl ASC",
+        "commission DESC", "commission ASC",
+    }
+    safe_order = order_by if order_by in allowed_orders else "trade_time DESC"
+    params.append(min(limit, 500))
+    query = f"SELECT symbol, side, price, qty, realized_pnl, commission, commission_asset, trade_time FROM trades WHERE {where} ORDER BY {safe_order} LIMIT ${len(params)}"
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(query, *params)
+    trades = [dict(r) for r in rows]
+    for t in trades:
+        if "trade_time" in t and t["trade_time"]:
+            t["trade_time"] = t["trade_time"].isoformat()
+    total_pnl = sum(t["realized_pnl"] for t in trades)
+    total_commission = sum(t["commission"] for t in trades)
+    return {
+        "count": len(trades),
+        "total_realized_pnl": round(total_pnl, 4),
+        "total_commission": round(total_commission, 4),
+        "net_pnl": round(total_pnl - total_commission, 4),
+        "trades": trades,
+    }
 
 
 async def _chat_get_trading_performance(days: int = 7, symbol: str | None = None) -> dict:
@@ -758,8 +829,31 @@ _CHAT_SYSTEM = (
     "Você é um assistente especializado em trading de criptomoedas. "
     "Sempre responda em português brasileiro. "
     "Use as tools disponíveis para consultar dados reais antes de responder. "
-    "Seja direto e objetivo nas respostas."
+    "Seja direto e objetivo. Não apresente menus, listas de funções ou introduções. "
+    "Responda apenas o que foi perguntado, de forma concisa."
 )
+
+
+class TelegramAlertRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/alert/telegram")
+async def send_telegram_alert(req: TelegramAlertRequest):
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID", "")
+    if not token or not chat_id:
+        return {"ok": False, "error": "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not configured"}
+    import urllib.parse
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = json.dumps({"chat_id": chat_id, "text": req.message, "parse_mode": "HTML"}).encode()
+    try:
+        http_req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(http_req, timeout=5) as resp:
+            result = json.loads(resp.read())
+        return {"ok": result.get("ok", False)}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/api/chat")
@@ -807,6 +901,8 @@ async def chat_endpoint(req: ChatRequest):
                         result = _chat_get_sweep_results(**inp)
                     elif block.name == "get_bot_logs":
                         result = _chat_get_bot_logs(**inp)
+                    elif block.name == "query_trades":
+                        result = await _chat_query_trades(**inp)
                     else:
                         result = {"error": f"Tool desconhecida: {block.name}"}
                 except Exception as e:

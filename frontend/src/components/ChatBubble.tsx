@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 
 interface Message {
   role: "user" | "assistant";
@@ -7,6 +8,7 @@ interface Message {
 
 export default function ChatBubble() {
   const [isOpen, setIsOpen] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -71,7 +73,11 @@ export default function ChatBubble() {
     <>
       {/* Chat panel */}
       {isOpen && (
-        <div className="fixed bottom-20 right-6 z-50 w-80 h-[440px] flex flex-col rounded-xl shadow-2xl border border-gray-700 bg-gray-900 overflow-hidden">
+        <div className={`fixed z-50 flex flex-col rounded-xl shadow-2xl border border-gray-700 bg-gray-900 overflow-hidden transition-all duration-200 ${
+          isMaximized
+            ? "bottom-6 right-6 left-6 top-6 md:left-auto md:w-[600px] md:top-6 md:bottom-6"
+            : "bottom-20 right-6 w-80 h-[440px]"
+        }`}>
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 bg-gray-800 border-b border-gray-700 flex-shrink-0">
             <div className="flex items-center gap-2">
@@ -80,14 +86,31 @@ export default function ChatBubble() {
                 Trading Assistant
               </span>
             </div>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="text-gray-400 hover:text-gray-200 transition-colors"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsMaximized(v => !v)}
+                className="text-gray-400 hover:text-gray-200 transition-colors"
+                title={isMaximized ? "Minimizar" : "Maximizar"}
+              >
+                {isMaximized ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0h5m-5 0v5M15 9l5-5m0 0h-5m5 0v5M9 15l-5 5m0 0h5m-5 0v-5M15 15l5 5m0 0h-5m5 0v-5" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5" />
+                  </svg>
+                )}
+              </button>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
           </div>
 
           {/* Messages */}
@@ -117,13 +140,32 @@ export default function ChatBubble() {
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap ${
+                  className={`max-w-[85%] rounded-xl px-3 py-2 text-xs leading-relaxed ${
                     m.role === "user"
                       ? "bg-emerald-700 text-white rounded-br-sm"
                       : "bg-gray-800 text-gray-200 rounded-bl-sm"
                   }`}
                 >
-                  {m.content}
+                  {m.role === "user" ? (
+                    m.content
+                  ) : (
+                    <ReactMarkdown
+                      components={{
+                        p: ({ children }) => <p className="mb-1.5 last:mb-0">{children}</p>,
+                        strong: ({ children }) => <strong className="text-white font-semibold">{children}</strong>,
+                        ul: ({ children }) => <ul className="list-disc list-inside space-y-0.5 my-1.5">{children}</ul>,
+                        ol: ({ children }) => <ol className="list-decimal list-inside space-y-0.5 my-1.5">{children}</ol>,
+                        li: ({ children }) => <li className="text-gray-300">{children}</li>,
+                        h1: ({ children }) => <p className="font-bold text-white text-sm mb-1">{children}</p>,
+                        h2: ({ children }) => <p className="font-bold text-white mb-1">{children}</p>,
+                        h3: ({ children }) => <p className="font-semibold text-gray-100 mb-0.5">{children}</p>,
+                        code: ({ children }) => <code className="bg-gray-900 text-emerald-400 rounded px-1 font-mono">{children}</code>,
+                        hr: () => <hr className="border-gray-700 my-2" />,
+                      }}
+                    >
+                      {m.content}
+                    </ReactMarkdown>
+                  )}
                 </div>
               </div>
             ))}

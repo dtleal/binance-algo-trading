@@ -11,6 +11,7 @@ interface Trade {
 interface PerformanceMetricsProps {
   trades: Trade[];
   startCapital?: number;
+  totalEquity?: number;
 }
 
 function MetricCard({
@@ -36,7 +37,7 @@ function MetricCard({
   );
 }
 
-export default function PerformanceMetrics({ trades, startCapital = 1000 }: PerformanceMetricsProps) {
+export default function PerformanceMetrics({ trades, startCapital = 1000, totalEquity }: PerformanceMetricsProps) {
   const metrics = useMemo(() => {
     // Filter only closing trades (with P&L)
     const closingTrades = trades.filter(t => t.realized_pnl !== 0);
@@ -107,8 +108,9 @@ export default function PerformanceMetrics({ trades, startCapital = 1000 }: Perf
     const stdDev = Math.sqrt(variance);
     const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) * Math.sqrt(252) : 0;
 
-    // Return on capital
-    const returnOnCapital = (netProfit / startCapital) * 100;
+    // Return on capital — net of commissions, over current equity
+    const capital = totalEquity && totalEquity > 0 ? totalEquity : startCapital;
+    const returnOnCapital = ((netProfit - totalCommissions) / capital) * 100;
 
     // Calculate average trade duration (pair SELL→BUY for each symbol)
     const tradesBySymbol: Record<string, Trade[]> = {};
@@ -171,7 +173,7 @@ export default function PerformanceMetrics({ trades, startCapital = 1000 }: Perf
       avgWinDuration,
       avgLossDuration,
     };
-  }, [trades, startCapital]);
+  }, [trades, startCapital, totalEquity]);
 
   if (!metrics) {
     return (

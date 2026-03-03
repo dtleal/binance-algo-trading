@@ -35,6 +35,10 @@ from trader.config import (
 from trader.strategy import VWAPRollingTracker
 from trader.strategy_vwap_pullback import EMATracker, VWAPPullbackSignal
 from trader import events as _events, bot_registry as _registry
+from trader.notifications import (
+    notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
+    notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
+)
 
 
 def _parse_proxy(url: str) -> dict | None:
@@ -491,6 +495,9 @@ class VWAPPullbackBotV2:
             )
         logger.info("-" * 60)
 
+        if not self.dry_run:
+            notify_bot_started(self.symbol, "VWAPPullback-v2", self.interval, self.leverage, self.pos_size_pct)
+
         _registry.update(self._reg_key, {
             "symbol": self.symbol,
             "strategy": "pullback_v2",
@@ -565,6 +572,8 @@ class VWAPPullbackBotV2:
                     await connection.close_connection(close_session=True)
                 except Exception:
                     pass
+            if not self.dry_run:
+                notify_bot_stopped(self.symbol, "VWAPPullback-v2")
             logger.info("Connection closed. Goodbye.")
 
     # ------------------------------------------------------------------
@@ -635,11 +644,15 @@ class VWAPPullbackBotV2:
             )
             if signal == "ENTER_LONG":
                 logger.info(f"{BOLD}{GREEN}{prefix}SIGNAL: ENTER_LONG @ {c:.{self._price_decimals}f}{RESET}")
+                if not self.dry_run:
+                    notify_signal(self.symbol, "long", round(c, self._price_decimals), "VWAPPullback-v2")
                 self._emit({"type": "signal", "symbol": self.symbol, "strategy": "pullback_v2",
                             "direction": "long", "price": c, "ts": ts})
                 asyncio.get_event_loop().create_task(self._enter_position("long", c))
             elif signal == "ENTER_SHORT":
                 logger.info(f"{BOLD}{RED}{prefix}SIGNAL: ENTER_SHORT @ {c:.{self._price_decimals}f}{RESET}")
+                if not self.dry_run:
+                    notify_signal(self.symbol, "short", round(c, self._price_decimals), "VWAPPullback-v2")
                 self._emit({"type": "signal", "symbol": self.symbol, "strategy": "pullback_v2",
                             "direction": "short", "price": c, "ts": ts})
                 asyncio.get_event_loop().create_task(self._enter_position("short", c))
@@ -931,6 +944,10 @@ class VWAPPullbackBotV2:
                 f"{BOLD}{direction.upper()} opened | Entry: ${avg_price:.{self._price_decimals}f} | "
                 f"SL: ${self._sl_price} | Trailing R-multiple active{RESET}"
             )
+            notify_position_opened(
+                self.symbol, direction, avg_price,
+                self._sl_price, None, executed_qty, self.leverage,
+            )
 
             self._monitor_task = asyncio.get_event_loop().create_task(
                 self._monitor_position_fill()
@@ -938,6 +955,7 @@ class VWAPPullbackBotV2:
 
         except Exception as e:
             logger.info(f"{RED}Entry failed: {e}{RESET}")
+            notify_error(self.symbol, str(e), "Entry failed")
             self._signal.trades_today = max(0, self._signal.trades_today - 1)
             self._direction = None
             self._state = _State.SCANNING
@@ -965,6 +983,12 @@ class VWAPPullbackBotV2:
                     )
                     self._emit({"type": "position_closed", "symbol": self.symbol,
                                 "strategy": "pullback_v2", "reason": "Trailing SL"})
+                    notify_position_closed(
+                        self.symbol,
+                        self._direction or "",
+                        self._entry_price,
+                        reason="SL/TP",
+                    )
                     self._direction = None
                     self._r_value = 0.0
                     self._sl_milestone = 0
@@ -1051,6 +1075,9 @@ class VWAPPullbackBotV2:
             logger.info(
                 f"{color}EOD closed {qty} {self.symbol} ({self._direction}) "
                 f"@ ${avg_price:.{self._price_decimals}f} | P&L: ${pnl:+.2f}{RESET}"
+            )
+            notify_eod_close(
+                self.symbol, self._direction or "", self._entry_price, avg_price, pnl
             )
 
         except BadRequestError as e:

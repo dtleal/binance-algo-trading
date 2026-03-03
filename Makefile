@@ -83,7 +83,7 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		(nohup poetry run python -m trader bot --symbol sandusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot --symbol manausdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot --symbol solusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 5 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol avaxusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 5 > /dev/null 2>&1 &) && \

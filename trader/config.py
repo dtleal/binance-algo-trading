@@ -10,6 +10,10 @@ BINANCE_API_KEY = os.getenv("API_KEY", "")
 BINANCE_SECRET_KEY = os.getenv("SECRET_KEY", "")
 SOCKS_PROXY = os.getenv("SOCKS_PROXY", "")  # e.g. "socks5://127.0.0.1:1081"
 
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+TELEGRAM_ENABLED = bool(TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID)
+
 DEFAULT_SYMBOL = "axsusdt"
 DEFAULT_SYMBOL_UPPER = "AXSUSDT"
 DEFAULT_ASSET = "AXS"
@@ -124,7 +128,7 @@ GALA_CONFIG = SymbolConfig(
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
-    pos_size_pct=0.40,
+    pos_size_pct=0.10,  # reduzido de 0.40 — 10% até performance melhorar
     vol_filter=False,
     price_decimals=5,
     qty_decimals=0,

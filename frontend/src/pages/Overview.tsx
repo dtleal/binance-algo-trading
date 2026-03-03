@@ -133,7 +133,7 @@ export default function Overview() {
   // Filtered period stats (responds to active filters)
   const closingTrades      = useMemo(() => filteredTrades.filter(t => t.realized_pnl !== 0), [filteredTrades]);
   const filteredPnl        = useMemo(() => closingTrades.reduce((s, t) => s + t.realized_pnl, 0), [closingTrades]);
-  const filteredCommission = useMemo(() => closingTrades.reduce((s, t) => s + t.commission, 0), [closingTrades]);
+  const filteredCommission = useMemo(() => filteredTrades.reduce((s, t) => s + t.commission, 0), [filteredTrades]);
   const filteredNetPnl     = filteredPnl - filteredCommission;
   const filteredWins       = useMemo(() => closingTrades.filter(t => t.realized_pnl > 0).length, [closingTrades]);
   const filteredWinRate    = closingTrades.length
@@ -355,7 +355,7 @@ export default function Overview() {
               stroke={pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "#10b981" : "#ef4444"}
               strokeWidth={2}
               fill={pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "url(#colorPnl)" : "url(#colorPnlNeg)"}
-              dot={pnlView === "trade" ? { r: 3, fill: pnlCurve.length > 0 && pnlCurve[pnlCurve.length - 1].pnl >= 0 ? "#10b981" : "#ef4444", strokeWidth: 0 } : false}
+              dot={false}
               activeDot={{ r: 5 }}
             />
             <Area
@@ -471,7 +471,7 @@ export default function Overview() {
       </div>
 
       {/* Performance Report */}
-      <PerformanceMetrics trades={filteredTrades} startCapital={1000} />
+      <PerformanceMetrics trades={filteredTrades} startCapital={1000} totalEquity={totalEquity} />
 
       {/* Performance Rankings */}
       <PerformanceRankings trades={filteredTrades} />

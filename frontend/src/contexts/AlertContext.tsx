@@ -47,6 +47,16 @@ function fmt(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
 }
 
+async function sendTelegram(message: string) {
+  try {
+    await fetch("/api/alert/telegram", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    });
+  } catch {}
+}
+
 export function AlertProvider({ children }: { children: React.ReactNode }) {
   const { positions } = usePositions();
   const [settings, setSettings] = useState<AlertSettings>(loadSettings);
@@ -113,6 +123,9 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
     if (armed && !triggered && total < settings.alertBelow) {
       triggered = true;
 
+      const msg = `⚠️ <b>Alerta P&amp;L — Drawdown</b>\nP&amp;L caiu para <b>${fmt(total)}</b>\nPico: ${fmt(peakSeen)}`;
+      sendTelegram(msg);
+
       if ("Notification" in window && Notification.permission === "granted") {
         try {
           new Notification("⚠️ Alerta P&L — Drawdown", {
@@ -126,6 +139,9 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
     // Fire absolute alert: P&L dropped below absolute threshold (no arm needed)
     if (settings.absoluteEnabled && !triggeredAbsolute && total < settings.absoluteThreshold) {
       triggeredAbsolute = true;
+
+      const msg = `⚠️ <b>Alerta P&amp;L — Limite Absoluto</b>\nOpen P&amp;L: <b>${fmt(total)}</b>\nLimite: ${fmt(settings.absoluteThreshold)}`;
+      sendTelegram(msg);
 
       if ("Notification" in window && Notification.permission === "granted") {
         try {

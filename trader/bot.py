@@ -20,6 +20,10 @@ from trader.config import (
 )
 from trader.strategy import VWAPTracker, MomShortSignal
 from trader import events as _events, bot_registry as _registry
+from trader.notifications import (
+    notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
+    notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
+)
 
 def _parse_proxy(url: str) -> dict | None:
     """Parse 'socks5://host:port' into the SDK proxy dict format."""
@@ -314,6 +318,8 @@ class MomShortBot:
                 f"(at {self.cfg.pos_size_pct * 100:.0f}% position size)."
             )
         logger.info("-" * 60)
+        if not self.dry_run:
+            notify_bot_started(self.symbol, "MomShort", self.cfg.interval, self.leverage, self.cfg.pos_size_pct)
 
         # Publish bot configuration to registry
         _registry.update(self._reg_key, {
@@ -400,6 +406,8 @@ class MomShortBot:
                     await connection.close_connection(close_session=True)
                 except Exception:
                     pass
+            if not self.dry_run:
+                notify_bot_stopped(self.symbol, "MomShort")
             logger.info("Connection closed. Goodbye.")
 
     # ------------------------------------------------------------------
@@ -466,6 +474,8 @@ class MomShortBot:
                 self._emit({"type": "signal", "symbol": self.symbol,
                            "strategy": "momshort", "direction": "SHORT",
                            "price": c, "timestamp": ts})
+                if not self.dry_run:
+                    notify_signal(self.symbol, "short", round(c, 4), "MomShort")
                 asyncio.get_event_loop().create_task(self._enter_short(c))
 
         elif self._state == _State.IN_POSITION:
@@ -663,6 +673,10 @@ class MomShortBot:
                 f"{BOLD}Short opened | Entry: ${avg_price:.4f} | "
                 f"SL: ${self._sl_price} | TP: ${self._tp_price}{RESET}"
             )
+            notify_position_opened(
+                self.symbol, "short", avg_price,
+                self._sl_price, self._tp_price, executed_qty, self.leverage,
+            )
 
             # Update dashboard
             self._emit({"type": "order", "symbol": self.symbol, "side": "SHORT",
@@ -680,6 +694,7 @@ class MomShortBot:
 
         except Exception as e:
             logger.info(f"{RED}Entry failed: {e}{RESET}")
+            notify_error(self.symbol, str(e), "Entry failed")
             # Don't burn the daily trade on a failed order
             self._signal.traded_today = False
             self._state = _State.SCANNING
@@ -690,8 +705,15 @@ class MomShortBot:
 
     async def _on_user_data(self, event) -> None:
         """Handle real-time account events from the user data stream."""
-        from binance_sdk_derivatives_trading_usds_futures.websocket_streams.models import AccountUpdate
+        from binance_sdk_derivatives_trading_usds_futures.websocket_streams.models import AccountUpdate, OrderTradeUpdate
         actual = getattr(event, "actual_instance", None)
+        if isinstance(actual, OrderTradeUpdate) and actual.o:
+            o = actual.o
+            if (o.s == self.symbol and o.X == "FILLED" and
+                    o.ot == "MARKET" and o.R is True and
+                    self._state == _State.IN_POSITION):
+                self._last_close_reason = "Manual (UI da Binance)"
+            return
         if not isinstance(actual, AccountUpdate) or not actual.a or not actual.a.P:
             return
         for pos in actual.a.P:
@@ -700,14 +722,19 @@ class MomShortBot:
             pa = float(pos.pa)
             up = float(pos.up)
             if pa == 0.0 and self._state == _State.IN_POSITION:
+                close_reason = getattr(self, '_last_close_reason', 'SL/TP')
+                self._last_close_reason = 'SL/TP'
                 logger.info(
                     f"{YELLOW}[UserData] Position closed for {self.symbol} "
-                    f"(SL/TP or manual){RESET}"
+                    f"({close_reason}){RESET}"
                 )
                 if self._monitor_task and not self._monitor_task.done():
                     self._monitor_task.cancel()
                 self._emit({"type": "position_closed", "symbol": self.symbol,
-                            "strategy": "momshort", "reason": "SL/TP or manual"})
+                            "strategy": "momshort", "reason": close_reason})
+                notify_position_closed(
+                    self.symbol, "short", self._entry_price, reason=close_reason
+                )
                 self._signal.traded_today = False
                 self._state = _State.SCANNING
                 _registry.update(self._reg_key, {
@@ -749,6 +776,9 @@ class MomShortBot:
                     )
                     self._emit({"type": "position_closed", "symbol": self.symbol,
                                "reason": "SL/TP", "pnl_info": pnl_info})
+                    notify_position_closed(
+                        self.symbol, "short", self._entry_price, reason="SL/TP"
+                    )
                     # Go back to SCANNING so the bot can re-enter if a new signal forms.
                     # Also reset traded_today so a manual close doesn't permanently block
                     # the bot for the rest of the day.
@@ -831,6 +861,7 @@ class MomShortBot:
             )
             self._emit({"type": "position_closed", "symbol": self.symbol,
                        "reason": "EOD", "pnl": pnl})
+            notify_eod_close(self.symbol, "short", self._entry_price, avg_price, pnl)
         except BadRequestError as e:
             # Position was already closed by SL/TP fill
             logger.info(f"{YELLOW}EOD close: position already closed ({e}){RESET}")

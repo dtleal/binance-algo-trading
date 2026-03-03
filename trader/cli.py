@@ -40,7 +40,7 @@ def _load_symbol_config(symbol: str, strategy_name: str):
         raise SystemExit(0)
 
     if result == "fallback":
-        # DB unavailable or symbol not found — use Python config
+        # DB unavailable — use Python config, mark as fallback so CLI args are used
         from trader.config import get_symbol_config
         cfg = get_symbol_config(symbol)
         extras = {
@@ -50,10 +50,13 @@ def _load_symbol_config(symbol: str, strategy_name: str):
             "range_mins": None, "pdhl_prox_pct": None,
             "be_r": None, "trail_step": None,
             "leverage": DEFAULT_LEVERAGE, "active": True,
+            "_source": "fallback",
         }
         return cfg, extras
 
-    return result
+    cfg, extras = result
+    extras["_source"] = "db"
+    return cfg, extras
 
 
 def main():
@@ -115,8 +118,8 @@ def main():
         help="Futures trading pair (e.g. btcusdt, ethusdt, solusdt)",
     )
     pb_parser.add_argument(
-        "--leverage", type=int, default=DEFAULT_LEVERAGE,
-        help=f"Leverage multiplier (default: {DEFAULT_LEVERAGE}x)",
+        "--leverage", type=int, default=None,
+        help="Leverage multiplier (default: from DB/config)",
     )
     pb_parser.add_argument(
         "--capital", type=float, default=None,
@@ -126,15 +129,15 @@ def main():
         "--dry-run", action="store_true",
         help="Run without placing orders (log signals only)",
     )
-    pb_parser.add_argument("--tp", type=float, default=5.0, help="Take-profit %% (default: 5.0)")
-    pb_parser.add_argument("--sl", type=float, default=2.5, help="Stop-loss %% (default: 2.5)")
-    pb_parser.add_argument("--min-bars", type=int, default=3, help="Min consolidation bars (default: 3)")
-    pb_parser.add_argument("--confirm-bars", type=int, default=2, help="Confirmation bars (default: 2)")
-    pb_parser.add_argument("--vwap-prox", type=float, default=0.005, help="VWAP proximity threshold (default: 0.005)")
+    pb_parser.add_argument("--tp", type=float, default=None, help="Take-profit %% (default: from DB/config)")
+    pb_parser.add_argument("--sl", type=float, default=None, help="Stop-loss %% (default: from DB/config)")
+    pb_parser.add_argument("--min-bars", type=int, default=None, help="Min consolidation bars (default: from DB/config)")
+    pb_parser.add_argument("--confirm-bars", type=int, default=None, help="Confirmation bars (default: from DB/config)")
+    pb_parser.add_argument("--vwap-prox", type=float, default=None, help="VWAP proximity threshold (default: from DB/config)")
     pb_parser.add_argument("--vwap-window-days", type=int, default=10, help="VWAP rolling window in days (default: 10)")
-    pb_parser.add_argument("--pos-size", type=float, default=0.20, help="Position size as fraction of capital (default: 0.20)")
-    pb_parser.add_argument("--ema-period", type=int, default=200, help="EMA period for trend detection (default: 200)")
-    pb_parser.add_argument("--max-trades", type=int, default=4, help="Max trades per UTC day (default: 4)")
+    pb_parser.add_argument("--pos-size", type=float, default=None, help="Position size as fraction of capital (default: from DB/config)")
+    pb_parser.add_argument("--ema-period", type=int, default=None, help="EMA period for trend detection (default: from DB/config)")
+    pb_parser.add_argument("--max-trades", type=int, default=None, help="Max trades per UTC day (default: from DB/config)")
 
     # --- pullback-v2 ---
     pb2_parser = subparsers.add_parser(
@@ -156,14 +159,14 @@ def main():
         "--dry-run", action="store_true",
         help="Run without placing orders (log signals only)",
     )
-    pb2_parser.add_argument("--sl", type=float, default=2.5, help="Initial stop-loss %% (default: 2.5)")
-    pb2_parser.add_argument("--min-bars", type=int, default=3, help="Min consolidation bars (default: 3)")
-    pb2_parser.add_argument("--confirm-bars", type=int, default=2, help="Confirmation bars (default: 2)")
-    pb2_parser.add_argument("--vwap-prox", type=float, default=0.005, help="VWAP proximity threshold (default: 0.005)")
+    pb2_parser.add_argument("--sl", type=float, default=None, help="Initial stop-loss %% (default: from DB/config)")
+    pb2_parser.add_argument("--min-bars", type=int, default=None, help="Min consolidation bars (default: from DB/config)")
+    pb2_parser.add_argument("--confirm-bars", type=int, default=None, help="Confirmation bars (default: from DB/config)")
+    pb2_parser.add_argument("--vwap-prox", type=float, default=None, help="VWAP proximity threshold (default: from DB/config)")
     pb2_parser.add_argument("--vwap-window-days", type=int, default=10, help="VWAP rolling window in days (default: 10)")
-    pb2_parser.add_argument("--pos-size", type=float, default=0.20, help="Position size as fraction of capital (default: 0.20)")
-    pb2_parser.add_argument("--ema-period", type=int, default=200, help="EMA period for trend detection (default: 200)")
-    pb2_parser.add_argument("--max-trades", type=int, default=4, help="Max trades per UTC day (default: 4)")
+    pb2_parser.add_argument("--pos-size", type=float, default=None, help="Position size as fraction of capital (default: from DB/config)")
+    pb2_parser.add_argument("--ema-period", type=int, default=None, help="EMA period for trend detection (default: from DB/config)")
+    pb2_parser.add_argument("--max-trades", type=int, default=None, help="Max trades per UTC day (default: from DB/config)")
 
     # --- ema-scalp ---
     ema_parser = subparsers.add_parser(
@@ -318,6 +321,14 @@ def main():
 
     args = parser.parse_args()
 
+    def _resolve(db_val, cli_val, hardcoded_default=None):
+        """DB wins. CLI is fallback when DB unavailable. hardcoded_default is last resort."""
+        if db_val is not None:
+            return db_val
+        if cli_val is not None:
+            return cli_val
+        return hardcoded_default
+
     if args.command == "monitor":
         streams = args.streams.split(",") if args.streams else ALL_STREAMS
         invalid = [s for s in streams if s not in ALL_STREAMS]
@@ -349,21 +360,22 @@ def main():
 
     elif args.command == "pullback":
         cfg, extras = _load_symbol_config(args.symbol.upper(), "VWAPPullback")
+        _db = extras.get("_source") == "db"
         from trader.bot_vwap_pullback import VWAPPullbackBot
         bot = VWAPPullbackBot(
             symbol=args.symbol,
-            leverage=args.leverage or extras["leverage"],
+            leverage=_resolve(extras["leverage"] if _db else None, args.leverage, DEFAULT_LEVERAGE),
             capital=args.capital,
             dry_run=args.dry_run,
-            tp_pct=args.tp or cfg.tp_pct,
-            sl_pct=args.sl or cfg.sl_pct,
-            min_bars=args.min_bars if args.min_bars != 0 else cfg.min_bars,
-            confirm_bars=args.confirm_bars if args.confirm_bars != 0 else cfg.confirm_bars,
-            vwap_prox=args.vwap_prox or cfg.vwap_prox,
+            tp_pct=_resolve(cfg.tp_pct if _db else None, args.tp, 5.0),
+            sl_pct=_resolve(cfg.sl_pct if _db else None, args.sl, 2.5),
+            min_bars=_resolve(cfg.min_bars if _db else None, args.min_bars, 3),
+            confirm_bars=_resolve(cfg.confirm_bars if _db else None, args.confirm_bars, 2),
+            vwap_prox=_resolve(cfg.vwap_prox if _db else None, args.vwap_prox, 0.005),
             vwap_window_days=args.vwap_window_days,
-            pos_size_pct=args.pos_size or cfg.pos_size_pct,
-            ema_period=args.ema_period or extras.get("ema_period") or 200,
-            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
+            pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, 0.20),
+            ema_period=_resolve(extras.get("ema_period") if _db else None, args.ema_period, 200),
+            max_trades_per_day=_resolve(extras.get("max_trades_per_day") if _db else None, args.max_trades, 4),
             interval=cfg.interval,
             vwap_dist_stop=cfg.vwap_dist_stop,
         )
@@ -371,80 +383,84 @@ def main():
 
     elif args.command == "pullback-v2":
         cfg, extras = _load_symbol_config(args.symbol.upper(), "VWAPPullback")
+        _db = extras.get("_source") == "db"
         from trader.bot_vwap_pullback_v2 import VWAPPullbackBotV2
         bot = VWAPPullbackBotV2(
             symbol=args.symbol,
-            leverage=args.leverage or extras["leverage"],
+            leverage=_resolve(extras["leverage"] if _db else None, args.leverage, DEFAULT_LEVERAGE),
             capital=args.capital,
             dry_run=args.dry_run,
-            sl_pct=args.sl or cfg.sl_pct,
-            min_bars=args.min_bars if args.min_bars != 0 else cfg.min_bars,
-            confirm_bars=args.confirm_bars if args.confirm_bars != 0 else cfg.confirm_bars,
-            vwap_prox=args.vwap_prox or cfg.vwap_prox,
+            sl_pct=_resolve(cfg.sl_pct if _db else None, args.sl, 2.5),
+            min_bars=_resolve(cfg.min_bars if _db else None, args.min_bars, 3),
+            confirm_bars=_resolve(cfg.confirm_bars if _db else None, args.confirm_bars, 2),
+            vwap_prox=_resolve(cfg.vwap_prox if _db else None, args.vwap_prox, 0.005),
             vwap_window_days=args.vwap_window_days,
-            pos_size_pct=args.pos_size or cfg.pos_size_pct,
-            ema_period=args.ema_period or extras.get("ema_period") or 200,
-            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
+            pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, 0.20),
+            ema_period=_resolve(extras.get("ema_period") if _db else None, args.ema_period, 200),
+            max_trades_per_day=_resolve(extras.get("max_trades_per_day") if _db else None, args.max_trades, 4),
             interval=cfg.interval,
         )
         _run_async(bot.run())
 
     elif args.command == "ema-scalp":
         cfg, extras = _load_symbol_config(args.symbol.upper(), "EMAScalp")
+        _db = extras.get("_source") == "db"
         from trader.bot_ema_scalp import EMAScalpBot
         bot = EMAScalpBot(
             symbol=args.symbol,
-            leverage=args.leverage or extras["leverage"],
+            leverage=_resolve(extras["leverage"] if _db else None, args.leverage, DEFAULT_LEVERAGE),
             capital=args.capital,
             dry_run=args.dry_run,
-            sl_pct=args.sl or cfg.sl_pct,
-            fast_period=args.fast_period or extras.get("fast_period") or 8,
-            slow_period=args.slow_period or extras.get("slow_period") or 21,
-            vol_filter=args.vol_filter if args.vol_filter else cfg.vol_filter,
-            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
-            pos_size_pct=args.pos_size or cfg.pos_size_pct,
-            be_r=args.be_r or extras.get("be_r") or 2.0,
-            trail_step=args.trail_step or extras.get("trail_step") or 0.5,
+            sl_pct=_resolve(cfg.sl_pct if _db else None, args.sl, 0.3),
+            fast_period=_resolve(extras.get("fast_period") if _db else None, args.fast_period, 8),
+            slow_period=_resolve(extras.get("slow_period") if _db else None, args.slow_period, 21),
+            vol_filter=cfg.vol_filter if _db else (args.vol_filter or cfg.vol_filter),
+            max_trades_per_day=_resolve(extras.get("max_trades_per_day") if _db else None, args.max_trades, 4),
+            pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, 0.20),
+            be_r=_resolve(extras.get("be_r") if _db else None, args.be_r, 2.0),
+            trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, 0.5),
             interval=cfg.interval,
         )
         _run_async(bot.run())
 
     elif args.command == "orb":
         cfg, extras = _load_symbol_config(args.symbol.upper(), "ORB")
+        _db = extras.get("_source") == "db"
         from trader.bot_orb import ORBBot
         bot = ORBBot(
             symbol=args.symbol,
-            leverage=args.leverage or extras["leverage"],
+            leverage=_resolve(extras["leverage"] if _db else None, args.leverage, DEFAULT_LEVERAGE),
             capital=args.capital,
             dry_run=args.dry_run,
-            sl_pct=args.sl or cfg.sl_pct,
-            range_mins=args.range_mins or extras.get("range_mins") or 30,
+            sl_pct=_resolve(cfg.sl_pct if _db else None, args.sl, 0.5),
+            range_mins=_resolve(extras.get("range_mins") if _db else None, args.range_mins, 30),
             buffer_pct=args.buffer_pct,
-            vol_filter=args.vol_filter if args.vol_filter else cfg.vol_filter,
-            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
-            pos_size_pct=args.pos_size or cfg.pos_size_pct,
-            be_r=args.be_r or extras.get("be_r") or 2.0,
-            trail_step=args.trail_step or extras.get("trail_step") or 0.5,
+            vol_filter=cfg.vol_filter if _db else (args.vol_filter or cfg.vol_filter),
+            max_trades_per_day=_resolve(extras.get("max_trades_per_day") if _db else None, args.max_trades, 4),
+            pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, 0.20),
+            be_r=_resolve(extras.get("be_r") if _db else None, args.be_r, 2.0),
+            trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, 0.5),
             interval=cfg.interval,
         )
         _run_async(bot.run())
 
     elif args.command == "pdhl":
         cfg, extras = _load_symbol_config(args.symbol.upper(), "PDHL")
+        _db = extras.get("_source") == "db"
         from trader.bot_pdhl import PDHLBot
         bot = PDHLBot(
             symbol=args.symbol,
-            leverage=args.leverage or extras["leverage"],
+            leverage=_resolve(extras["leverage"] if _db else None, args.leverage, DEFAULT_LEVERAGE),
             capital=args.capital,
             dry_run=args.dry_run,
-            sl_pct=args.sl or cfg.sl_pct,
-            prox_pct=args.prox_pct or extras.get("pdhl_prox_pct") or 0.002,
-            confirm_bars=args.confirm_bars if args.confirm_bars != 0 else cfg.confirm_bars,
-            max_trades_per_day=args.max_trades or extras.get("max_trades_per_day") or 4,
-            pos_size_pct=args.pos_size or cfg.pos_size_pct,
-            be_r=args.be_r or extras.get("be_r") or 2.0,
-            trail_step=args.trail_step or extras.get("trail_step") or 0.5,
-            tp_pct=args.tp or cfg.tp_pct or None,
+            sl_pct=_resolve(cfg.sl_pct if _db else None, args.sl, 0.3),
+            prox_pct=_resolve(extras.get("pdhl_prox_pct") if _db else None, args.prox_pct, 0.002),
+            confirm_bars=_resolve(cfg.confirm_bars if _db else None, args.confirm_bars, 1),
+            max_trades_per_day=_resolve(extras.get("max_trades_per_day") if _db else None, args.max_trades, 4),
+            pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, 0.20),
+            be_r=_resolve(extras.get("be_r") if _db else None, args.be_r, 2.0),
+            trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, 0.5),
+            tp_pct=_resolve(cfg.tp_pct if _db else None, args.tp, None),
             interval=cfg.interval,
         )
         _run_async(bot.run())
@@ -457,10 +473,11 @@ def main():
 
     elif args.command == "bot":
         cfg, extras = _load_symbol_config(args.symbol.upper(), "MomShort")
+        _db = extras.get("_source") == "db"
         from trader.bot import MomShortBot
         bot = MomShortBot(
             cfg=cfg,
-            leverage=args.leverage or extras["leverage"],
+            leverage=_resolve(extras["leverage"] if _db else None, args.leverage, DEFAULT_LEVERAGE),
             capital=args.capital,
             dry_run=args.dry_run,
         )

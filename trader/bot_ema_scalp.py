@@ -23,6 +23,10 @@ from trader.config import (
 )
 from trader.strategy_ema_scalp import EMAScalpSignal
 from trader import events as _events, bot_registry as _registry
+from trader.notifications import (
+    notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
+    notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
+)
 
 
 def _parse_proxy(url: str) -> dict | None:
@@ -460,6 +464,9 @@ class EMAScalpBot:
             )
         logger.info("-" * 60)
 
+        if not self.dry_run:
+            notify_bot_started(self.symbol, "EMAScalp", self.interval, self.leverage, self.pos_size_pct)
+
         _registry.update(self._reg_key, {
             "symbol": self.symbol,
             "strategy": "ema_scalp",
@@ -539,6 +546,8 @@ class EMAScalpBot:
                     await connection.close_connection(close_session=True)
                 except Exception:
                     pass
+            if not self.dry_run:
+                notify_bot_stopped(self.symbol, "EMAScalp")
             logger.info("Connection closed. Goodbye.")
 
     # ------------------------------------------------------------------
@@ -586,11 +595,15 @@ class EMAScalpBot:
             )
             if signal == "ENTER_LONG":
                 logger.info(f"{BOLD}{GREEN}{prefix}SIGNAL: ENTER_LONG @ {c:.{pd}f}{RESET}")
+                if not self.dry_run:
+                    notify_signal(self.symbol, "long", round(c, self._price_decimals), "EMAScalp")
                 self._emit({"type": "signal", "symbol": self.symbol, "strategy": "ema_scalp",
                             "direction": "long", "price": c, "ts": ts})
                 asyncio.get_event_loop().create_task(self._enter_position("long", c))
             elif signal == "ENTER_SHORT":
                 logger.info(f"{BOLD}{RED}{prefix}SIGNAL: ENTER_SHORT @ {c:.{pd}f}{RESET}")
+                if not self.dry_run:
+                    notify_signal(self.symbol, "short", round(c, self._price_decimals), "EMAScalp")
                 self._emit({"type": "signal", "symbol": self.symbol, "strategy": "ema_scalp",
                             "direction": "short", "price": c, "ts": ts})
                 asyncio.get_event_loop().create_task(self._enter_position("short", c))
@@ -862,6 +875,10 @@ class EMAScalpBot:
                 f"{BOLD}{direction.upper()} opened | Entry: ${avg_price:.{self._price_decimals}f} | "
                 f"SL: ${self._sl_price} | Trailing R-multiple active{RESET}"
             )
+            notify_position_opened(
+                self.symbol, direction, avg_price,
+                self._sl_price, None, executed_qty, self.leverage,
+            )
 
             self._monitor_task = asyncio.get_event_loop().create_task(
                 self._monitor_position_fill()
@@ -869,6 +886,7 @@ class EMAScalpBot:
 
         except Exception as e:
             logger.info(f"{RED}Entry failed: {e}{RESET}")
+            notify_error(self.symbol, str(e), "Entry failed")
             self._signal.trades_today = max(0, self._signal.trades_today - 1)
             self._direction = None
             self._state = _State.SCANNING
@@ -879,8 +897,15 @@ class EMAScalpBot:
 
     async def _on_user_data(self, event) -> None:
         """Handle real-time account events from the user data stream."""
-        from binance_sdk_derivatives_trading_usds_futures.websocket_streams.models import AccountUpdate
+        from binance_sdk_derivatives_trading_usds_futures.websocket_streams.models import AccountUpdate, OrderTradeUpdate
         actual = getattr(event, "actual_instance", None)
+        if isinstance(actual, OrderTradeUpdate) and actual.o:
+            o = actual.o
+            if (o.s == self.symbol and o.X == "FILLED" and
+                    o.ot == "MARKET" and o.R is True and
+                    self._state == _State.IN_POSITION):
+                self._last_close_reason = "Manual (UI da Binance)"
+            return
         if not isinstance(actual, AccountUpdate) or not actual.a or not actual.a.P:
             return
         for pos in actual.a.P:
@@ -889,14 +914,22 @@ class EMAScalpBot:
             pa = float(pos.pa)
             up = float(pos.up)
             if pa == 0.0 and self._state == _State.IN_POSITION:
+                close_reason = getattr(self, '_last_close_reason', 'SL/TP')
+                self._last_close_reason = 'SL/TP'
                 logger.info(
                     f"{YELLOW}[UserData] Position closed for {self.symbol} "
-                    f"(SL/TP or manual){RESET}"
+                    f"({close_reason}){RESET}"
                 )
                 if self._monitor_task and not self._monitor_task.done():
                     self._monitor_task.cancel()
                 self._emit({"type": "position_closed", "symbol": self.symbol,
-                            "strategy": "ema_scalp", "reason": "SL/TP or manual"})
+                            "strategy": "ema_scalp", "reason": close_reason})
+                notify_position_closed(
+                    self.symbol,
+                    self._direction or "",
+                    self._entry_price,
+                    reason=close_reason,
+                )
                 self._direction = None
                 self._r_value = 0.0
                 self._sl_milestone = 0
@@ -932,6 +965,12 @@ class EMAScalpBot:
                     )
                     self._emit({"type": "position_closed", "symbol": self.symbol,
                                 "strategy": "ema_scalp", "reason": "Trailing SL"})
+                    notify_position_closed(
+                        self.symbol,
+                        self._direction or "",
+                        self._entry_price,
+                        reason="SL/TP",
+                    )
                     self._direction = None
                     self._r_value = 0.0
                     self._sl_milestone = 0
@@ -1018,6 +1057,9 @@ class EMAScalpBot:
             logger.info(
                 f"{color}EOD closed {qty} {self.symbol} ({self._direction}) "
                 f"@ ${avg_price:.{self._price_decimals}f} | P&L: ${pnl:+.2f}{RESET}"
+            )
+            notify_eod_close(
+                self.symbol, self._direction or "", self._entry_price, avg_price, pnl
             )
 
         except BadRequestError as e:
