@@ -129,11 +129,12 @@ GALA_CONFIG = SymbolConfig(
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
-    pos_size_pct=0.10,  # reduzido de 0.40 — 10% até performance melhorar
+    pos_size_pct=0.05,
     vol_filter=False,
     price_decimals=5,
     qty_decimals=0,
     interval="1m",
+    leverage=1,
 )
 
 DOGE_CONFIG = SymbolConfig(
@@ -183,13 +184,14 @@ ETH_CONFIG = SymbolConfig(
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
-    pos_size_pct=0.40,  # 40% per trade
+    pos_size_pct=0.05,
     price_decimals=2,
     qty_decimals=3,
     min_notional=20.0,
     vol_filter=False,
     interval="5m",
     vwap_dist_stop=0.03,  # exit if price >3% from VWAP in wrong direction
+    leverage=1,
 )
 
 SOL_CONFIG = SymbolConfig(
@@ -203,12 +205,13 @@ SOL_CONFIG = SymbolConfig(
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
-    pos_size_pct=0.40,  # 40% per trade
+    pos_size_pct=0.05,
     price_decimals=2,
     qty_decimals=2,
     min_notional=5.0,
     vol_filter=True,    # Volume filter enabled for MomShort
     interval="1m",
+    leverage=1,
 )
 
 AVAX_CONFIG = SymbolConfig(
@@ -279,12 +282,13 @@ XAU_CONFIG = SymbolConfig(
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
-    pos_size_pct=0.40,
+    pos_size_pct=0.05,
     price_decimals=2,
     qty_decimals=3,
     vol_filter=False,
     min_notional=5.0,
     interval="1m",
+    leverage=1,
 )
 
 LTC_CONFIG = SymbolConfig(
