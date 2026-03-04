@@ -45,9 +45,25 @@ def _load_symbol_config(symbol: str, strategy_name: str):
     if result == "fallback":
         if not ALLOW_CONFIG_FALLBACK:
             from trader.notifications import notify_startup_error_sync
+            interval = None
+            leverage = None
+            pos_size_pct = None
+            try:
+                from trader.config import get_symbol_config
+                local_cfg = get_symbol_config(symbol)
+                interval = local_cfg.interval
+                leverage = local_cfg.leverage
+                pos_size_pct = local_cfg.pos_size_pct
+            except Exception:
+                pass
             notify_startup_error_sync(
-                symbol,
-                f"DB unavailable ({strategy_name}): {reason}",
+                symbol=symbol,
+                strategy=strategy_name,
+                interval=interval,
+                leverage=leverage,
+                pos_size_pct=pos_size_pct,
+                error=f"DB unavailable ({strategy_name}): {reason}",
+                stage="config-load",
             )
             print(
                 f"⛔ DB unavailable for {symbol} ({strategy_name}) — bot não iniciado. "

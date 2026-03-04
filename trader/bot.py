@@ -23,6 +23,7 @@ from trader import events as _events, bot_registry as _registry
 from trader.notifications import (
     notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
     notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
+    notify_startup_error,
 )
 
 def _parse_proxy(url: str) -> dict | None:
@@ -322,7 +323,15 @@ class MomShortBot:
                 f"(at {self.cfg.pos_size_pct * 100:.0f}% position size)."
             )
             if not self.dry_run:
-                notify_error(self.symbol, msg, "Erro ao inciar bot")
+                notify_startup_error(
+                    symbol=self.symbol,
+                    strategy="MomShort",
+                    interval=self.cfg.interval,
+                    leverage=self.leverage,
+                    pos_size_pct=self.cfg.pos_size_pct,
+                    error=msg,
+                    stage="pre-trade validation",
+                )
             raise SystemExit(
                 msg
             )

@@ -45,7 +45,7 @@ const STATE_DOT: Record<string, string> = {
   COOLDOWN:    "bg-amber-400",
 };
 
-type BotFilter = "all" | "in_position" | "scanning" | "cooldown" | "traded";
+type BotFilter = "all" | "in_position" | "scanning" | "cooldown" | "traded" | "recovery";
 
 function fmtPrice(n: number | undefined, decimals = 4) {
   if (n == null) return "—";
@@ -380,6 +380,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
     scanning:    botList.filter(b => b.state === "SCANNING").length,
     cooldown:    botList.filter(b => b.state === "COOLDOWN").length,
     traded:      botList.filter(b => (b.trades_today ?? 0) > 0).length,
+    recovery:    botList.filter(b => b.mode === "monitoring").length,
   }), [botList]);
 
   const filteredBots = useMemo(() => {
@@ -388,6 +389,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
       case "scanning":    return botList.filter(b => b.state === "SCANNING");
       case "cooldown":    return botList.filter(b => b.state === "COOLDOWN");
       case "traded":      return botList.filter(b => (b.trades_today ?? 0) > 0);
+      case "recovery":    return botList.filter(b => b.mode === "monitoring");
       default:            return botList;
     }
   }, [botList, activeFilter]);
@@ -407,6 +409,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
     { key: "in_position", label: "In Position",  countKey: "in_position" },
     { key: "cooldown",    label: "Cooldown",     countKey: "cooldown" },
     { key: "scanning",    label: "Scanning",     countKey: "scanning" },
+    { key: "recovery",    label: "Recuperação",  countKey: "recovery" },
     { key: "traded",      label: "Traded Today", countKey: "traded" },
   ];
 

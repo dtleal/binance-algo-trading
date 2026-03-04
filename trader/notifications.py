@@ -171,21 +171,80 @@ def notify_error(
     )
 
 
-def notify_startup_error_sync(symbol: str, error: str) -> None:
+def _format_startup_error_message(
+    symbol: str,
+    strategy: str,
+    interval: str | None,
+    leverage: int | None,
+    pos_size_pct: float | None,
+    error: str,
+    stage: str = "startup",
+) -> str:
+    tf = interval or "n/a"
+    lev = f"{leverage}x" if leverage is not None else "n/a"
+    pos = f"{pos_size_pct * 100:.0f}%" if pos_size_pct is not None else "n/a"
+    return (
+        f"⚠️ <b>Falha ao iniciar bot</b> — {symbol}\n"
+        f"Strategy: <b>{strategy}</b> | TF: {tf}\n"
+        f"Leverage: {lev} | Pos size: {pos}\n"
+        f"Etapa: {stage}\n"
+        f"Motivo: <code>{str(error)[:250]}</code>"
+    )
+
+
+def notify_startup_error(
+    symbol: str,
+    strategy: str,
+    interval: str | None,
+    leverage: int | None,
+    pos_size_pct: float | None,
+    error: str,
+    stage: str = "startup",
+) -> None:
+    """Structured startup failure message (async context)."""
+    _fire(
+        _format_startup_error_message(
+            symbol=symbol,
+            strategy=strategy,
+            interval=interval,
+            leverage=leverage,
+            pos_size_pct=pos_size_pct,
+            error=error,
+            stage=stage,
+        )
+    )
+
+
+def notify_startup_error_sync(
+    symbol: str,
+    strategy: str,
+    interval: str | None,
+    leverage: int | None,
+    pos_size_pct: float | None,
+    error: str,
+    stage: str = "startup",
+) -> None:
     """Send startup error immediately (safe to call before asyncio loop exists)."""
     _init()
     if not _ENABLED:
         return
     try:
         url = f"https://api.telegram.org/bot{_TOKEN}/sendMessage"
-        payload = json.dumps({
-            "chat_id": _CHAT_ID,
-            "text": (
-                f"⚠️ <b>Erro ao inciar bot</b> — {symbol}\n"
-                f"<code>{str(error)[:250]}</code>"
-            ),
-            "parse_mode": "HTML",
-        }).encode()
+        payload = json.dumps(
+            {
+                "chat_id": _CHAT_ID,
+                "text": _format_startup_error_message(
+                    symbol=symbol,
+                    strategy=strategy,
+                    interval=interval,
+                    leverage=leverage,
+                    pos_size_pct=pos_size_pct,
+                    error=error,
+                    stage=stage,
+                ),
+                "parse_mode": "HTML",
+            }
+        ).encode()
         req = urllib.request.Request(
             url, data=payload, headers={"Content-Type": "application/json"}
         )

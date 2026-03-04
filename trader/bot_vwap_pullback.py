@@ -32,6 +32,7 @@ from trader import events as _events, bot_registry as _registry
 from trader.notifications import (
     notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
     notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
+    notify_startup_error,
 )
 
 
@@ -508,8 +509,6 @@ class VWAPPullbackBot:
             f"{vwap_dist_label}"
         )
         logger.info("-" * 60)
-        if not self.dry_run:
-            notify_bot_started(self.symbol, "VWAPPullback", self.interval, self.leverage, self.pos_size_pct)
 
         if not self.dry_run:
             self._fetch_exchange_precision()
@@ -528,11 +527,21 @@ class VWAPPullbackBot:
                 f"Minimum --capital is ${min_cap:.2f}."
             )
             if not self.dry_run:
-                notify_error(self.symbol, msg, "Erro ao inciar bot")
+                notify_startup_error(
+                    symbol=self.symbol,
+                    strategy="VWAPPullback",
+                    interval=self.interval,
+                    leverage=self.leverage,
+                    pos_size_pct=self.pos_size_pct,
+                    error=msg,
+                    stage="pre-trade validation",
+                )
             raise SystemExit(
                 msg
             )
         logger.info("-" * 60)
+        if not self.dry_run:
+            notify_bot_started(self.symbol, "VWAPPullback", self.interval, self.leverage, self.pos_size_pct)
 
         # Publish bot configuration to registry
         _registry.update(self._reg_key, {

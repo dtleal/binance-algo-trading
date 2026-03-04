@@ -38,6 +38,7 @@ from trader import events as _events, bot_registry as _registry
 from trader.notifications import (
     notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
     notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
+    notify_startup_error,
 )
 
 
@@ -494,7 +495,15 @@ class VWAPPullbackBotV2:
                 f"Minimum --capital is ${min_cap:.2f}."
             )
             if not self.dry_run:
-                notify_error(self.symbol, msg, "Erro ao inciar bot")
+                notify_startup_error(
+                    symbol=self.symbol,
+                    strategy="VWAPPullback-v2",
+                    interval=self.interval,
+                    leverage=self.leverage,
+                    pos_size_pct=self.pos_size_pct,
+                    error=msg,
+                    stage="pre-trade validation",
+                )
             raise SystemExit(
                 msg
             )

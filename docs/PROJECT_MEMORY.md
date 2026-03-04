@@ -141,7 +141,11 @@ It supports:
   - This is required for DB credentials (`POSTGRES_*`) and Telegram vars in detached startup.
 - Startup configuration remains DB-first (`symbol_configs`), with strict fail-closed behavior when DB is unavailable unless `ALLOW_CONFIG_FALLBACK=1`.
 - On DB-related startup failure (before async loop), CLI now triggers Telegram notification:
-  - `⚠️ Erro ao inciar bot — <SYMBOL>`, including the failure reason.
+  - `⚠️ Falha ao iniciar bot — <SYMBOL>`, with structured payload:
+    - strategy, timeframe, leverage, position size, startup stage and failure reason.
+- Startup validation failures inside bots (e.g., `min_notional`) also use the same structured Telegram message format.
+- Dashboard (`/bots`) now has a dedicated filter for recovery bots:
+  - `Recuperação` filter shows only bots with `mode="monitoring"` (same criterion as red recovery badge).
 - For symbols `ETHUSDT`, `GALAUSDT`, `SOLUSDT`, `XAUUSDT`, `1000SHIBUSDT`:
   - `symbol_configs.pos_size_pct = 0.40`
   - `leverage = 1`
