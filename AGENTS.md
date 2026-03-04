@@ -6,8 +6,9 @@ Before doing analysis, code changes, backtests, or recommendations in this repos
 the agent must read:
 
 1. `docs/PROJECT_MEMORY.md`
-2. Any strategy doc relevant to the requested symbol in `docs/STRATEGY_*.md`
-3. `docs/ONBOARDING.md` when the task is onboarding/backtesting workflow related
+2. `docs/DB_ACCESS.md`
+3. Any strategy doc relevant to the requested symbol in `docs/STRATEGY_*.md`
+4. `docs/ONBOARDING.md` when the task is onboarding/backtesting workflow related
 
 If there is a conflict, use this precedence:
 - concrete code behavior > strategy docs > project memory summary
@@ -25,6 +26,6 @@ When adding or changing:
 - command workflows,
 - exchange precision details,
 - risk guardrails,
+- database access/query workflows,
 
 also update `docs/PROJECT_MEMORY.md` so future sessions keep the same context.
-

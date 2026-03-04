@@ -126,6 +126,7 @@ It supports:
 - `data/sweeps/`: sweep outputs.
 - `trader/config.py`: live symbol configuration.
 - `docs/STRATEGY_*.md`: per-symbol implementation records.
+- `docs/DB_ACCESS.md`: canonical database access and query guide (Postgres/Redis).
 
 ## Operational Guardrails
 
