@@ -225,6 +225,181 @@ async def get_positions():
     return {"positions": positions}
 
 
+# ── Position action helpers ───────────────────────────────────────────────────
+
+async def _do_close_position(client, symbol: str) -> dict:
+    """Cancel all orders and market-close a position."""
+    sym = symbol.upper()
+    try:
+        await asyncio.to_thread(client.rest_api.cancel_all_open_orders, symbol=sym)
+    except Exception:
+        pass
+    try:
+        await asyncio.to_thread(client.rest_api.cancel_all_algo_open_orders, symbol=sym)
+    except Exception:
+        pass
+    resp = await asyncio.to_thread(client.rest_api.position_information_v3, symbol=sym)
+    pos = next((p for p in resp.data() if abs(_safe_float(p.position_amt)) > 0), None)
+    if not pos:
+        return {"ok": False, "error": "Sem posição aberta"}
+    qty = abs(_safe_float(pos.position_amt))
+    direction = "long" if _safe_float(pos.position_amt) > 0 else "short"
+    close_side = "SELL" if direction == "long" else "BUY"
+    order = await asyncio.to_thread(
+        client.rest_api.new_order,
+        symbol=sym, side=close_side, type="MARKET",
+        quantity=str(qty), reduce_only="true", new_order_resp_type="RESULT",
+    )
+    avg = _safe_float(order.data().avg_price)
+    entry = _safe_float(pos.entry_price)
+    pnl = (avg - entry) * qty if direction == "long" else (entry - avg) * qty
+    return {"ok": True, "symbol": sym, "direction": direction, "close_price": avg, "pnl": round(pnl, 4), "qty": qty}
+
+
+@app.post("/api/positions/close_all")
+async def api_close_all_positions():
+    """Close all open positions immediately."""
+    client = await get_client()
+    data = await get_positions()
+    results = []
+    for pos in data["positions"]:
+        result = await _do_close_position(client, pos["symbol"])
+        results.append(result)
+    return {"ok": True, "results": results}
+
+
+@app.post("/api/positions/{symbol}/close")
+async def api_close_position(symbol: str):
+    """Cancel all orders and market-close one position."""
+    client = await get_client()
+    return await _do_close_position(client, symbol)
+
+
+@app.post("/api/positions/{symbol}/breakeven")
+async def api_breakeven(symbol: str):
+    """Move SL to entry price (breakeven). Cancels existing algo orders and re-places SL+TP."""
+    import redis.asyncio as aioredis
+    sym = symbol.upper()
+    client = await get_client()
+
+    # Get current position
+    resp = await asyncio.to_thread(client.rest_api.position_information_v3, symbol=sym)
+    pos = next((p for p in resp.data() if abs(_safe_float(p.position_amt)) > 0), None)
+    if not pos:
+        return {"ok": False, "error": "Sem posição aberta"}
+
+    entry_price = _safe_float(pos.entry_price)
+    qty = abs(_safe_float(pos.position_amt))
+    direction = "long" if _safe_float(pos.position_amt) > 0 else "short"
+    close_side = "SELL" if direction == "long" else "BUY"
+
+    # Try to get tp_price from Redis bot state
+    tp_price = None
+    try:
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        r = await aioredis.from_url(redis_url, decode_responses=True)
+        states = await r.hgetall("bot:states")
+        for key, raw in states.items():
+            if key.startswith(sym + ":"):
+                state = json.loads(raw)
+                tp_price = state.get("tp_price")
+                break
+    except Exception:
+        pass
+
+    # Cancel all existing algo orders
+    try:
+        await asyncio.to_thread(client.rest_api.cancel_all_algo_open_orders, symbol=sym)
+    except Exception:
+        pass
+
+    # Place new SL at entry price
+    await asyncio.to_thread(
+        client.rest_api.new_algo_order,
+        algo_type="CONDITIONAL", symbol=sym, side=close_side,
+        type="STOP_MARKET", trigger_price=str(entry_price), close_position="true",
+    )
+
+    # Re-place TP if we have the price
+    if tp_price:
+        try:
+            await asyncio.to_thread(
+                client.rest_api.new_algo_order,
+                algo_type="CONDITIONAL", symbol=sym, side=close_side,
+                type="TAKE_PROFIT_MARKET", trigger_price=str(tp_price), close_position="true",
+            )
+        except Exception:
+            pass
+
+    return {"ok": True, "symbol": sym, "sl_moved_to": entry_price, "tp_price": tp_price}
+
+
+@app.post("/api/positions/{symbol}/invert")
+async def api_invert_position(symbol: str):
+    """Close current position and open the opposite direction with same qty + SL/TP from config."""
+    sym = symbol.upper()
+    client = await get_client()
+
+    # Get current position before closing
+    resp = await asyncio.to_thread(client.rest_api.position_information_v3, symbol=sym)
+    pos = next((p for p in resp.data() if abs(_safe_float(p.position_amt)) > 0), None)
+    if not pos:
+        return {"ok": False, "error": "Sem posição aberta"}
+
+    qty = abs(_safe_float(pos.position_amt))
+    direction = "long" if _safe_float(pos.position_amt) > 0 else "short"
+    new_direction = "short" if direction == "long" else "long"
+    new_side = "SELL" if new_direction == "short" else "BUY"
+    close_algo_side = "BUY" if new_direction == "short" else "SELL"
+
+    # Close current position
+    close_result = await _do_close_position(client, sym)
+    if not close_result.get("ok"):
+        return close_result
+    new_entry = close_result["close_price"]
+
+    # Get SL/TP pcts from config (fallback to defaults)
+    cfg = SYMBOL_CONFIGS.get(sym)
+    sl_pct = cfg.sl_pct if cfg else 5.0
+    tp_pct = cfg.tp_pct if cfg else 10.0
+
+    import math
+    if new_direction == "long":
+        sl_price = round(new_entry * (1 - sl_pct / 100), 4)
+        tp_price = round(new_entry * (1 + tp_pct / 100), 4)
+    else:
+        sl_price = round(new_entry * (1 + sl_pct / 100), 4)
+        tp_price = round(new_entry * (1 - tp_pct / 100), 4)
+
+    # Open new position
+    order = await asyncio.to_thread(
+        client.rest_api.new_order,
+        symbol=sym, side=new_side, type="MARKET",
+        quantity=str(qty), new_order_resp_type="RESULT",
+    )
+
+    # Place SL + TP
+    try:
+        await asyncio.to_thread(
+            client.rest_api.new_algo_order,
+            algo_type="CONDITIONAL", symbol=sym, side=close_algo_side,
+            type="STOP_MARKET", trigger_price=str(sl_price), close_position="true",
+        )
+        await asyncio.to_thread(
+            client.rest_api.new_algo_order,
+            algo_type="CONDITIONAL", symbol=sym, side=close_algo_side,
+            type="TAKE_PROFIT_MARKET", trigger_price=str(tp_price), close_position="true",
+        )
+    except Exception:
+        pass
+
+    return {
+        "ok": True, "symbol": sym,
+        "closed": direction, "opened": new_direction,
+        "qty": qty, "entry": new_entry, "sl": sl_price, "tp": tp_price,
+    }
+
+
 @app.get("/api/test_trades")
 async def test_trades_endpoint():
     """Summary of trades per symbol from DB."""
@@ -596,6 +771,44 @@ _CHAT_TOOLS = [
         },
     },
     {
+        "name": "close_position",
+        "description": "Fecha imediatamente uma posição aberta. Cancela todas as ordens (SL/TP) e fecha via ordem a mercado. Use quando o usuário pedir para fechar, encerrar ou sair de uma posição.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Símbolo (ex: AXSUSDT)"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "move_stop_to_breakeven",
+        "description": "Move o stop loss para o preço de entrada (breakeven / 0a0 / zero a zero). Cancela o SL atual e coloca um novo no entry price.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Símbolo (ex: DOGEUSDT)"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "invert_position",
+        "description": "Inverte a posição: fecha a atual e abre uma nova no sentido oposto (long→short ou short→long) com mesma quantidade e SL/TP da configuração.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {"type": "string", "description": "Símbolo (ex: AXSUSDT)"},
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": "close_all_positions",
+        "description": "Fecha TODAS as posições abertas imediatamente. Use somente quando o usuário pedir explicitamente para fechar tudo.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "query_trades",
         "description": (
             "Consulta a tabela de trades no banco de dados. Use para responder perguntas detalhadas sobre "
@@ -830,7 +1043,10 @@ _CHAT_SYSTEM = (
     "Sempre responda em português brasileiro. "
     "Use as tools disponíveis para consultar dados reais antes de responder. "
     "Seja direto e objetivo. Não apresente menus, listas de funções ou introduções. "
-    "Responda apenas o que foi perguntado, de forma concisa."
+    "Responda apenas o que foi perguntado, de forma concisa. "
+    "Você pode executar ações de trading: fechar posições, mover stop para breakeven, "
+    "inverter posições e fechar todas as posições. "
+    "Sempre confirme o resultado da ação ao usuário após executá-la."
 )
 
 
@@ -903,6 +1119,15 @@ async def chat_endpoint(req: ChatRequest):
                         result = _chat_get_bot_logs(**inp)
                     elif block.name == "query_trades":
                         result = await _chat_query_trades(**inp)
+                    elif block.name == "close_position":
+                        _c = await get_client()
+                        result = await api_close_position(**inp)
+                    elif block.name == "move_stop_to_breakeven":
+                        result = await api_breakeven(**inp)
+                    elif block.name == "invert_position":
+                        result = await api_invert_position(**inp)
+                    elif block.name == "close_all_positions":
+                        result = await api_close_all_positions()
                     else:
                         result = {"error": f"Tool desconhecida: {block.name}"}
                 except Exception as e:
