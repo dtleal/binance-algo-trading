@@ -140,6 +140,22 @@ def notify_position_closed(
     )
 
 
+def notify_stop_loss_updated(
+    symbol: str,
+    direction: str,
+    old_sl: float,
+    new_sl: float,
+    reason: str,
+) -> None:
+    """Stop loss level was updated while position remains open."""
+    dir_label = "LONG" if direction == "long" else "SHORT" if direction == "short" else direction.upper()
+    _fire(
+        f"🛡️ <b>SL atualizado</b> — {symbol}\n"
+        f"{dir_label} | {old_sl} → <b>{new_sl}</b>\n"
+        f"Motivo: {reason}"
+    )
+
+
 def notify_eod_close(
     symbol: str,
     direction: str,

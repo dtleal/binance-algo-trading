@@ -159,3 +159,16 @@ It supports:
   - `symbol_configs.pos_size_pct = 0.40`
   - `leverage = 1`
   - This avoids low notional startup failures with small account balances.
+- Phase 1 of position risk guard started for live bots (excluding `VWAPPullback-v2` by explicit decision):
+  - Bots updated: `MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`.
+  - New deterministic early-exit params (constructor defaults):
+    - `time_stop_minutes = 20`
+    - `time_stop_min_progress_pct = 0.0`
+    - `adverse_exit_bars = 3`
+    - `adverse_body_min_pct = 0.20`
+  - New per-position internal state:
+    - `entry_ts_ms`, `adverse_count`, `risk_exit_pending`
+  - New early-exit reasons:
+    - `Time stop` (no progress after X minutes)
+    - `Adverse momentum` (consecutive adverse candles with minimum body, only when `PnL% < 0`)
+  - Position-guard state is reset on position close/error/EOD paths to avoid stale carry-over.

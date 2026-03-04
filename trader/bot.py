@@ -62,6 +62,10 @@ class MomShortBot:
         leverage: int = DEFAULT_LEVERAGE,
         capital: float | None = None,
         dry_run: bool = False,
+        time_stop_minutes: int = 20,
+        time_stop_min_progress_pct: float = 0.0,
+        adverse_exit_bars: int = 3,
+        adverse_body_min_pct: float = 0.20,
     ):
         self.cfg = cfg
         self.symbol = cfg.symbol
@@ -117,6 +121,13 @@ class MomShortBot:
         self._position_qty = 0.0
         self._sl_price = 0.0
         self._tp_price = 0.0
+        self._entry_ts_ms: int | None = None
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+        self.time_stop_minutes = time_stop_minutes
+        self.time_stop_min_progress_pct = time_stop_min_progress_pct
+        self.adverse_exit_bars = adverse_exit_bars
+        self.adverse_body_min_pct = adverse_body_min_pct
 
         # Background tasks
         self._eod_task: asyncio.Task | None = None
@@ -132,6 +143,42 @@ class MomShortBot:
             asyncio.get_event_loop().create_task(_events.publish(event))
         except RuntimeError:
             pass
+
+    def _mark_position_opened(self) -> None:
+        self._entry_ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+
+    def _reset_position_guard(self) -> None:
+        self._entry_ts_ms = None
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+
+    def _position_guard_reason(self, candle_open_ms: int, o: float, c: float, pnl_pct: float) -> str | None:
+        if self._risk_exit_pending:
+            return None
+
+        if self._entry_ts_ms and self.time_stop_minutes > 0:
+            elapsed_min = (candle_open_ms - self._entry_ts_ms) / 60_000
+            if elapsed_min >= self.time_stop_minutes and pnl_pct <= self.time_stop_min_progress_pct:
+                return (
+                    f"Time stop ({self.time_stop_minutes}m): "
+                    f"PnL {pnl_pct:+.2f}% <= {self.time_stop_min_progress_pct:+.2f}%"
+                )
+
+        body_pct = (abs(c - o) / o * 100) if o else 0.0
+        adverse_candle = c > o and body_pct >= self.adverse_body_min_pct
+        self._adverse_count = self._adverse_count + 1 if adverse_candle else 0
+        if (
+            self.adverse_exit_bars > 0
+            and self._adverse_count >= self.adverse_exit_bars
+            and pnl_pct < 0
+        ):
+            return (
+                f"Adverse momentum: {self._adverse_count} candles contra "
+                f"(body>={self.adverse_body_min_pct:.2f}%, PnL {pnl_pct:+.2f}%)"
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Logging setup
@@ -230,6 +277,7 @@ class MomShortBot:
             self._state = _State.IN_POSITION
             self._entry_price = pos["entry_price"]
             self._position_qty = abs(pos["position_amt"])
+            self._mark_position_opened()
             self._sl_price = self._round_price(self._entry_price * (1 + self.cfg.sl_pct / 100))
             self._tp_price = self._round_price(self._entry_price * (1 - self.cfg.tp_pct / 100))
             self._signal.mark_traded()
@@ -517,6 +565,13 @@ class MomShortBot:
             pnl_per_unit = self._entry_price - c
             total_pnl = pnl_per_unit * self._position_qty
             pnl_pct = (pnl_per_unit / self._entry_price) * 100 if self._entry_price else 0
+            guard_reason = self._position_guard_reason(candle_open_ms, o, c, pnl_pct)
+            if guard_reason:
+                self._risk_exit_pending = True
+                self._last_close_reason = guard_reason
+                logger.info(f"{YELLOW}Early exit: {guard_reason}{RESET}")
+                asyncio.get_event_loop().create_task(self._eod_close(reason=guard_reason))
+                return
             color = GREEN if total_pnl >= 0 else RED
             logger.info(
                 f"{prefix}[{ts}] C={c:.4f} VWAP={vwap:.4f} | "
@@ -610,6 +665,7 @@ class MomShortBot:
         if self.dry_run:
             self._entry_price = entry_price
             self._position_qty = qty
+            self._mark_position_opened()
             self._sl_price = self._round_price(entry_price * (1 + self.cfg.sl_pct / 100))
             self._tp_price = self._round_price(entry_price * (1 - self.cfg.tp_pct / 100))
             self._state = _State.IN_POSITION
@@ -648,6 +704,7 @@ class MomShortBot:
 
             self._entry_price = avg_price
             self._position_qty = executed_qty
+            self._mark_position_opened()
 
             logger.info(
                 f"{GREEN}SOLD {executed_qty} {self.asset} @ ${avg_price:.4f} | "
@@ -716,6 +773,7 @@ class MomShortBot:
             # Don't burn the daily trade on a failed order
             self._signal.traded_today = False
             self._state = _State.SCANNING
+            self._reset_position_guard()
 
     # ------------------------------------------------------------------
     # Position monitoring (poll for SL/TP fill)
@@ -755,6 +813,7 @@ class MomShortBot:
                 )
                 self._signal.traded_today = False
                 self._state = _State.SCANNING
+                self._reset_position_guard()
                 _registry.update(self._reg_key, {
                     "state": self._state.name, "direction": None,
                     "entry_price": None, "sl_price": None, "tp_price": None,
@@ -802,6 +861,7 @@ class MomShortBot:
                     # the bot for the rest of the day.
                     self._signal.traded_today = False
                     self._state = _State.SCANNING
+                    self._reset_position_guard()
                     _registry.update(self._reg_key, {
                         "state": self._state.name, "direction": None,
                         "entry_price": None, "sl_price": None, "tp_price": None,
@@ -831,6 +891,7 @@ class MomShortBot:
             self._emit({"type": "position_closed", "symbol": self.symbol,
                        "reason": "EOD", "dry_run": True})
             self._state = _State.COOLDOWN
+            self._reset_position_guard()
             _registry.update(self._reg_key, {
                 "state": self._state.name, "direction": None,
                 "entry_price": None, "sl_price": None, "tp_price": None,
@@ -856,6 +917,7 @@ class MomShortBot:
             if pos is None or pos["position_amt"] == 0:
                 logger.info(f"{YELLOW}Position already closed{RESET}")
                 self._state = _State.COOLDOWN
+                self._reset_position_guard()
                 return
 
             qty = abs(pos["position_amt"])
@@ -887,6 +949,7 @@ class MomShortBot:
             logger.info(f"{RED}EOD close error: {e}{RESET}")
 
         self._state = _State.COOLDOWN
+        self._reset_position_guard()
         _registry.update(self._reg_key, {
             "state": self._state.name, "direction": None,
             "entry_price": None, "sl_price": None, "tp_price": None,

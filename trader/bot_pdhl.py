@@ -22,7 +22,7 @@ from trader import events as _events, bot_registry as _registry
 from trader.notifications import (
     notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
     notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
-    notify_startup_error,
+    notify_startup_error, notify_stop_loss_updated,
 )
 
 
@@ -81,6 +81,10 @@ class PDHLBot:
         interval: str = "1m",
         price_decimals: int | None = None,
         qty_decimals: int | None = None,
+        time_stop_minutes: int = 20,
+        time_stop_min_progress_pct: float = 0.0,
+        adverse_exit_bars: int = 3,
+        adverse_body_min_pct: float = 0.20,
     ):
         self.symbol = symbol.upper()
         self.leverage = leverage
@@ -162,6 +166,13 @@ class PDHLBot:
         self._r_value: float = 0.0
         self._sl_milestone: int = 0
         self._tp_price: float = 0.0
+        self._entry_ts_ms: int | None = None
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+        self.time_stop_minutes = time_stop_minutes
+        self.time_stop_min_progress_pct = time_stop_min_progress_pct
+        self.adverse_exit_bars = adverse_exit_bars
+        self.adverse_body_min_pct = adverse_body_min_pct
 
         # Background tasks
         self._eod_task: asyncio.Task | None = None
@@ -175,6 +186,52 @@ class PDHLBot:
             asyncio.get_event_loop().create_task(_events.publish(event))
         except RuntimeError:
             pass
+
+    def _mark_position_opened(self) -> None:
+        self._entry_ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+
+    def _reset_position_guard(self) -> None:
+        self._entry_ts_ms = None
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+
+    def _position_guard_reason(
+        self,
+        candle_open_ms: int,
+        o: float,
+        c: float,
+        pnl_pct: float,
+        direction: str,
+    ) -> str | None:
+        if self._risk_exit_pending:
+            return None
+
+        if self._entry_ts_ms and self.time_stop_minutes > 0:
+            elapsed_min = (candle_open_ms - self._entry_ts_ms) / 60_000
+            if elapsed_min >= self.time_stop_minutes and pnl_pct <= self.time_stop_min_progress_pct:
+                return (
+                    f"Time stop ({self.time_stop_minutes}m): "
+                    f"PnL {pnl_pct:+.2f}% <= {self.time_stop_min_progress_pct:+.2f}%"
+                )
+
+        body_pct = (abs(c - o) / o * 100) if o else 0.0
+        adverse_candle = (
+            (direction == "long" and c < o) or
+            (direction == "short" and c > o)
+        ) and body_pct >= self.adverse_body_min_pct
+        self._adverse_count = self._adverse_count + 1 if adverse_candle else 0
+        if (
+            self.adverse_exit_bars > 0
+            and self._adverse_count >= self.adverse_exit_bars
+            and pnl_pct < 0
+        ):
+            return (
+                f"Adverse momentum: {self._adverse_count} candles contra "
+                f"(body>={self.adverse_body_min_pct:.2f}%, PnL {pnl_pct:+.2f}%)"
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Logging setup
@@ -388,6 +445,7 @@ class PDHLBot:
         self._state = _State.IN_POSITION
         self._entry_price = pos["entry_price"]
         self._position_qty = abs(amt)
+        self._mark_position_opened()
 
         if self._direction == "long":
             self._sl_price = self._round_price(self._entry_price * (1 - self.sl_pct / 100))
@@ -679,6 +737,7 @@ class PDHLBot:
                     else:
                         self._signal.reset_signal()
                         self._state = _State.SCANNING
+                    self._reset_position_guard()
                     _registry.update(self._reg_key, {
                         "state": self._state.name, "direction": None,
                         "entry_price": None, "sl_price": None, "tp_price": None,
@@ -695,6 +754,13 @@ class PDHLBot:
                 pnl = (self._entry_price - c) * self._position_qty
                 pnl_pct = ((self._entry_price - c) / self._entry_price) * 100
             color = GREEN if pnl >= 0 else RED
+            guard_reason = self._position_guard_reason(candle_open_ms, o, c, pnl_pct, self._direction or "short")
+            if guard_reason:
+                self._risk_exit_pending = True
+                self._last_close_reason = guard_reason
+                logger.info(f"{YELLOW}Early exit: {guard_reason}{RESET}")
+                asyncio.get_event_loop().create_task(self._eod_close())
+                return
 
             r_achieved = (
                 ((h - self._entry_price) / self._r_value) if self._r_value > 0 and self._direction == "long"
@@ -801,6 +867,13 @@ class PDHLBot:
                 f"Algo ID: {sl_resp.data().algo_id}{RESET}"
             )
             _registry.update(self._reg_key, {"sl_price": new_sl_price})
+            notify_stop_loss_updated(
+                self.symbol,
+                self._direction or "",
+                old_sl,
+                new_sl_price,
+                f"Trailing SL ({label})",
+            )
 
         except Exception as e:
             logger.info(f"{RED}Failed to update trailing SL: {e} — keeping old SL{RESET}")
@@ -828,6 +901,7 @@ class PDHLBot:
         self._signal.reset_daily()
         if self._state == _State.COOLDOWN:
             self._state = _State.SCANNING
+            self._reset_position_guard()
         self._schedule_eod()
 
     def _schedule_eod(self):
@@ -889,6 +963,7 @@ class PDHLBot:
             self._direction = direction
             self._entry_price = entry_price
             self._position_qty = qty
+            self._mark_position_opened()
             self._sl_price = sl_price
             self._tp_price = tp_price or 0.0
             self._r_value = abs(entry_price - sl_price)
@@ -932,6 +1007,7 @@ class PDHLBot:
             self._direction = direction
             self._entry_price = avg_price
             self._position_qty = executed_qty
+            self._mark_position_opened()
             self._sl_price = (
                 self._round_price(avg_price * (1 - self.sl_pct / 100))
                 if direction == "long"
@@ -1001,6 +1077,7 @@ class PDHLBot:
             self._signal.trades_today = max(0, self._signal.trades_today - 1)
             self._direction = None
             self._state = _State.SCANNING
+            self._reset_position_guard()
 
     # ------------------------------------------------------------------
     # Position monitoring
@@ -1050,6 +1127,7 @@ class PDHLBot:
                 else:
                     self._signal.reset_signal()
                     self._state = _State.SCANNING
+                self._reset_position_guard()
                 _registry.update(self._reg_key, {
                     "state": self._state.name, "direction": None,
                     "entry_price": None, "sl_price": None, "tp_price": None,
@@ -1092,6 +1170,7 @@ class PDHLBot:
                     else:
                         self._signal.reset_signal()
                         self._state = _State.SCANNING
+                    self._reset_position_guard()
                     _registry.update(self._reg_key, {
                         "state": self._state.name, "direction": None,
                         "entry_price": None, "sl_price": None, "tp_price": None,
@@ -1112,6 +1191,7 @@ class PDHLBot:
         if self._state != _State.IN_POSITION:
             logger.info(f"{prefix}No position to close at EOD")
             self._state = _State.COOLDOWN
+            self._reset_position_guard()
             return
 
         if self.dry_run:
@@ -1120,6 +1200,7 @@ class PDHLBot:
                 f"{self.symbol} ({self._direction})"
             )
             self._state = _State.COOLDOWN
+            self._reset_position_guard()
             self._direction = None
             self._r_value = 0.0
             self._sl_milestone = 0
@@ -1142,6 +1223,7 @@ class PDHLBot:
             if pos is None or pos["position_amt"] == 0:
                 logger.info(f"{YELLOW}Position already closed{RESET}")
                 self._state = _State.COOLDOWN
+                self._reset_position_guard()
                 self._direction = None
                 self._r_value = 0.0
                 self._sl_milestone = 0
@@ -1181,6 +1263,7 @@ class PDHLBot:
             logger.info(f"{RED}EOD close error: {e}{RESET}")
 
         self._state = _State.COOLDOWN
+        self._reset_position_guard()
         self._direction = None
         self._r_value = 0.0
         self._sl_milestone = 0

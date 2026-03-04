@@ -100,6 +100,10 @@ class VWAPPullbackBot:
         vwap_dist_stop: float = 0.0,
         price_decimals: int | None = None,
         qty_decimals: int | None = None,
+        time_stop_minutes: int = 20,
+        time_stop_min_progress_pct: float = 0.0,
+        adverse_exit_bars: int = 3,
+        adverse_body_min_pct: float = 0.20,
     ):
         self.symbol = symbol.upper()
         self.leverage = leverage
@@ -182,6 +186,13 @@ class VWAPPullbackBot:
         self._position_qty: float = 0.0
         self._sl_price = 0.0
         self._tp_price = 0.0
+        self._entry_ts_ms: int | None = None
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+        self.time_stop_minutes = time_stop_minutes
+        self.time_stop_min_progress_pct = time_stop_min_progress_pct
+        self.adverse_exit_bars = adverse_exit_bars
+        self.adverse_body_min_pct = adverse_body_min_pct
 
         # Background tasks
         self._eod_task: asyncio.Task | None = None
@@ -197,6 +208,52 @@ class VWAPPullbackBot:
             asyncio.get_event_loop().create_task(_events.publish(event))
         except RuntimeError:
             pass
+
+    def _mark_position_opened(self) -> None:
+        self._entry_ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+
+    def _reset_position_guard(self) -> None:
+        self._entry_ts_ms = None
+        self._adverse_count = 0
+        self._risk_exit_pending = False
+
+    def _position_guard_reason(
+        self,
+        candle_open_ms: int,
+        o: float,
+        c: float,
+        pnl_pct: float,
+        direction: str,
+    ) -> str | None:
+        if self._risk_exit_pending:
+            return None
+
+        if self._entry_ts_ms and self.time_stop_minutes > 0:
+            elapsed_min = (candle_open_ms - self._entry_ts_ms) / 60_000
+            if elapsed_min >= self.time_stop_minutes and pnl_pct <= self.time_stop_min_progress_pct:
+                return (
+                    f"Time stop ({self.time_stop_minutes}m): "
+                    f"PnL {pnl_pct:+.2f}% <= {self.time_stop_min_progress_pct:+.2f}%"
+                )
+
+        body_pct = (abs(c - o) / o * 100) if o else 0.0
+        adverse_candle = (
+            (direction == "long" and c < o) or
+            (direction == "short" and c > o)
+        ) and body_pct >= self.adverse_body_min_pct
+        self._adverse_count = self._adverse_count + 1 if adverse_candle else 0
+        if (
+            self.adverse_exit_bars > 0
+            and self._adverse_count >= self.adverse_exit_bars
+            and pnl_pct < 0
+        ):
+            return (
+                f"Adverse momentum: {self._adverse_count} candles contra "
+                f"(body>={self.adverse_body_min_pct:.2f}%, PnL {pnl_pct:+.2f}%)"
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Logging setup
@@ -427,6 +484,7 @@ class VWAPPullbackBot:
         self._state = _State.IN_POSITION
         self._entry_price = pos["entry_price"]
         self._position_qty = abs(amt)
+        self._mark_position_opened()
 
         if self._direction == "long":
             self._sl_price = self._round_price(self._entry_price * (1 - self.sl_pct / 100))
@@ -728,6 +786,7 @@ class VWAPPullbackBot:
                     )
                     if self.dry_run:
                         self._state = _State.COOLDOWN
+                        self._reset_position_guard()
                         self._direction = None
                     else:
                         asyncio.get_event_loop().create_task(
@@ -742,6 +801,13 @@ class VWAPPullbackBot:
                 pnl = (self._entry_price - c) * self._position_qty
                 pnl_pct = ((self._entry_price - c) / self._entry_price) * 100
             color = GREEN if pnl >= 0 else RED
+            guard_reason = self._position_guard_reason(candle_open_ms, o, c, pnl_pct, self._direction or "short")
+            if guard_reason:
+                self._risk_exit_pending = True
+                self._last_close_reason = guard_reason
+                logger.info(f"{YELLOW}Early exit: {guard_reason}{RESET}")
+                asyncio.get_event_loop().create_task(self._eod_close(reason=guard_reason))
+                return
             _registry.update(self._reg_key, {
                 "state": self._state.name, "price": c, "vwap": vwap,
                 "unrealized_pnl": round(pnl, 4), "unrealized_pnl_pct": round(pnl_pct, 4),
@@ -790,6 +856,7 @@ class VWAPPullbackBot:
         self._vol_history.clear()
         if self._state == _State.COOLDOWN:
             self._state = _State.SCANNING
+            self._reset_position_guard()
         self._schedule_eod()
 
     def _schedule_eod(self):
@@ -855,6 +922,7 @@ class VWAPPullbackBot:
             self._direction = direction
             self._entry_price = entry_price
             self._position_qty = qty
+            self._mark_position_opened()
             self._sl_price = sl_price
             self._tp_price = tp_price
             self._state = _State.IN_POSITION
@@ -894,6 +962,7 @@ class VWAPPullbackBot:
             self._direction = direction
             self._entry_price = avg_price
             self._position_qty = executed_qty
+            self._mark_position_opened()
             self._sl_price = (
                 self._round_price(avg_price * (1 - self.sl_pct / 100))
                 if direction == "long"
@@ -963,6 +1032,7 @@ class VWAPPullbackBot:
             self._signal.trades_today = max(0, self._signal.trades_today - 1)
             self._direction = None
             self._state = _State.SCANNING
+            self._reset_position_guard()
 
     # ------------------------------------------------------------------
     # User data stream handler
@@ -1009,6 +1079,7 @@ class VWAPPullbackBot:
                 else:
                     self._signal.reset_signal()
                     self._state = _State.SCANNING
+                self._reset_position_guard()
                 _registry.update(self._reg_key, {
                     "state": self._state.name, "direction": None,
                     "entry_price": None, "sl_price": None, "tp_price": None,
@@ -1051,6 +1122,7 @@ class VWAPPullbackBot:
                     else:
                         self._signal.reset_signal()
                         self._state = _State.SCANNING
+                    self._reset_position_guard()
                     _registry.update(self._reg_key, {
                         "state": self._state.name, "direction": None,
                         "entry_price": None, "sl_price": None, "tp_price": None,
@@ -1074,6 +1146,7 @@ class VWAPPullbackBot:
         if self._state != _State.IN_POSITION:
             logger.info(f"{prefix}No position to close at EOD")
             self._state = _State.COOLDOWN
+            self._reset_position_guard()
             return
 
         if self.dry_run:
@@ -1082,6 +1155,7 @@ class VWAPPullbackBot:
                 f"{self.symbol} ({self._direction})"
             )
             self._state = _State.COOLDOWN
+            self._reset_position_guard()
             self._direction = None
             return
 
@@ -1102,6 +1176,7 @@ class VWAPPullbackBot:
             if pos is None or pos["position_amt"] == 0:
                 logger.info(f"{YELLOW}Position already closed{RESET}")
                 self._state = _State.COOLDOWN
+                self._reset_position_guard()
                 self._direction = None
                 return
 
@@ -1139,6 +1214,7 @@ class VWAPPullbackBot:
             logger.info(f"{RED}EOD close error: {e}{RESET}")
 
         self._state = _State.COOLDOWN
+        self._reset_position_guard()
         self._direction = None
 
         if self._monitor_task and not self._monitor_task.done():
