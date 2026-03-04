@@ -193,8 +193,12 @@ class MomShortBot:
         factor = 10 ** self.cfg.price_decimals
         return math.floor(price * factor) / factor
 
-    def _round_qty(self, qty: float) -> int:
-        return int(math.floor(qty))
+    def _round_qty(self, qty: float) -> float:
+        decimals = self.cfg.qty_decimals
+        if decimals == 0:
+            return float(int(math.floor(qty)))
+        step = 10 ** (-decimals)
+        return math.floor(qty / step) * step
 
     # ------------------------------------------------------------------
     # REST helpers
@@ -840,7 +844,7 @@ class MomShortBot:
                 self._state = _State.COOLDOWN
                 return
 
-            qty = int(abs(pos["position_amt"]))
+            qty = abs(pos["position_amt"])
 
             close_resp = self._client.rest_api.new_order(
                 symbol=self.symbol,
