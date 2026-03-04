@@ -79,30 +79,30 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 	@echo "$(YELLOW)All bots load TP/SL/params from DB (symbol_configs). Fallback: trader/config.py$(NC)"
 	@echo ""
 	@export REDIS_URL=redis://localhost:6379 && \
-		(nohup poetry run python -m trader bot --symbol axsusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader bot --symbol sandusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader bot --symbol manausdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader bot --symbol solusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol galausdt --leverage 5 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol avaxusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol dogeusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol 1000shibusdt --leverage 5 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xrpusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol ethusdt --leverage 10 --pos-size 0.35 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xauusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol ltcusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol linkusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol bchusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol xmrusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol uniusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol aptusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol 1000pepeusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol dashusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol zecusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader orb --symbol ksmusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pdhl --symbol magicusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol aaveusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader bot --symbol thetausdt --leverage 30 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader bot      --symbol axsusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot      --symbol sandusdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot      --symbol manausdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot      --symbol solusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol galausdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol avaxusdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol dogeusdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol 1000shibusdt  > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xrpusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol ethusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xauusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl     --symbol ltcusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl     --symbol linkusdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl     --symbol bchusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol xmrusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol uniusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol aptusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol 1000pepeusdt  > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol dashusdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol zecusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader orb      --symbol ksmusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl     --symbol magicusdt     > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pullback --symbol aaveusdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot      --symbol thetausdt     > /dev/null 2>&1 &)
 	@sleep 3
 	@echo "$(GREEN)✅ Bots started — 24 bots loading config from DB$(NC)"
 	@echo ""

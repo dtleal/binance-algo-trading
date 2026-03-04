@@ -62,6 +62,7 @@ class SymbolConfig:
     min_notional: float = 5.0  # Binance minimum order notional (USDT)
     interval: str = "1m"  # WebSocket kline interval (1m, 5m, 15m, 30m, 1h)
     vwap_dist_stop: float = 0.0  # exit if price moves >X% from VWAP in wrong direction (0 = disabled)
+    leverage: int = 30         # Binance futures leverage (default 30x)
 
 
 AXS_CONFIG = SymbolConfig(
@@ -168,6 +169,7 @@ SHIB_CONFIG = SymbolConfig(
     price_decimals=6,
     qty_decimals=0,
     interval="5m",
+    leverage=1,
 )
 
 ETH_CONFIG = SymbolConfig(

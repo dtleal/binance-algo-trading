@@ -49,7 +49,7 @@ def _load_symbol_config(symbol: str, strategy_name: str):
             "fast_period": None, "slow_period": None,
             "range_mins": None, "pdhl_prox_pct": None,
             "be_r": None, "trail_step": None,
-            "leverage": DEFAULT_LEVERAGE, "active": True,
+            "leverage": cfg.leverage, "active": True,
             "_source": "fallback",
         }
         return cfg, extras
@@ -495,6 +495,22 @@ def main():
         parser.print_help()
 
 
+async def _load_cfg_async(symbol: str, strategy_name: str):
+    """Async DB config load for use inside async context (e.g. _serve)."""
+    try:
+        import db
+        from db.queries.symbol_config import get_symbol_config as _db_cfg
+        pool = await db.init_pool()
+        cfg, extras = await _db_cfg(pool, symbol.upper())
+        await db.close_pool()
+        extras["_source"] = "db"
+        return cfg, extras
+    except Exception:
+        from trader.config import get_symbol_config
+        cfg = get_symbol_config(symbol)
+        return cfg, {"leverage": cfg.leverage, "_source": "fallback"}
+
+
 async def _serve(args):
     """Start FastAPI dashboard, optionally co-located with bots."""
     import uvicorn
@@ -505,34 +521,31 @@ async def _serve(args):
     # Start VWAPPullback bots
     for sym in args.pullback_symbols:
         from trader.bot_vwap_pullback import VWAPPullbackBot
-        from trader.config import get_symbol_config
-        # Use pre-configured settings if available
-        if sym.upper() in SYMBOL_CONFIGS:
-            cfg = get_symbol_config(sym)
-            bot = VWAPPullbackBot(
-                symbol=sym,
-                leverage=args.leverage,
-                dry_run=args.dry_run,
-                tp_pct=cfg.tp_pct,
-                sl_pct=cfg.sl_pct,
-                min_bars=cfg.min_bars,
-                confirm_bars=cfg.confirm_bars,
-                vwap_prox=cfg.vwap_prox,
-                pos_size_pct=cfg.pos_size_pct,
-                vol_filter=cfg.vol_filter,
-                interval=cfg.interval,
-                vwap_dist_stop=cfg.vwap_dist_stop,
-            )
-        else:
-            bot = VWAPPullbackBot(symbol=sym, leverage=args.leverage, dry_run=args.dry_run)
+        cfg, extras = await _load_cfg_async(sym, "VWAPPullback")
+        _db = extras.get("_source") == "db"
+        bot = VWAPPullbackBot(
+            symbol=sym,
+            leverage=extras["leverage"],
+            dry_run=args.dry_run,
+            tp_pct=cfg.tp_pct,
+            sl_pct=cfg.sl_pct,
+            min_bars=cfg.min_bars,
+            confirm_bars=cfg.confirm_bars,
+            vwap_prox=cfg.vwap_prox,
+            pos_size_pct=cfg.pos_size_pct,
+            vol_filter=cfg.vol_filter,
+            interval=cfg.interval,
+            vwap_dist_stop=cfg.vwap_dist_stop,
+            price_decimals=cfg.price_decimals if _db else None,
+            qty_decimals=cfg.qty_decimals if _db else None,
+        )
         tasks.append(asyncio.create_task(bot.run()))
 
     # Start MomShort bots
     for sym in args.momshort_symbols:
         from trader.bot import MomShortBot
-        from trader.config import get_symbol_config
-        cfg = get_symbol_config(sym)
-        bot = MomShortBot(cfg=cfg, leverage=args.leverage, dry_run=args.dry_run)
+        cfg, extras = await _load_cfg_async(sym, "MomShort")
+        bot = MomShortBot(cfg=cfg, leverage=extras["leverage"], dry_run=args.dry_run)
         tasks.append(asyncio.create_task(bot.run()))
 
     config = uvicorn.Config(app, host=args.host, port=args.port, loop="none")
