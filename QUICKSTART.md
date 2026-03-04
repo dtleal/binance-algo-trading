@@ -1,4 +1,4 @@
-# 🚀 Quick Start Guide
+# Quick Start Guide
 
 ## Installation
 
@@ -6,194 +6,115 @@
 make install
 ```
 
-This will:
-- ✅ Install all backend dependencies (Poetry)
-- ✅ Install all frontend dependencies (npm)
-- ✅ Build the production frontend
+This installs backend dependencies (Poetry), frontend dependencies (npm), and builds the frontend.
 
-## Starting the System
+## Environment
 
-### Option 1: Start Everything (Recommended)
+Create `.env` in project root:
 
 ```bash
-make start
-```
-
-This starts:
-- 📊 **Dashboard** on http://localhost:8080
-- 🤖 **8 Trading Bots** with optimal configurations:
-  - 6 MomShort bots (20x leverage): AXSUSDT, SANDUSDT, DOGEUSDT, 1000SHIBUSDT, GALAUSDT, MANAUSDT
-  - 2 VWAP Pullback bots:
-    - ETHUSDT (5x leverage) - 5min candles
-    - AXSUSDT (20x leverage) - 1min candles
-
-### Option 2: Start Components Separately
-
-```bash
-# Start only dashboard
-make dashboard
-
-# Start only bots
-make bots
-
-# Start Redis (required for both)
-make redis
-```
-
-## Managing the System
-
-### Check Status
-
-```bash
-make status-all
-```
-
-Shows:
-- ✅/❌ Redis status
-- ✅/❌ Dashboard status
-- ✅/❌ Number of active bots
-
-### Stop Everything
-
-```bash
-make stop
-```
-
-Stops all processes:
-- ⛔ All trading bots
-- ⛔ Dashboard
-- ⛔ Redis
-
-### View Logs
-
-```bash
-make logs
-```
-
-## Configuration
-
-Before starting, create a `.env` file:
-
-```bash
-BINANCE_API_KEY=your_api_key_here
-BINANCE_SECRET_KEY=your_secret_key_here
+API_KEY=your_api_key_here
+SECRET_KEY=your_secret_key_here
 REDIS_URL=redis://localhost:6379
 
 # Optional
 SOCKS_PROXY=socks5h://127.0.0.1:1080
 ```
 
-## Bot Configurations
+## Start The System
 
-### MomShort Bots (6 bots)
-- **Leverage**: 20x
-- **Symbols**: AXSUSDT, SANDUSDT, DOGEUSDT, 1000SHIBUSDT, GALAUSDT, MANAUSDT
-- **Strategy**: Momentum-based short selling on consolidation breakdowns
+```bash
+make start
+```
 
-### VWAP Pullback - ETHUSDT
-- **Leverage**: 5x
-- **Candle Size**: 5 minutes
-- **Parameters**:
-  - TP: 10% | SL: 5%
-  - Min Bars: 20 | Confirm Bars: 0
-  - EMA: 100 | VWAP Window: 1 day
-  - Position Size: 30% | Max Trades/Day: 2
-- **Backtest Results**: +31.38% return, 49.8% win rate, 6.47% max DD
+This starts:
+- dashboard on `http://localhost:8080`
+- trade sync daemon
+- **24 trading bots**:
+  - MomShort: 5
+  - VWAPPullback: 14
+  - PDHL: 4
+  - ORB: 1
 
-### VWAP Pullback - AXSUSDT
-- **Leverage**: 20x
-- **Candle Size**: 1 minute
-- **Parameters**:
-  - TP: 10% | SL: 5%
-  - Min Bars: 5 | Confirm Bars: 1
-  - EMA: 200 | VWAP Window: 10 days
-  - Position Size: 20% | Max Trades/Day: 1
+Full active portfolio:
+- `docs/ACTIVE_BOTS.md`
 
-## Makefile Commands Reference
+## Core Operations
 
-### Quick Start
-- `make install` - Install all dependencies
-- `make start` - Start everything
-- `make stop` - Stop everything
-- `make status-all` - Check status
+```bash
+# Check full status (redis + dashboard + bots)
+make status-all
 
-### Development
-- `make dashboard` - Start dashboard only
-- `make bots` - Start all bots
-- `make logs` - View bot logs
-- `make build-frontend` - Rebuild frontend
+# Stream logs
+make logs
 
-### Individual Bots
-- `make bot-dry` - Run AXSUSDT MomShort in dry-run
-- `make pullback-eth` - Run ETHUSDT Pullback
-- `make pullback-best` - Run AXSUSDT Pullback with best params
+# Stop everything
+make stop
+```
 
-### Monitoring
-- `make monitor` - Monitor market data
-- `make status` - Show position status
-- `make history` - Show trade history
+## Run Components Separately
 
-### Backtesting
-- `make sweep-rust-eth` - Run parameter sweep for ETH
-- `make analyze-best` - Analyze sweep results
-- `make backtest-detail` - Run detailed backtest
+```bash
+# Redis only
+make redis
 
-## Dashboard Features
+# Dashboard only
+make dashboard
 
-Access at **http://localhost:8080**
+# Bots only
+make bots
+```
 
-### Pages:
-1. **Overview** - P&L curves, account summary, performance metrics
-2. **Bots** - Real-time bot status, positions, configurations
-3. **Positions** - Open positions with P&L tracking
-4. **History** - Trade history with P&L analysis
-5. **Commissions** - Fee tracking and breakdown
+## Useful Commands
 
-### Global Filter
-Filter data across all pages by:
-- **Symbol** - Specific asset or all
-- **Strategy** - MomShort, Pullback, or all
-- **Date Range** - 7, 30, or 90 days
+```bash
+# One bot in dry-run
+poetry run python -m trader bot --symbol axsusdt --dry-run
+
+# Pullback bot
+poetry run python -m trader pullback --symbol ethusdt --dry-run
+
+# PDHL bot
+poetry run python -m trader pdhl --symbol ltcusdt --dry-run
+
+# ORB bot
+poetry run python -m trader orb --symbol ksmusdt --dry-run
+
+# Portfolio status
+poetry run python -m trader status
+
+# Trade history
+poetry run python -m trader history --days 30
+```
+
+## Dashboard
+
+Access: `http://localhost:8080`
+
+Main pages:
+- Overview
+- Bots
+- Positions
+- History
+- Commissions
 
 ## Troubleshooting
 
-### Redis not starting
+If Redis is missing on macOS:
+
 ```bash
 brew install redis
 make redis
 ```
 
-### Port 8080 already in use
+If dashboard port is busy:
+
 ```bash
-# Stop existing processes
-make stop
-
-# Or change port in trader/cli.py
-```
-
-### Bots not appearing in dashboard
-```bash
-# Check Redis is running
-make status-all
-
-# Restart everything
 make stop
 make start
 ```
 
-## Safety Features
+## Notes
 
-- ✅ Dry-run mode available for all bots
-- ✅ Per-trade position sizing
-- ✅ Daily trade limits
-- ✅ Stop-loss on all positions
-- ✅ Take-profit targets
-- ✅ Redis-based state management
-
-## Getting Help
-
-```bash
-make help
-```
-
-Shows all available commands with descriptions.
+- Bot runtime parameters are loaded from DB (`symbol_configs`) first, with fallback to `trader/config.py`.
+- For onboarding new assets, follow `docs/ONBOARDING.md`.

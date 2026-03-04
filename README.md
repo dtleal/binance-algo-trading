@@ -2,10 +2,12 @@
 
 Async Python bot for automated USDT-M futures trading on Binance.
 
-The bot implements three strategies:
+The bot implements five strategies:
 - **MomShort** (Momentum Short): Intraday VWAP-breakdown strategy for short-selling
 - **VWAPPullback**: Bidirectional VWAP pullback with EMA trend filter (supports long and short positions)
 - **PDHL** (Previous Day High/Low): Bidirectional breakout strategy using previous day's high/low levels
+- **ORB** (Opening Range Breakout): Breakout strategy with trailing risk logic
+- **EMAScalp**: Bidirectional EMA crossover with trailing stop management
 
 All strategies support **configurable timeframes** (1m, 5m, 15m, 30m, 1h) via WebSocket kline streams.
 
@@ -20,37 +22,17 @@ Exits are checked every candle in order: stop-loss (5% above entry), take-profit
 
 The strategy is configured per-symbol in `trader/config.py` — parameters like TP/SL, min consolidation bars, confirmation bars, and VWAP proximity threshold vary per asset.
 
-## Active Portfolio (18 Bots)
+## Active Portfolio (24 Bots)
 
-### MomShort Strategy
-| Symbol     | Timeframe | Return  | TP   | SL   | Leverage | Config               |
-|------------|-----------|---------|------|------|----------|----------------------|
-| AXSUSDT    | 1m        | +40.10% | 10%  | 5%   | 20x      | bars=3, cfm=2        |
-| SANDUSDT   | 5m        | +27.61% | 10%  | 1%   | 20x      | bars=5, cfm=0, vf=✓  |
-| MANAUSDT   | 1m        | +30.54% | 5%   | 5%   | 20x      | bars=12, cfm=2, vf=✓ |
-| SOLUSDT    | 1m        | +28.13% | 7%   | 5%   | 20x      | bars=8, cfm=0        |
+Current live roster (started by `make bots` / `make start`):
 
-### VWAPPullback Strategy
-| Symbol       | Timeframe | Return  | TP   | SL   | Leverage | Config               |
-|--------------|-----------|---------|------|------|----------|----------------------|
-| GALAUSDT     | 1m        | +34.85% | 10%  | 5%   | 20x      | bars=3, cfm=0        |
-| AVAXUSDT     | 1m        | +31.12% | 7%   | 2%   | 20x      | bars=30, cfm=0       |
-| DOGEUSDT     | 5m        | +41.28% | 10%  | 5%   | 20x      | bars=3, cfm=0        |
-| 1000SHIBUSDT | 5m        | +37.51% | 7%   | 5%   | 20x      | bars=3, cfm=0        |
-| 1000PEPEUSDT | 5m        | +38.86% | 10%  | 5%   | 20x      | bars=5, cfm=2        |
-| ETHUSDT      | 5m        | +31.28% | 10%  | 5%   | 5x       | bars=20, cfm=0       |
-| XRPUSDT      | 5m        | +29.21% | 10%  | 2%   | 20x      | bars=3, cfm=0        |
-| UNIUSDT      | 15m       | +31.71% | 10%  | 2%   | 20x      | bars=3, cfm=1        |
-| APTUSDT      | 5m        | +19.66% | 10%  | 5%   | 20x      | bars=3, cfm=0        |
-| XMRUSDT      | 1m        | +35.76% | 7%   | 5%   | 20x      | bars=8, cfm=0        |
-| XAUUSDT      | 1m        | +7.67%  | 5%   | 5%   | 20x      | bars=3, cfm=1        |
+- **MomShort (5):** AXSUSDT, SANDUSDT, MANAUSDT, SOLUSDT, THETAUSDT
+- **VWAPPullback (14):** GALAUSDT, AVAXUSDT, DOGEUSDT, 1000SHIBUSDT, XRPUSDT, ETHUSDT, XAUUSDT, XMRUSDT, UNIUSDT, APTUSDT, 1000PEPEUSDT, DASHUSDT, ZECUSDT, AAVEUSDT
+- **PDHL (4):** LTCUSDT, LINKUSDT, BCHUSDT, MAGICUSDT
+- **ORB (1):** KSMUSDT
 
-### PDHL Strategy
-| Symbol     | Timeframe | Return   | TP   | SL   | Leverage | Config               |
-|------------|-----------|----------|------|------|----------|----------------------|
-| LTCUSDT    | 1m        | +50.76%  | 3%   | 5%   | 20x      | cfm=1                |
-| LINKUSDT   | 1m        | +115.87% | 10%  | 5%   | 20x      | cfm=2                |
-| BCHUSDT    | 5m        | +68.46%  | 10%  | 5%   | 20x      | cfm=1                |
+For the full per-symbol table (timeframe, TP/SL, bars, leverage, mode), see:
+- `docs/ACTIVE_BOTS.md`
 
 ## Setup
 
@@ -72,7 +54,7 @@ SECRET_KEY=your_secret_key
 ### Quick Start (Recommended)
 
 ```bash
-# Start everything: 18 bots + dashboard
+# Start everything: 24 bots + dashboard
 make start
 
 # Stop everything
@@ -97,7 +79,7 @@ poetry run python -m trader serve --port 8080
 Access at http://localhost:8080
 
 **Features:**
-- Real-time bot status (all 18 bots always visible, even in COOLDOWN)
+- Real-time bot status (all 24 bots always visible, even in COOLDOWN)
 - Live price, VWAP, and P&L tracking
 - Position monitoring and trade history
 - WebSocket updates with heartbeat (bots publish state every candle)
