@@ -171,6 +171,29 @@ def notify_error(
     )
 
 
+def notify_startup_error_sync(symbol: str, error: str) -> None:
+    """Send startup error immediately (safe to call before asyncio loop exists)."""
+    _init()
+    if not _ENABLED:
+        return
+    try:
+        url = f"https://api.telegram.org/bot{_TOKEN}/sendMessage"
+        payload = json.dumps({
+            "chat_id": _CHAT_ID,
+            "text": (
+                f"⚠️ <b>Erro ao inciar bot</b> — {symbol}\n"
+                f"<code>{str(error)[:250]}</code>"
+            ),
+            "parse_mode": "HTML",
+        }).encode()
+        req = urllib.request.Request(
+            url, data=payload, headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as exc:
+        _log.warning("Telegram startup error send failed: %s", exc)
+
+
 def notify_bot_stopped(symbol: str, strategy: str) -> None:
     """Bot process is shutting down."""
     _fire(f"🛑 <b>Bot finalizado</b> — {symbol}\nStrategy: {strategy}")

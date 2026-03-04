@@ -488,10 +488,15 @@ class VWAPPullbackBotV2:
         logger.info(f"Capital: ${self.capital:.2f} | Per-trade: ${per_trade:.2f}")
         if per_trade < self.min_notional:
             min_cap = math.ceil(self.min_notional / self.pos_size_pct * 100) / 100
-            raise SystemExit(
+            msg = (
                 f"Per-trade capital ${per_trade:.2f} is below Binance minimum "
                 f"notional ${self.min_notional:.2f} for {self.symbol}. "
                 f"Minimum --capital is ${min_cap:.2f}."
+            )
+            if not self.dry_run:
+                notify_error(self.symbol, msg, "Erro ao inciar bot")
+            raise SystemExit(
+                msg
             )
         logger.info("-" * 60)
 

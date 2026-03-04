@@ -134,3 +134,15 @@ It supports:
 - Treat V2 sweep as advanced/optional (explicit request only).
 - If champion comes from broadly negative sweep averages, treat as suspect and validate longer.
 - Keep one-trade-per-day and EOD close behavior unless there is a clear, tested reason to change.
+
+## Runtime Notes (2026-03-04)
+
+- `make bots` and `make start` now load `.env` before spawning bot processes/dashboard/sync daemon.
+  - This is required for DB credentials (`POSTGRES_*`) and Telegram vars in detached startup.
+- Startup configuration remains DB-first (`symbol_configs`), with strict fail-closed behavior when DB is unavailable unless `ALLOW_CONFIG_FALLBACK=1`.
+- On DB-related startup failure (before async loop), CLI now triggers Telegram notification:
+  - `⚠️ Erro ao inciar bot — <SYMBOL>`, including the failure reason.
+- For symbols `ETHUSDT`, `GALAUSDT`, `SOLUSDT`, `XAUUSDT`, `1000SHIBUSDT`:
+  - `symbol_configs.pos_size_pct = 0.40`
+  - `leverage = 1`
+  - This avoids low notional startup failures with small account balances.

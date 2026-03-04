@@ -44,6 +44,11 @@ def _load_symbol_config(symbol: str, strategy_name: str):
 
     if result == "fallback":
         if not ALLOW_CONFIG_FALLBACK:
+            from trader.notifications import notify_startup_error_sync
+            notify_startup_error_sync(
+                symbol,
+                f"DB unavailable ({strategy_name}): {reason}",
+            )
             print(
                 f"⛔ DB unavailable for {symbol} ({strategy_name}) — bot não iniciado. "
                 f"Reason: {reason}"

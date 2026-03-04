@@ -315,11 +315,16 @@ class MomShortBot:
         logger.info(f"Capital: ${self.capital:.2f} | Per-trade: ${per_trade:.2f}")
         if per_trade < self.cfg.min_notional:
             min_capital = math.ceil(self.cfg.min_notional / self.cfg.pos_size_pct * 100) / 100
-            raise SystemExit(
+            msg = (
                 f"Per-trade capital ${per_trade:.2f} is below Binance minimum "
                 f"notional ${self.cfg.min_notional:.2f} for {self.symbol}. "
                 f"Minimum --capital is ${min_capital:.2f} "
                 f"(at {self.cfg.pos_size_pct * 100:.0f}% position size)."
+            )
+            if not self.dry_run:
+                notify_error(self.symbol, msg, "Erro ao inciar bot")
+            raise SystemExit(
+                msg
             )
         logger.info("-" * 60)
         if not self.dry_run:

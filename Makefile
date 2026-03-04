@@ -69,7 +69,8 @@ dashboard: redis build-frontend ## Start dashboard server only
 	@echo "$(GREEN)  Starting Dashboard$(NC)"
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
 	@echo ""
-	@export REDIS_URL=redis://localhost:6379 && \
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		export REDIS_URL=redis://localhost:6379 && \
 		poetry run python -m trader serve --port 8080 --host 0.0.0.0
 
 bots: redis ## Start all trading bots — strategy params auto-loaded from DB (fallback: trader/config.py)
@@ -78,7 +79,8 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 	@echo "$(GREEN)═══════════════════════════════════════$(NC)"
 	@echo "$(YELLOW)All bots load TP/SL/params from DB (symbol_configs). Fallback: trader/config.py$(NC)"
 	@echo ""
-	@export REDIS_URL=redis://localhost:6379 && \
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		export REDIS_URL=redis://localhost:6379 && \
 		(nohup poetry run python -m trader bot      --symbol axsusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol sandusdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol manausdt      > /dev/null 2>&1 &) && \
@@ -117,10 +119,12 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo "$(YELLOW)🤖 Starting trading bots...$(NC)"
 	@$(MAKE) -s bots
 	@echo "$(YELLOW)📊 Starting dashboard...$(NC)"
-	@export REDIS_URL=redis://localhost:6379 && \
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		export REDIS_URL=redis://localhost:6379 && \
 		nohup poetry run python -m trader serve --port 8080 --host 0.0.0.0 > /dev/null 2>&1 &
 	@echo "$(YELLOW)🔄 Starting trade sync daemon...$(NC)"
-	@nohup poetry run python -m db.sync_trades > logs/sync.log 2>&1 &
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+		nohup poetry run python -m db.sync_trades > logs/sync.log 2>&1 &
 	@sleep 2
 	@echo ""
 	@echo "$(GREEN)╔════════════════════════════════════════════╗$(NC)"

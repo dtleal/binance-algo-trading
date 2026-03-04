@@ -139,3 +139,4 @@ ORDER BY symbol;
 - If Postgres is unreachable, check if container/service is running (`docker compose ps`).
 - Runtime bots load config from DB first; fallback is `trader/config.py`.
 - For strict reproducibility in support/debug sessions, include timezone in every date filter.
+- For detached startup, `make start`/`make bots` must load `.env` so `POSTGRES_*`/Telegram vars are available to child processes.
