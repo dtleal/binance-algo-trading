@@ -16,6 +16,7 @@ import asyncio
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1090,15 +1091,52 @@ async def chat_endpoint(req: ChatRequest):
     openai_key = os.getenv("OPENAI_API_KEY", "")
 
     if provider == "openai":
-        if not openai_key:
-            return {"response": "⚠️ OPENAI_API_KEY não configurada no .env"}
-        return {"response": await _chat_with_openai(req, openai_key)}
+        if openai_key:
+            try:
+                return {"response": await _chat_with_openai(req, openai_key)}
+            except Exception as e:
+                if anthropic_key:
+                    try:
+                        fallback = await _chat_with_anthropic(req, anthropic_key)
+                        return {"response": f"⚠️ OpenAI indisponível ({e}). Resposta via Anthropic:\n\n{fallback}"}
+                    except Exception as e2:
+                        return {"response": f"⚠️ Falha OpenAI ({e}) e Anthropic ({e2})."}
+                return {"response": f"⚠️ Falha ao consultar OpenAI: {e}"}
+        if anthropic_key:
+            return {"response": await _chat_with_anthropic(req, anthropic_key)}
+        return {"response": "⚠️ OPENAI_API_KEY não configurada no .env"}
 
     if provider not in {"anthropic", "auto"}:
         return {"response": f"⚠️ CHAT_PROVIDER inválido: {provider}. Use: anthropic, openai ou auto"}
 
+    if provider == "anthropic":
+        if anthropic_key:
+            try:
+                return {"response": await _chat_with_anthropic(req, anthropic_key)}
+            except Exception as e:
+                if openai_key:
+                    try:
+                        fallback = await _chat_with_openai(req, openai_key)
+                        return {"response": f"⚠️ Anthropic indisponível ({e}). Resposta via OpenAI:\n\n{fallback}"}
+                    except Exception as e2:
+                        return {"response": f"⚠️ Falha Anthropic ({e}) e OpenAI ({e2})."}
+                return {"response": f"⚠️ Falha ao consultar Anthropic: {e}"}
+        if openai_key:
+            return {"response": await _chat_with_openai(req, openai_key)}
+        return {"response": "⚠️ ANTHROPIC_API_KEY não configurada no .env"}
+
+    # auto: OpenAI first, fallback to Anthropic
     if openai_key:
-        return {"response": await _chat_with_openai(req, openai_key)}
+        try:
+            return {"response": await _chat_with_openai(req, openai_key)}
+        except Exception as e:
+            if anthropic_key:
+                try:
+                    fallback = await _chat_with_anthropic(req, anthropic_key)
+                    return {"response": f"⚠️ OpenAI indisponível ({e}). Resposta via Anthropic:\n\n{fallback}"}
+                except Exception as e2:
+                    return {"response": f"⚠️ Falha OpenAI ({e}) e Anthropic ({e2})."}
+            return {"response": f"⚠️ Falha ao consultar OpenAI: {e}"}
     if anthropic_key:
         return {"response": await _chat_with_anthropic(req, anthropic_key)}
     return {"response": "⚠️ Configure OPENAI_API_KEY ou ANTHROPIC_API_KEY no .env"}
@@ -1195,7 +1233,7 @@ async def _chat_with_openai(req: ChatRequest, api_key: str) -> str:
 
     for _ in range(5):
         payload = {
-            "model": os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
+            "model": os.getenv("OPENAI_CHAT_MODEL", "gpt-5.1"),
             "messages": messages,
             "tools": _openai_tools(),
             "tool_choice": "auto",
@@ -1208,7 +1246,20 @@ async def _chat_with_openai(req: ChatRequest, api_key: str) -> str:
                 "Authorization": f"Bearer {api_key}",
             },
         )
-        data = await asyncio.to_thread(lambda: json.loads(urllib.request.urlopen(req_http, timeout=20).read()))
+        def _do_call():
+            try:
+                with urllib.request.urlopen(req_http, timeout=20) as r:
+                    return json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                body = ""
+                try:
+                    body = e.read().decode("utf-8", errors="ignore")
+                except Exception:
+                    pass
+                raise RuntimeError(f"HTTP {e.code}: {body[:280] or e.reason}") from e
+            except urllib.error.URLError as e:
+                raise RuntimeError(f"Conexão OpenAI falhou: {e.reason}") from e
+        data = await asyncio.to_thread(_do_call)
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
         tool_calls = msg.get("tool_calls") or []

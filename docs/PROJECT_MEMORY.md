@@ -153,6 +153,8 @@ It supports:
   - Anthropic key: `ANTHROPIC_API_KEY`
   - OpenAI key: `OPENAI_API_KEY` (model via `OPENAI_CHAT_MODEL`, default `gpt-4.1-mini`)
   - If OpenAI key is missing, backend falls back to Anthropic when available.
+  - Runtime provider failures no longer return HTTP 500 HTML:
+    - `/api/chat` now returns JSON with human-readable error and tries provider fallback when possible.
 - For symbols `ETHUSDT`, `GALAUSDT`, `SOLUSDT`, `XAUUSDT`, `1000SHIBUSDT`:
   - `symbol_configs.pos_size_pct = 0.40`
   - `leverage = 1`
