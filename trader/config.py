@@ -63,6 +63,7 @@ class SymbolConfig:
     interval: str = "1m"  # WebSocket kline interval (1m, 5m, 15m, 30m, 1h)
     vwap_dist_stop: float = 0.0  # exit if price moves >X% from VWAP in wrong direction (0 = disabled)
     leverage: int = 30         # Binance futures leverage (default 30x)
+    mode: str = "normal"       # 'normal' | 'monitoring' (reduced risk, under observation)
 
 
 AXS_CONFIG = SymbolConfig(
@@ -135,6 +136,7 @@ GALA_CONFIG = SymbolConfig(
     qty_decimals=0,
     interval="1m",
     leverage=1,
+    mode="monitoring",
 )
 
 DOGE_CONFIG = SymbolConfig(
@@ -171,6 +173,7 @@ SHIB_CONFIG = SymbolConfig(
     qty_decimals=0,
     interval="5m",
     leverage=1,
+    mode="monitoring",
 )
 
 ETH_CONFIG = SymbolConfig(
@@ -192,6 +195,7 @@ ETH_CONFIG = SymbolConfig(
     interval="5m",
     vwap_dist_stop=0.03,  # exit if price >3% from VWAP in wrong direction
     leverage=1,
+    mode="monitoring",
 )
 
 SOL_CONFIG = SymbolConfig(
@@ -212,6 +216,7 @@ SOL_CONFIG = SymbolConfig(
     vol_filter=True,    # Volume filter enabled for MomShort
     interval="1m",
     leverage=1,
+    mode="monitoring",
 )
 
 AVAX_CONFIG = SymbolConfig(
@@ -289,6 +294,7 @@ XAU_CONFIG = SymbolConfig(
     min_notional=5.0,
     interval="1m",
     leverage=1,
+    mode="monitoring",
 )
 
 LTC_CONFIG = SymbolConfig(

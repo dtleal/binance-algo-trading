@@ -485,7 +485,18 @@ async def get_commissions(days: int = 30):
 
 @app.get("/api/bot_states")
 async def get_bot_states():
-    return {"bots": bot_registry.get_states()}
+    states = bot_registry.get_states()
+    try:
+        import db
+        pool = db.get_pool()
+        rows = await pool.fetch("SELECT symbol, mode FROM symbol_configs")
+        mode_map = {r["symbol"]: r["mode"] for r in rows}
+        for state in states.values():
+            sym = state.get("symbol", "").upper()
+            state["mode"] = mode_map.get(sym, "normal")
+    except Exception:
+        pass
+    return {"bots": states}
 
 
 @app.get("/api/account_summary")

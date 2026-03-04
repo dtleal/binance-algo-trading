@@ -32,6 +32,7 @@ export interface BotState {
   symbol: string;
   strategy: string;
   state: "SCANNING" | "IN_POSITION" | "COOLDOWN";
+  mode?: "normal" | "monitoring";
   price?: number;
   vwap?: number;
   ema?: number;

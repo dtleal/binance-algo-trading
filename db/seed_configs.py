@@ -119,11 +119,11 @@ async def seed_symbol_configs(conn: asyncpg.Connection) -> None:
                 tp_pct, sl_pct, min_bars, confirm_bars,
                 vwap_prox, vwap_dist_stop, vol_filter,
                 pos_size_pct, price_decimals, qty_decimals, min_notional,
-                leverage,
+                leverage, mode,
                 champion_return_pct, champion_win_rate, champion_trades, champion_max_dd,
                 active, updated_at
             )
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,TRUE,NOW())
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,TRUE,NOW())
             ON CONFLICT (symbol) DO UPDATE SET
                 asset               = EXCLUDED.asset,
                 strategy_name       = EXCLUDED.strategy_name,
@@ -143,6 +143,7 @@ async def seed_symbol_configs(conn: asyncpg.Connection) -> None:
                 qty_decimals        = EXCLUDED.qty_decimals,
                 min_notional        = EXCLUDED.min_notional,
                 leverage            = EXCLUDED.leverage,
+                mode                = EXCLUDED.mode,
                 champion_return_pct = EXCLUDED.champion_return_pct,
                 champion_win_rate   = EXCLUDED.champion_win_rate,
                 champion_trades     = EXCLUDED.champion_trades,
@@ -154,7 +155,7 @@ async def seed_symbol_configs(conn: asyncpg.Connection) -> None:
             cfg.tp_pct, cfg.sl_pct, cfg.min_bars, cfg.confirm_bars,
             cfg.vwap_prox, cfg.vwap_dist_stop, cfg.vol_filter,
             cfg.pos_size_pct, cfg.price_decimals, cfg.qty_decimals, cfg.min_notional,
-            cfg.leverage,
+            cfg.leverage, cfg.mode,
             champ.get("ret"), champ.get("wr"), champ.get("trades"), champ.get("max_dd"),
         )
         print(f"  {symbol:<20} {cfg.interval:>3}  {strategy}")

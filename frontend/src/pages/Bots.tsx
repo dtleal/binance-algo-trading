@@ -78,7 +78,11 @@ function BotCard({
   return (
     <div
       onClick={onClick}
-      className="bg-gray-800 border border-gray-700 rounded-xl p-5 space-y-4 cursor-pointer hover:border-emerald-600 transition-colors"
+      className={`bg-gray-800 rounded-xl p-5 space-y-4 cursor-pointer transition-colors ${
+        state.mode === "monitoring"
+          ? "border-2 border-red-500/60 hover:border-red-400"
+          : "border border-gray-700 hover:border-emerald-600"
+      }`}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
@@ -128,6 +132,11 @@ function BotCard({
 
         {/* Right: status */}
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          {state.mode === "monitoring" && (
+            <span className="text-[10px] px-2 py-0.5 rounded bg-red-900/50 text-red-400 border border-red-700/50 font-medium">
+              🔴 RECUPERAÇÃO
+            </span>
+          )}
           {state.dry_run && (
             <span className="text-[10px] px-2 py-0.5 rounded bg-gray-700 text-gray-400">
               DRY RUN

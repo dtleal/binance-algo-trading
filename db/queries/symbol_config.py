@@ -41,6 +41,8 @@ async def get_symbol_config(pool: asyncpg.Pool, symbol: str):
         vol_filter=bool(row["vol_filter"]),
         interval=row["interval"],
         vwap_dist_stop=float(row["vwap_dist_stop"]),
+        leverage=row["leverage"] or 30,
+        mode=row["mode"] or "normal",
     )
 
     extras = {
@@ -54,6 +56,7 @@ async def get_symbol_config(pool: asyncpg.Pool, symbol: str):
         "be_r":               float(row["be_r"]) if row["be_r"] else None,
         "trail_step":         float(row["trail_step"]) if row["trail_step"] else None,
         "leverage":           row["leverage"] or 30,
+        "mode":               row["mode"] or "normal",
         "active":             row["active"],
     }
 
