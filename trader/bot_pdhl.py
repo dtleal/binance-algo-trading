@@ -253,8 +253,6 @@ class PDHLBot:
         return None
 
     def _fetch_exchange_precision(self):
-        if self.symbol in SYMBOL_CONFIGS:
-            return
         try:
             info = self._client.rest_api.exchange_information()
             for sym in info.data().symbols:

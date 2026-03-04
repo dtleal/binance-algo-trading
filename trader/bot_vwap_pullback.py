@@ -279,8 +279,6 @@ class VWAPPullbackBot:
 
     def _fetch_exchange_precision(self):
         """Fetch tick_size and step_size from Binance exchange info."""
-        if self.symbol in SYMBOL_CONFIGS:
-            return  # already resolved from pre-configured symbols
         try:
             info = self._client.rest_api.exchange_information()
             for sym in info.data().symbols:
