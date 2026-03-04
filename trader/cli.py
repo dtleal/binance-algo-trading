@@ -378,6 +378,8 @@ def main():
             max_trades_per_day=_resolve(extras.get("max_trades_per_day") if _db else None, args.max_trades, 4),
             interval=cfg.interval,
             vwap_dist_stop=cfg.vwap_dist_stop,
+            price_decimals=cfg.price_decimals if _db else None,
+            qty_decimals=cfg.qty_decimals if _db else None,
         )
         _run_async(bot.run())
 
@@ -420,6 +422,8 @@ def main():
             be_r=_resolve(extras.get("be_r") if _db else None, args.be_r, 2.0),
             trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, 0.5),
             interval=cfg.interval,
+            price_decimals=cfg.price_decimals if _db else None,
+            qty_decimals=cfg.qty_decimals if _db else None,
         )
         _run_async(bot.run())
 
@@ -441,6 +445,8 @@ def main():
             be_r=_resolve(extras.get("be_r") if _db else None, args.be_r, 2.0),
             trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, 0.5),
             interval=cfg.interval,
+            price_decimals=cfg.price_decimals if _db else None,
+            qty_decimals=cfg.qty_decimals if _db else None,
         )
         _run_async(bot.run())
 
@@ -462,6 +468,8 @@ def main():
             trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, 0.5),
             tp_pct=_resolve(cfg.tp_pct if _db else None, args.tp, None),
             interval=cfg.interval,
+            price_decimals=cfg.price_decimals if _db else None,
+            qty_decimals=cfg.qty_decimals if _db else None,
         )
         _run_async(bot.run())
 

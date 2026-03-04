@@ -97,6 +97,8 @@ class VWAPPullbackBot:
         vol_filter: bool = False,
         interval: str = "1m",
         vwap_dist_stop: float = 0.0,
+        price_decimals: int | None = None,
+        qty_decimals: int | None = None,
     ):
         self.symbol = symbol.upper()
         self.leverage = leverage
@@ -114,9 +116,15 @@ class VWAPPullbackBot:
         self._price_decimals = 4  # default, overridden from exchange info
         self._qty_decimals = 3    # default, overridden from exchange info
         self._qty_step = 0.001    # default
+        self._precision_from_db = False
 
-        # Override precision from pre-configured symbols if available
-        if self.symbol in SYMBOL_CONFIGS:
+        if price_decimals is not None and qty_decimals is not None:
+            # Values from DB — most accurate, skip Binance API call at startup
+            self._price_decimals = price_decimals
+            self._qty_decimals = qty_decimals
+            self._qty_step = 10 ** (-qty_decimals) if qty_decimals > 0 else 1
+            self._precision_from_db = True
+        elif self.symbol in SYMBOL_CONFIGS:
             cfg = SYMBOL_CONFIGS[self.symbol]
             self._price_decimals = cfg.price_decimals
             self._qty_decimals = cfg.qty_decimals
@@ -279,6 +287,8 @@ class VWAPPullbackBot:
 
     def _fetch_exchange_precision(self):
         """Fetch tick_size and step_size from Binance exchange info."""
+        if self._precision_from_db:
+            return
         try:
             info = self._client.rest_api.exchange_information()
             for sym in info.data().symbols:

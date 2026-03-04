@@ -83,6 +83,8 @@ class EMAScalpBot:
         be_r: float = 2.0,
         trail_step: float = 0.5,
         interval: str = "1m",
+        price_decimals: int | None = None,
+        qty_decimals: int | None = None,
     ):
         self.symbol = symbol.upper()
         self.leverage = leverage
@@ -99,8 +101,14 @@ class EMAScalpBot:
         self._price_decimals = 4
         self._qty_decimals = 3
         self._qty_step = 0.001
+        self._precision_from_db = False
 
-        if self.symbol in SYMBOL_CONFIGS:
+        if price_decimals is not None and qty_decimals is not None:
+            self._price_decimals = price_decimals
+            self._qty_decimals = qty_decimals
+            self._qty_step = 10 ** (-qty_decimals) if qty_decimals > 0 else 1
+            self._precision_from_db = True
+        elif self.symbol in SYMBOL_CONFIGS:
             cfg = SYMBOL_CONFIGS[self.symbol]
             self._price_decimals = cfg.price_decimals
             self._qty_decimals = cfg.qty_decimals
@@ -257,6 +265,8 @@ class EMAScalpBot:
         return None
 
     def _fetch_exchange_precision(self):
+        if self._precision_from_db:
+            return
         try:
             info = self._client.rest_api.exchange_information()
             for sym in info.data().symbols:
