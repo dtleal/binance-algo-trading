@@ -101,9 +101,10 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		(nohup poetry run python -m trader pullback --symbol zecusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader orb --symbol ksmusdt --leverage 30 > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pdhl --symbol magicusdt --leverage 30 > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader pullback --symbol aaveusdt --leverage 30 > /dev/null 2>&1 &)
+		(nohup poetry run python -m trader pullback --symbol aaveusdt --leverage 30 > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader bot --symbol thetausdt --leverage 30 > /dev/null 2>&1 &)
 	@sleep 3
-	@echo "$(GREEN)✅ Bots started — 23 bots loading config from DB$(NC)"
+	@echo "$(GREEN)✅ Bots started — 24 bots loading config from DB$(NC)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -128,8 +129,8 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo ""
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
-	@echo "$(BLUE)🤖 Active Bots:$(NC) 23 total"
-	@echo "   • 4 MomShort    — AXS, SAND, MANA, SOL"
+	@echo "$(BLUE)🤖 Active Bots:$(NC) 24 total"
+	@echo "   • 5 MomShort    — AXS, SAND, MANA, SOL, THETA"
 	@echo "   • 14 VWAPPullback — GALA, AVAX, DOGE, SHIB, XRP, ETH, XAU, XMR, UNI, APT, PEPE, DASH, ZEC, AAVE"
 	@echo "   • 4 PDHL        — LTC, LINK, BCH, MAGIC"
 	@echo "   • 1 ORB         — KSM"

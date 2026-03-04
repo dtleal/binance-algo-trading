@@ -521,6 +521,26 @@ AAVE_CONFIG = SymbolConfig(
     interval="5m",
 )
 
+THETA_CONFIG = SymbolConfig(
+    symbol="THETAUSDT",
+    asset="THETA",
+    tp_pct=3.0,         # Champion: 5m MomShort, +41.68% return (286 trades, 60.5% WR, maxDD=3.69%)
+    sl_pct=5.0,
+    min_bars=3,
+    confirm_bars=2,
+    vwap_prox=0.005,    # 0.5%
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=4,
+    qty_decimals=0,
+    vol_filter=True,
+    min_notional=5.0,
+    interval="5m",
+    vwap_dist_stop=0.02,  # exit if price >2% from VWAP in wrong direction
+)
+
 SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "AXSUSDT": AXS_CONFIG,
     "SANDUSDT": SAND_CONFIG,
@@ -545,6 +565,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "KSMUSDT": KSM_CONFIG,
     "MAGICUSDT": MAGIC_CONFIG,
     "AAVEUSDT": AAVE_CONFIG,
+    "THETAUSDT": THETA_CONFIG,
     # "PEPEUSDT": PEPE_CONFIG,  # Removed: Invalid symbol on Binance Futures API
 }
 

@@ -81,6 +81,7 @@ CHAMPION_INFO: dict[str, dict] = {
     "KSMUSDT":      {"strategy": "ORB",          "ret": 31.95,  "wr": 49.6,   "trades": 468,  "max_dd": 5.63},
     "MAGICUSDT":    {"strategy": "PDHL",         "ret": 90.75,  "wr": 53.9,   "trades": 618,  "max_dd": 11.76},
     "AAVEUSDT":     {"strategy": "VWAPPullback", "ret": 42.04,  "wr": 57.4,   "trades": 310,  "max_dd": 7.67},
+    "THETAUSDT":    {"strategy": "MomShort",     "ret": 41.68,  "wr": 60.5,   "trades": 286,  "max_dd": 3.69},
 }
 
 
