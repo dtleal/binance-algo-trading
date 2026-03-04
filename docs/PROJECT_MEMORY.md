@@ -146,6 +146,13 @@ It supports:
 - Startup validation failures inside bots (e.g., `min_notional`) also use the same structured Telegram message format.
 - Dashboard (`/bots`) now has a dedicated filter for recovery bots:
   - `Recuperação` filter shows only bots with `mode="monitoring"` (same criterion as red recovery badge).
+- Global Symbol filter now includes `RECOVERY` as first option:
+  - selecting it filters Overview/History to trades from symbols currently in recovery mode (`mode="monitoring"` in bot states).
+- Chat backend now supports two LLM providers:
+  - `CHAT_PROVIDER=openai|anthropic|auto` (default: `openai`)
+  - Anthropic key: `ANTHROPIC_API_KEY`
+  - OpenAI key: `OPENAI_API_KEY` (model via `OPENAI_CHAT_MODEL`, default `gpt-4.1-mini`)
+  - If OpenAI key is missing, backend falls back to Anthropic when available.
 - For symbols `ETHUSDT`, `GALAUSDT`, `SOLUSDT`, `XAUUSDT`, `1000SHIBUSDT`:
   - `symbol_configs.pos_size_pct = 0.40`
   - `leverage = 1`

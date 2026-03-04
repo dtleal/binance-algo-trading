@@ -6,7 +6,8 @@ export default function GlobalFilter() {
   const { bots } = useBotStates();
   const { strategies: dbStrategies } = useStrategies();
 
-  const symbols = ["ALL", ...Array.from(new Set(Object.values(bots).map(b => b.symbol)))];
+  const symbols = Array.from(new Set(Object.values(bots).map(b => b.symbol))).sort();
+  const symbolOptions = ["RECOVERY", "ALL", ...symbols];
   const strategies = ["ALL", ...dbStrategies.map(s => s.name)];
   const dateRanges = [1, 7, 30, 90];
   const today = new Date().toISOString().slice(0, 10);
@@ -49,11 +50,22 @@ export default function GlobalFilter() {
             className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white
               focus:outline-none focus:border-emerald-600 transition-colors"
           >
-            {symbols.map(s => (
-              <option key={s} value={s}>{s === "ALL" ? "All Symbols" : s}</option>
+            {symbolOptions.map(s => (
+              <option key={s} value={s}>
+                {s === "RECOVERY" ? "Recuperação" : s === "ALL" ? "All Symbols" : s}
+              </option>
             ))}
           </select>
         </div>
+
+        {/* Recovery quick hint */}
+        {filter.symbol === "RECOVERY" && (
+          <div className="w-full -mt-1">
+            <p className="text-[11px] text-red-400">
+              Filtrando apenas símbolos em recuperação (modo monitoring)
+            </p>
+          </div>
+        )}
 
         {/* Strategy filter */}
         <div className="flex-1 md:min-w-[150px]">
@@ -172,7 +184,7 @@ export default function GlobalFilter() {
           <span>Active filters:</span>
           {filter.symbol !== "ALL" && (
             <span className="px-2 py-1 bg-emerald-900/40 text-emerald-400 rounded">
-              {filter.symbol}
+              {filter.symbol === "RECOVERY" ? "Recuperação" : filter.symbol}
             </span>
           )}
           {filter.strategy !== "ALL" && (

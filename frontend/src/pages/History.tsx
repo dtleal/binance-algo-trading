@@ -50,20 +50,28 @@ export default function History() {
   const { trades, isLoading } = useTrades(globalFilter.dateRange, globalFilter.dateFrom, globalFilter.dateTo, globalFilter.strategy);
   const { bots } = useBotStates();
   const { positions } = usePositions();
+  const recoverySymbols = useMemo(
+    () => new Set(Object.values(bots).filter(b => b.mode === "monitoring").map(b => b.symbol)),
+    [bots]
+  );
 
   const activeBots = Object.values(bots).length;
   const openPositions = positions.length;
 
   const filtered = useMemo(() => {
     return trades.filter((t) => {
-      if (globalFilter.symbol !== "ALL" && t.symbol !== globalFilter.symbol) return false;
+      if (globalFilter.symbol === "RECOVERY") {
+        if (!recoverySymbols.has(t.symbol)) return false;
+      } else if (globalFilter.symbol !== "ALL" && t.symbol !== globalFilter.symbol) {
+        return false;
+      }
       if (globalFilter.side !== "ALL" && t.realized_pnl !== 0) {
         if (globalFilter.side === "LONG" && t.side !== "SELL") return false;
         if (globalFilter.side === "SHORT" && t.side !== "BUY") return false;
       }
       return true;
     });
-  }, [trades, globalFilter.symbol, globalFilter.side]);
+  }, [trades, globalFilter.symbol, globalFilter.side, recoverySymbols]);
 
   const [sort, setSort] = useState<{ key: keyof Trade; dir: 1 | -1 }>({
     key: "time", dir: -1,

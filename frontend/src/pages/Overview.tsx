@@ -118,10 +118,18 @@ export default function Overview() {
   const { positions } = usePositions();
   const { bots }      = useBotStates();
   const [pnlView, setPnlView] = useState<"trade" | "daily">("trade");
+  const recoverySymbols = useMemo(
+    () => new Set(Object.values(bots).filter(b => b.mode === "monitoring").map(b => b.symbol)),
+    [bots]
+  );
 
   const filteredTrades = useMemo(() => {
     return trades.filter(t => {
-      if (filter.symbol !== "ALL" && t.symbol !== filter.symbol) return false;
+      if (filter.symbol === "RECOVERY") {
+        if (!recoverySymbols.has(t.symbol)) return false;
+      } else if (filter.symbol !== "ALL" && t.symbol !== filter.symbol) {
+        return false;
+      }
       // Side filter applies to closing trades only; non-closing (pnl=0) are excluded from stats regardless
       if (filter.side !== "ALL" && t.realized_pnl !== 0) {
         // closing LONG = SELL side; closing SHORT = BUY side
@@ -130,7 +138,7 @@ export default function Overview() {
       }
       return true;
     });
-  }, [trades, filter.symbol, filter.side]);
+  }, [trades, filter.symbol, filter.side, recoverySymbols]);
 
   const totalEquity = summary?.total_equity ?? 0;
   const pnl24h = summary?.pnl_24h ?? 0;

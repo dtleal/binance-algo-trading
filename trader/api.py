@@ -1085,11 +1085,55 @@ async def send_telegram_alert(req: TelegramAlertRequest):
 
 @app.post("/api/chat")
 async def chat_endpoint(req: ChatRequest):
-    import anthropic as _anthropic
+    provider = os.getenv("CHAT_PROVIDER", "openai").lower().strip()
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
+    openai_key = os.getenv("OPENAI_API_KEY", "")
 
-    api_key = os.getenv("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return {"response": "⚠️ ANTHROPIC_API_KEY não configurada no .env"}
+    if provider == "openai":
+        if not openai_key:
+            return {"response": "⚠️ OPENAI_API_KEY não configurada no .env"}
+        return {"response": await _chat_with_openai(req, openai_key)}
+
+    if provider not in {"anthropic", "auto"}:
+        return {"response": f"⚠️ CHAT_PROVIDER inválido: {provider}. Use: anthropic, openai ou auto"}
+
+    if openai_key:
+        return {"response": await _chat_with_openai(req, openai_key)}
+    if anthropic_key:
+        return {"response": await _chat_with_anthropic(req, anthropic_key)}
+    return {"response": "⚠️ Configure OPENAI_API_KEY ou ANTHROPIC_API_KEY no .env"}
+
+
+async def _chat_execute_tool(name: str, inp: dict) -> dict:
+    try:
+        if name == "get_account_summary":
+            return await get_account_summary()
+        if name == "get_open_positions":
+            return await get_positions()
+        if name == "get_trading_performance":
+            return await _chat_get_trading_performance(**inp)
+        if name == "get_sweep_results":
+            return _chat_get_sweep_results(**inp)
+        if name == "get_bot_logs":
+            return _chat_get_bot_logs(**inp)
+        if name == "query_trades":
+            return await _chat_query_trades(**inp)
+        if name == "close_position":
+            _c = await get_client()
+            return await api_close_position(**inp)
+        if name == "move_stop_to_breakeven":
+            return await api_breakeven(**inp)
+        if name == "invert_position":
+            return await api_invert_position(**inp)
+        if name == "close_all_positions":
+            return await api_close_all_positions()
+        return {"error": f"Tool desconhecida: {name}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def _chat_with_anthropic(req: ChatRequest, api_key: str) -> str:
+    import anthropic as _anthropic
 
     client = _anthropic.Anthropic(api_key=api_key)
     history = req.history[-10:]
@@ -1107,53 +1151,97 @@ async def chat_endpoint(req: ChatRequest):
         )
 
         if resp.stop_reason == "end_turn":
-            text = next((b.text for b in resp.content if hasattr(b, "text")), "")
-            return {"response": text}
+            return next((b.text for b in resp.content if hasattr(b, "text")), "")
 
-        if resp.stop_reason == "tool_use":
-            messages.append({"role": "assistant", "content": resp.content})
-            tool_results = []
-            for block in resp.content:
-                if block.type != "tool_use":
-                    continue
-                try:
-                    inp = block.input
-                    if block.name == "get_account_summary":
-                        result = await get_account_summary()
-                    elif block.name == "get_open_positions":
-                        result = await get_positions()
-                    elif block.name == "get_trading_performance":
-                        result = await _chat_get_trading_performance(**inp)
-                    elif block.name == "get_sweep_results":
-                        result = _chat_get_sweep_results(**inp)
-                    elif block.name == "get_bot_logs":
-                        result = _chat_get_bot_logs(**inp)
-                    elif block.name == "query_trades":
-                        result = await _chat_query_trades(**inp)
-                    elif block.name == "close_position":
-                        _c = await get_client()
-                        result = await api_close_position(**inp)
-                    elif block.name == "move_stop_to_breakeven":
-                        result = await api_breakeven(**inp)
-                    elif block.name == "invert_position":
-                        result = await api_invert_position(**inp)
-                    elif block.name == "close_all_positions":
-                        result = await api_close_all_positions()
-                    else:
-                        result = {"error": f"Tool desconhecida: {block.name}"}
-                except Exception as e:
-                    result = {"error": str(e)}
+        if resp.stop_reason != "tool_use":
+            break
 
-                tool_results.append({
+        messages.append({"role": "assistant", "content": resp.content})
+        tool_results = []
+        for block in resp.content:
+            if block.type != "tool_use":
+                continue
+            result = await _chat_execute_tool(block.name, block.input or {})
+            tool_results.append(
+                {
                     "type": "tool_result",
                     "tool_use_id": block.id,
                     "content": json.dumps(result, default=str),
-                })
-            messages.append({"role": "user", "content": tool_results})
-        else:
-            break
+                }
+            )
+        messages.append({"role": "user", "content": tool_results})
+    return "Não foi possível gerar uma resposta."
 
-    return {"response": "Não foi possível gerar uma resposta."}
+
+def _openai_tools() -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {"type": "object", "properties": {}, "required": []}),
+            },
+        }
+        for t in _CHAT_TOOLS
+    ]
+
+
+async def _chat_with_openai(req: ChatRequest, api_key: str) -> str:
+    history = req.history[-10:]
+    messages: list[dict] = [{"role": "system", "content": _CHAT_SYSTEM}]
+    messages.extend(history)
+    messages.append({"role": "user", "content": req.message})
+
+    for _ in range(5):
+        payload = {
+            "model": os.getenv("OPENAI_CHAT_MODEL", "gpt-4.1-mini"),
+            "messages": messages,
+            "tools": _openai_tools(),
+            "tool_choice": "auto",
+        }
+        req_http = urllib.request.Request(
+            "https://api.openai.com/v1/chat/completions",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+        )
+        data = await asyncio.to_thread(lambda: json.loads(urllib.request.urlopen(req_http, timeout=20).read()))
+        choice = (data.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        tool_calls = msg.get("tool_calls") or []
+
+        if not tool_calls:
+            return msg.get("content") or "Não foi possível gerar uma resposta."
+
+        messages.append(
+            {
+                "role": "assistant",
+                "content": msg.get("content") or "",
+                "tool_calls": tool_calls,
+            }
+        )
+        for tc in tool_calls:
+            fn = tc.get("function") or {}
+            name = fn.get("name", "")
+            raw_args = fn.get("arguments") or "{}"
+            try:
+                inp = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+            except Exception:
+                inp = {}
+            result = await _chat_execute_tool(name, inp)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.get("id", ""),
+                    "name": name,
+                    "content": json.dumps(result, default=str),
+                }
+            )
+
+    return "Não foi possível gerar uma resposta."
 
 
 # ── WebSocket feed ─────────────────────────────────────────────────────────────
