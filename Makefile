@@ -83,7 +83,7 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		export REDIS_URL=redis://localhost:6379 && \
 		(nohup poetry run python -m trader bot      --symbol axsusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol sandusdt      > /dev/null 2>&1 &) && \
-		(nohup poetry run python -m trader bot      --symbol manausdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl     --symbol manausdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol solusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol galausdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol avaxusdt      > /dev/null 2>&1 &) && \
@@ -134,9 +134,9 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
 	@echo "$(BLUE)🤖 Active Bots:$(NC) 24 total"
-	@echo "   • 5 MomShort    — AXS, SAND, MANA, SOL, THETA"
+	@echo "   • 4 MomShort    — AXS, SAND, SOL, THETA"
 	@echo "   • 14 VWAPPullback — GALA, AVAX, DOGE, SHIB, XRP, ETH, XAU, XMR, UNI, APT, PEPE, DASH, ZEC, AAVE"
-	@echo "   • 4 PDHL        — LTC, LINK, BCH, MAGIC"
+	@echo "   • 5 PDHL        — LTC, LINK, BCH, MAGIC, MANA"
 	@echo "   • 1 ORB         — KSM"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
@@ -222,11 +222,11 @@ bot-sand: ## Run MomShort trading bot for SANDUSDT
 bot-sand-dry: ## Run SANDUSDT bot in dry-run mode
 	poetry run python -m trader bot --symbol sandusdt --dry-run --leverage $(LEVERAGE)
 
-bot-mana: ## Run MomShort trading bot for MANAUSDT
-	poetry run python -m trader bot --symbol manausdt --leverage $(LEVERAGE)
+bot-mana: ## Run PDHL bot for MANAUSDT (1m, tp=7% sl=1.5% cf=3)
+	poetry run python -m trader pdhl --symbol manausdt --leverage $(LEVERAGE)
 
-bot-mana-dry: ## Run MANAUSDT bot in dry-run mode
-	poetry run python -m trader bot --symbol manausdt --dry-run --leverage $(LEVERAGE)
+bot-mana-dry: ## Run MANAUSDT PDHL bot in dry-run mode
+	poetry run python -m trader pdhl --symbol manausdt --dry-run --leverage $(LEVERAGE)
 
 bot-gala: ## Run VWAPPullback trading bot for GALAUSDT
 	poetry run python -m trader pullback --symbol galausdt --leverage $(LEVERAGE)

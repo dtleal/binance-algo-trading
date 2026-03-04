@@ -8,9 +8,9 @@ Last updated: 2026-03-04
 
 ## Strategy Distribution
 
-- MomShort: 5 bots
+- MomShort: 4 bots
 - VWAPPullback: 14 bots
-- PDHL: 4 bots
+- PDHL: 5 bots
 - ORB: 1 bot
 
 Total: 24 bots
@@ -21,7 +21,7 @@ Total: 24 bots
 |---|---|---|---:|---:|---:|---:|---:|---|---:|---:|---|
 | AXSUSDT | MomShort | 1m | 10.0 | 5.0 | 3 | 2 | 0.005 | no | 0.40 | 30 | normal |
 | SANDUSDT | MomShort | 5m | 10.0 | 1.0 | 5 | 0 | 0.005 | yes | 0.40 | 30 | normal |
-| MANAUSDT | MomShort | 1m | 5.0 | 5.0 | 12 | 2 | 0.005 | yes | 0.40 | 30 | normal |
+| MANAUSDT | PDHL | 1m | 7.0 | 1.5 | 0 | 3 | 0.005 | no | 0.40 | 30 | normal |
 | SOLUSDT | MomShort | 1m | 7.0 | 5.0 | 8 | 0 | 0.002 | yes | 0.40 | 1 | monitoring |
 | THETAUSDT | MomShort | 5m | 3.0 | 5.0 | 3 | 2 | 0.005 | yes | 0.40 | 30 | normal |
 | GALAUSDT | VWAPPullback | 1m | 10.0 | 5.0 | 3 | 0 | 0.002 | no | 0.40 | 1 | monitoring |
@@ -49,3 +49,9 @@ Total: 24 bots
 - `PEPEUSDT` exists in config as `PEPE_CONFIG` but is intentionally not active in `SYMBOL_CONFIGS`.
 - Some bots run in `monitoring` mode with lower leverage/position size.
 - If `symbol_configs` in DB differs from Python config, runtime loads DB first and uses `trader/config.py` as fallback.
+
+## Portfolio Candidates (Onboarding)
+
+| Symbol | Candidate Strategy | TF | Return | Max DD | Source |
+|---|---|---|---:|---:|---|
+| MANAUSDT | PDHL | 1m | +95.61% | 13.87% | `data/sweeps/manausdt_1m_sweep.csv` |

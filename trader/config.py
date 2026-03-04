@@ -104,18 +104,18 @@ SAND_CONFIG = SymbolConfig(
 MANA_CONFIG = SymbolConfig(
     symbol="MANAUSDT",
     asset="MANA",
-    tp_pct=5.0,         # Champion: 1m MomShort, +30.54% return (295 trades, 52.9% WR)
-    sl_pct=5.0,
-    min_bars=12,
-    confirm_bars=2,
-    vwap_prox=0.005,    # 0.5%
+    tp_pct=7.0,         # Champion: 1m PDHL, +95.61% return (920 trades, 37.4% WR, maxDD=13.87%)
+    sl_pct=1.5,
+    min_bars=0,
+    confirm_bars=3,
+    vwap_prox=0.000,    # PDHL uses pdhl_prox_pct from DB; keep neutral in fallback config
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
     pos_size_pct=0.40,  # 40% per trade
     price_decimals=4,
     qty_decimals=0,
-    vol_filter=True,
+    vol_filter=False,
     interval="1m",
 )
 

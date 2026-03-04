@@ -88,14 +88,17 @@ It supports:
 - MANA (`docs/STRATEGY_MANAUSDT.md`):
   - MomShort, TP 5%, SL 5%, min_bars 12, confirm 2, vwap_prox 0.5%, vol_filter ON in sweep champion.
   - Balanced win-rate profile with moderate drawdown.
+  - New onboarding sweep (2026-03-04, 365d) produced stronger PDHL candidate:
+    - PDHL 1m: +95.61% return, maxDD 13.87%, 920 trades
+    - source: `data/sweeps/manausdt_1m_sweep.csv`
 
 ## Active Bot Portfolio (Current)
 
 - Total active bots: 24
 - Strategy split:
-  - MomShort: 5
+  - MomShort: 4
   - VWAPPullback: 14
-  - PDHL: 4
+  - PDHL: 5
   - ORB: 1
 - Canonical roster and params:
   - `docs/ACTIVE_BOTS.md`
@@ -159,6 +162,13 @@ It supports:
   - `symbol_configs.pos_size_pct = 0.40`
   - `leverage = 1`
   - This avoids low notional startup failures with small account balances.
+- `MANAUSDT` was migrated from `MomShort` to `PDHL` in runtime portfolio:
+  - DB `symbol_configs` updated to:
+    - `strategy_name=PDHL`, `interval=1m`
+    - `tp_pct=7.0`, `sl_pct=1.5`, `confirm_bars=3`
+    - `pdhl_prox_pct=0.005`, `vwap_dist_stop=0.03`
+    - `champion_return_pct=95.61`, `champion_max_dd=13.87`
+  - `make bots` now starts `manausdt` via `python -m trader pdhl --symbol manausdt`.
 - Phase 1 of position risk guard started for live bots (excluding `VWAPPullback-v2` by explicit decision):
   - Bots updated: `MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`.
   - New deterministic early-exit params (constructor defaults):
