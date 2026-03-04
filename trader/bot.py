@@ -37,6 +37,13 @@ def _parse_proxy(url: str) -> dict | None:
     return {"protocol": parsed.scheme, "host": parsed.hostname, "port": parsed.port}
 
 
+def _decimals_from_step(step_str: str) -> int:
+    step_str = step_str.rstrip("0")
+    if "." not in step_str:
+        return 0
+    return len(step_str.split(".")[1])
+
+
 GREEN = "\033[92m"
 RED = "\033[91m"
 YELLOW = "\033[93m"
@@ -73,6 +80,11 @@ class MomShortBot:
         self.leverage = leverage
         self.capital = capital
         self.dry_run = dry_run
+
+        # Precision (runtime-adjusted from exchange info at startup)
+        self._price_decimals = cfg.price_decimals
+        self._qty_decimals = cfg.qty_decimals
+        self._qty_step = 10 ** (-cfg.qty_decimals) if cfg.qty_decimals > 0 else 1.0
 
         self._client = None
         if not dry_run:
@@ -133,6 +145,7 @@ class MomShortBot:
         self._eod_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
         self._uds_task: asyncio.Task | None = None
+        self._heartbeat_task: asyncio.Task | None = None
 
         # Dashboard integration
         self._reg_key = f"{self.symbol}:momshort"
@@ -238,15 +251,55 @@ class MomShortBot:
     # ------------------------------------------------------------------
 
     def _round_price(self, price: float) -> float:
-        factor = 10 ** self.cfg.price_decimals
+        factor = 10 ** self._price_decimals
         return math.floor(price * factor) / factor
 
     def _round_qty(self, qty: float) -> float:
-        decimals = self.cfg.qty_decimals
-        if decimals == 0:
+        if self._qty_decimals == 0:
             return float(int(math.floor(qty)))
-        step = 10 ** (-decimals)
-        return math.floor(qty / step) * step
+        return math.floor(qty / self._qty_step) * self._qty_step
+
+    def _fmt_qty(self, qty: float) -> str:
+        if self._qty_decimals == 0:
+            return str(int(qty))
+        return f"{qty:.{self._qty_decimals}f}"
+
+    def _fmt_price(self, price: float) -> str:
+        return f"{price:.{self._price_decimals}f}"
+
+    def _fetch_exchange_precision(self):
+        """Refresh precision/min notional from Binance filters for the current symbol."""
+        try:
+            info = self._client.rest_api.exchange_information()
+            for sym in info.data().symbols:
+                if sym.symbol != self.symbol:
+                    continue
+                for f in sym.filters:
+                    if f.get("filterType") == "PRICE_FILTER":
+                        self._price_decimals = _decimals_from_step(f["tickSize"])
+                    elif f.get("filterType") == "LOT_SIZE":
+                        self._qty_decimals = _decimals_from_step(f["stepSize"])
+                        step = float(f["stepSize"])
+                        self._qty_step = step if step > 0 else 1.0
+                    elif f.get("filterType") == "MIN_NOTIONAL":
+                        self.cfg = self.cfg.__class__(**{
+                            **self.cfg.__dict__,
+                            "min_notional": float(f.get("notional", self.cfg.min_notional)),
+                        })
+                logger.info(
+                    f"Exchange precision for {self.symbol}: "
+                    f"price_decimals={self._price_decimals}, "
+                    f"qty_decimals={self._qty_decimals}"
+                )
+                return
+            logger.info(
+                f"{YELLOW}Symbol '{self.symbol}' not found in exchange info; "
+                f"using configured precision values{RESET}"
+            )
+        except Exception as e:
+            logger.info(
+                f"{YELLOW}Could not fetch exchange precision: {e} — using configured defaults{RESET}"
+            )
 
     # ------------------------------------------------------------------
     # REST helpers
@@ -357,6 +410,9 @@ class MomShortBot:
         )
         logger.info("-" * 60)
 
+        if not self.dry_run:
+            self._fetch_exchange_precision()
+
         self._check_startup_position()
         self._resolve_capital()
 
@@ -402,6 +458,12 @@ class MomShortBot:
             },
             "dry_run": self.dry_run,
         })
+        self._heartbeat_task = asyncio.create_task(
+            _registry.heartbeat_loop(
+                self._reg_key,
+                {"symbol": self.symbol, "strategy": "momshort", "state": self._state.name, "dry_run": self.dry_run},
+            )
+        )
 
         # Schedule EOD timer
         self._schedule_eod()
@@ -462,6 +524,8 @@ class MomShortBot:
                 self._eod_task.cancel()
             if self._monitor_task and not self._monitor_task.done():
                 self._monitor_task.cancel()
+            if self._heartbeat_task and not self._heartbeat_task.done():
+                self._heartbeat_task.cancel()
             if stream:
                 try:
                     await stream.unsubscribe()
@@ -695,7 +759,7 @@ class MomShortBot:
                 symbol=self.symbol,
                 side="SELL",
                 type="MARKET",
-                quantity=qty,
+                quantity=self._fmt_qty(qty),
                 new_order_resp_type="RESULT",
             )
             sell_data = sell_resp.data()
@@ -721,7 +785,7 @@ class MomShortBot:
                 symbol=self.symbol,
                 side="BUY",
                 type="STOP_MARKET",
-                trigger_price=self._sl_price,
+                trigger_price=self._fmt_price(self._sl_price),
                 close_position="true",
             )
             logger.info(
@@ -735,7 +799,7 @@ class MomShortBot:
                 symbol=self.symbol,
                 side="BUY",
                 type="TAKE_PROFIT_MARKET",
-                trigger_price=self._tp_price,
+                trigger_price=self._fmt_price(self._tp_price),
                 close_position="true",
             )
             logger.info(
@@ -926,7 +990,7 @@ class MomShortBot:
                 symbol=self.symbol,
                 side="BUY",
                 type="MARKET",
-                quantity=qty,
+                quantity=self._fmt_qty(qty),
                 reduce_only="true",
                 new_order_resp_type="RESULT",
             )

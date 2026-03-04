@@ -1,6 +1,8 @@
 """Shared registry of running bot states (Redis-based for multi-process, production-grade)."""
+import asyncio
 import json
 import os
+import time
 from typing import Any
 
 import redis
@@ -8,6 +10,8 @@ import redis
 
 # Redis connection (lazy init)
 _redis_client: redis.Redis | None = None
+REGISTRY_TTL_SEC = int(os.getenv("BOT_REGISTRY_TTL_SEC", "7200"))
+HEARTBEAT_INTERVAL_SEC = int(os.getenv("BOT_HEARTBEAT_INTERVAL_SEC", "10"))
 
 
 def _get_redis() -> redis.Redis:
@@ -28,10 +32,11 @@ def update(key: str, patch: dict[str, Any]) -> None:
         existing = json.loads(existing_json) if existing_json else {}
         # Merge patch
         updated = {**existing, **patch}
+        updated["heartbeat_ts"] = int(time.time())
         # Store back
         r.hset("bot:states", key, json.dumps(updated, default=str))
-        # Set TTL on the hash (auto-cleanup stale bots after 5 minutes of no updates)
-        r.expire("bot:states", 300)
+        # Keep hash alive as long as at least one bot is publishing state.
+        r.expire("bot:states", REGISTRY_TTL_SEC)
     except (redis.RedisError, json.JSONDecodeError):
         # Graceful degradation - if Redis is down, silently fail
         pass
@@ -54,3 +59,14 @@ def remove(key: str) -> None:
         r.hdel("bot:states", key)
     except redis.RedisError:
         pass
+
+
+async def heartbeat_loop(
+    key: str,
+    base_patch: dict[str, Any],
+    interval_sec: int = HEARTBEAT_INTERVAL_SEC,
+) -> None:
+    """Publish lightweight heartbeat updates for long candle intervals."""
+    while True:
+        update(key, base_patch)
+        await asyncio.sleep(interval_sec)

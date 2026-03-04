@@ -169,6 +169,12 @@ It supports:
     - `pdhl_prox_pct=0.005`, `vwap_dist_stop=0.03`
     - `champion_return_pct=95.61`, `champion_max_dd=13.87`
   - `make bots` now starts `manausdt` via `python -m trader pdhl --symbol manausdt`.
+- `MomShort` precision handling was hardened for order placement:
+  - `trader/bot.py` now fetches exchange filters (`PRICE_FILTER`/`LOT_SIZE`) at startup
+    and uses them to format `quantity` and `trigger_price`.
+  - This prevents Binance error `-1111` (`Precision is over the maximum`) on symbols with
+    stricter lot-size precision (e.g., `SOLUSDT`).
+  - Fallback config for `SOLUSDT` was aligned to `qty_decimals=1` in `trader/config.py`.
 - Phase 1 of position risk guard started for live bots (excluding `VWAPPullback-v2` by explicit decision):
   - Bots updated: `MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`.
   - New deterministic early-exit params (constructor defaults):
@@ -182,3 +188,14 @@ It supports:
     - `Time stop` (no progress after X minutes)
     - `Adverse momentum` (consecutive adverse candles with minimum body, only when `PnL% < 0`)
   - Position-guard state is reset on position close/error/EOD paths to avoid stale carry-over.
+- Bot registry heartbeat/TTL was hardened to keep `/api/bot_states` stable for long-candle bots:
+  - `trader/bot_registry.py` now stamps `heartbeat_ts` on every registry update.
+  - New async helper `heartbeat_loop()` publishes lightweight Redis heartbeat updates.
+  - Live bots (`MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`, `VWAPPullback-v2`) now start a background heartbeat task at startup and cancel it on shutdown.
+  - Default registry settings:
+    - `BOT_HEARTBEAT_INTERVAL_SEC=10`
+    - `BOT_REGISTRY_TTL_SEC=7200`
+  - This prevents the `bot:states` hash from expiring between sparse candles (e.g., 1h interval bots).
+- Docker Postgres healthcheck now targets the configured DB explicitly:
+  - `pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}`
+  - Prevents recurring Postgres log spam like `FATAL: database "trader" does not exist`.

@@ -182,6 +182,7 @@ class EMAScalpBot:
         self._eod_task: asyncio.Task | None = None
         self._monitor_task: asyncio.Task | None = None
         self._uds_task: asyncio.Task | None = None
+        self._heartbeat_task: asyncio.Task | None = None
 
         self._reg_key = f"{self.symbol}:ema_scalp"
 
@@ -562,6 +563,12 @@ class EMAScalpBot:
             },
             "dry_run": self.dry_run,
         })
+        self._heartbeat_task = asyncio.create_task(
+            _registry.heartbeat_loop(
+                self._reg_key,
+                {"symbol": self.symbol, "strategy": "ema_scalp", "state": self._state.name, "dry_run": self.dry_run},
+            )
+        )
 
         self._schedule_eod()
 
@@ -616,6 +623,8 @@ class EMAScalpBot:
                 self._eod_task.cancel()
             if self._monitor_task and not self._monitor_task.done():
                 self._monitor_task.cancel()
+            if self._heartbeat_task and not self._heartbeat_task.done():
+                self._heartbeat_task.cancel()
             if stream:
                 try:
                     await stream.unsubscribe()
