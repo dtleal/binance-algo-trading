@@ -4,6 +4,7 @@ import asyncio
 import collections
 import logging
 import math
+import os
 import re
 import sys
 import time
@@ -180,6 +181,11 @@ class PDHLBot:
         self.time_stop_min_progress_pct = time_stop_min_progress_pct
         self.adverse_exit_bars = adverse_exit_bars
         self.adverse_body_min_pct = adverse_body_min_pct
+        self._prefer_maker = os.getenv("PREFER_MAKER_EXECUTION", "1").strip().lower() not in {"0", "false", "no", "off"}
+        self._maker_price_offset_pct = max(0.0, float(os.getenv("MAKER_PRICE_OFFSET_PCT", "0.0002")))
+        self._maker_entry_timeout_sec = max(0.5, float(os.getenv("MAKER_ENTRY_TIMEOUT_SEC", "8")))
+        self._maker_exit_timeout_sec = max(0.5, float(os.getenv("MAKER_EXIT_TIMEOUT_SEC", "6")))
+        self._maker_poll_interval_sec = max(0.1, float(os.getenv("MAKER_POLL_INTERVAL_SEC", "0.4")))
 
         # Background tasks
         self._eod_task: asyncio.Task | None = None
@@ -206,6 +212,39 @@ class PDHLBot:
         self._adverse_count = 0
         self._risk_exit_pending = False
         self._be_triggered = False
+
+    def _maker_limit_price(self, reference_price: float, side: str) -> float:
+        if side.upper() == "BUY":
+            raw = reference_price * (1 - self._maker_price_offset_pct)
+        else:
+            raw = reference_price * (1 + self._maker_price_offset_pct)
+        return self._safe_trigger_price(raw)
+
+    async def _wait_for_position_open(self, timeout_sec: float, direction: str) -> dict | None:
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            pos = self._get_position()
+            if pos:
+                amt = float(pos["position_amt"])
+                if (direction == "long" and amt > 0) or (direction == "short" and amt < 0):
+                    return pos
+            await asyncio.sleep(self._maker_poll_interval_sec)
+        pos = self._get_position()
+        if pos:
+            amt = float(pos["position_amt"])
+            if (direction == "long" and amt > 0) or (direction == "short" and amt < 0):
+                return pos
+        return None
+
+    async def _wait_for_position_closed(self, timeout_sec: float) -> bool:
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            pos = self._get_position()
+            if pos is None or pos["position_amt"] == 0:
+                return True
+            await asyncio.sleep(self._maker_poll_interval_sec)
+        pos = self._get_position()
+        return pos is None or pos["position_amt"] == 0
 
     def _position_guard_reason(
         self,
@@ -641,6 +680,10 @@ class PDHLBot:
 
         try:
             try:
+                self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+            except BadRequestError:
+                pass
+            try:
                 self._client.rest_api.cancel_all_algo_open_orders(symbol=self.symbol)
             except BadRequestError:
                 pass
@@ -654,13 +697,14 @@ class PDHLBot:
                 close_position="true",
             )
             if self._tp_price > 0:
-                self._client.rest_api.new_algo_order(
-                    algo_type="CONDITIONAL",
+                self._client.rest_api.new_order(
                     symbol=self.symbol,
                     side=close_side,
-                    type="TAKE_PROFIT_MARKET",
-                    trigger_price=self._tp_price,
-                    close_position="true",
+                    type="LIMIT",
+                    time_in_force="GTX",
+                    price=self._tp_price,
+                    quantity=self._fmt_qty(self._position_qty),
+                    reduce_only="true",
                 )
             _registry.update(self._reg_key, {"sl_price": new_sl, "tp_price": self._tp_price or None})
             notify_stop_loss_updated(
@@ -700,7 +744,8 @@ class PDHLBot:
             f"prox={self._signal.prox_pct*100:.2f}% confirm={self._signal.confirm_bars} | "
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
             f"Max trades/day: {self._signal.max_trades_per_day} | "
-            f"WS stale watchdog: {self._ws_stale_after_sec}s"
+            f"WS stale watchdog: {self._ws_stale_after_sec}s | "
+            f"Maker mode: {'ON' if self._prefer_maker else 'OFF'}"
         )
         logger.info("-" * 60)
 
@@ -1207,18 +1252,54 @@ class PDHLBot:
                 symbol=self.symbol, leverage=self.leverage
             )
 
-            order_resp = self._client.rest_api.new_order(
-                symbol=self.symbol,
-                side=side,
-                type="MARKET",
-                quantity=self._fmt_qty(qty),
-                new_order_resp_type="RESULT",
-            )
-            order_data = order_resp.data()
-            avg_price = self._resolve_avg_fill_price(order_data, entry_price)
-            executed_qty = self._positive_float(getattr(order_data, "executed_qty", None)) or qty
+            avg_price = entry_price
+            executed_qty = 0.0
+            execution_mode = "market"
+            order_id = None
+
+            if self._prefer_maker:
+                maker_price = self._maker_limit_price(entry_price, side)
+                maker_resp = self._client.rest_api.new_order(
+                    symbol=self.symbol,
+                    side=side,
+                    type="LIMIT",
+                    time_in_force="GTX",
+                    price=maker_price,
+                    quantity=self._fmt_qty(qty),
+                    new_order_resp_type="RESULT",
+                )
+                maker_data = maker_resp.data()
+                order_id = getattr(maker_data, "order_id", None)
+                logger.info(
+                    f"{CYAN}Maker entry posted @ ${maker_price:.{self._price_decimals}f} "
+                    f"(timeout {self._maker_entry_timeout_sec:.1f}s){RESET}"
+                )
+                pos = await self._wait_for_position_open(self._maker_entry_timeout_sec, direction)
+                if pos:
+                    execution_mode = "maker"
+                    avg_price = float(pos["entry_price"])
+                    executed_qty = abs(float(pos["position_amt"]))
+                else:
+                    try:
+                        self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                    except Exception:
+                        pass
+                    logger.info(f"{YELLOW}Maker entry timeout — fallback MARKET{RESET}")
+
             if executed_qty <= 0:
-                raise RuntimeError(f"Invalid executed quantity for {self.symbol}: {executed_qty}")
+                order_resp = self._client.rest_api.new_order(
+                    symbol=self.symbol,
+                    side=side,
+                    type="MARKET",
+                    quantity=self._fmt_qty(qty),
+                    new_order_resp_type="RESULT",
+                )
+                order_data = order_resp.data()
+                avg_price = self._resolve_avg_fill_price(order_data, entry_price)
+                executed_qty = self._positive_float(getattr(order_data, "executed_qty", None)) or qty
+                order_id = getattr(order_data, "order_id", None)
+                if executed_qty <= 0:
+                    raise RuntimeError(f"Invalid executed quantity for {self.symbol}: {executed_qty}")
 
             self._direction = direction
             self._entry_price = avg_price
@@ -1235,7 +1316,7 @@ class PDHLBot:
             color = GREEN if direction == "long" else RED
             logger.info(
                 f"{color}{side} {executed_qty} {self.symbol} @ ${avg_price:.{self._price_decimals}f} | "
-                f"Order ID: {order_data.order_id}{RESET}"
+                f"Order ID: {order_id} | exec={execution_mode.upper()}{RESET}"
             )
 
             sl_side = "SELL" if direction == "long" else "BUY"
@@ -1255,17 +1336,20 @@ class PDHLBot:
             if tp_price is not None:
                 self._tp_price = tp_price
                 tp_side = "SELL" if direction == "long" else "BUY"
-                tp_resp = self._client.rest_api.new_algo_order(
-                    algo_type="CONDITIONAL",
+                tp_resp = self._client.rest_api.new_order(
                     symbol=self.symbol,
                     side=tp_side,
-                    type="TAKE_PROFIT_MARKET",
-                    trigger_price=self._tp_price,
-                    close_position="true",
+                    type="LIMIT",
+                    time_in_force="GTX",
+                    price=self._tp_price,
+                    quantity=self._fmt_qty(executed_qty),
+                    reduce_only="true",
+                    new_order_resp_type="RESULT",
                 )
+                tp_data = tp_resp.data()
                 logger.info(
                     f"{color}TP placed @ ${self._tp_price} | "
-                    f"Algo ID: {tp_resp.data().algo_id}{RESET}"
+                    f"Order ID: {getattr(tp_data, 'order_id', None)}{RESET}"
                 )
 
             self._state = _State.IN_POSITION
@@ -1445,19 +1529,63 @@ class PDHLBot:
                 self._sl_milestone = 0
                 return
 
-            qty = self._fmt_qty(abs(pos["position_amt"]))
+            qty_float = abs(pos["position_amt"])
+            qty = self._fmt_qty(qty_float)
             close_side = "SELL" if self._direction == "long" else "BUY"
+            close_mode = "market"
+            avg_price = 0.0
 
-            close_resp = self._client.rest_api.new_order(
-                symbol=self.symbol,
-                side=close_side,
-                type="MARKET",
-                quantity=qty,
-                reduce_only="true",
-                new_order_resp_type="RESULT",
-            )
-            close_data = close_resp.data()
-            avg_price = float(close_data.avg_price) if close_data.avg_price else 0
+            if self._prefer_maker:
+                ref_price = self._entry_price
+                try:
+                    price_resp = self._client.rest_api.symbol_price_ticker(symbol=self.symbol)
+                    price_data = price_resp.data()
+                    if hasattr(price_data, "actual_instance"):
+                        ref_price = float(price_data.actual_instance.price)
+                    else:
+                        ref_price = float(price_data.price)
+                except Exception:
+                    pass
+                maker_close_price = self._maker_limit_price(ref_price, close_side)
+                self._client.rest_api.new_order(
+                    symbol=self.symbol,
+                    side=close_side,
+                    type="LIMIT",
+                    time_in_force="GTX",
+                    price=maker_close_price,
+                    quantity=qty,
+                    reduce_only="true",
+                    new_order_resp_type="RESULT",
+                )
+                logger.info(
+                    f"{CYAN}EOD maker close posted @ ${maker_close_price:.{self._price_decimals}f} "
+                    f"(timeout {self._maker_exit_timeout_sec:.1f}s){RESET}"
+                )
+                if await self._wait_for_position_closed(self._maker_exit_timeout_sec):
+                    close_mode = "maker"
+                    avg_price = maker_close_price
+                else:
+                    try:
+                        self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                    except Exception:
+                        pass
+                    logger.info(f"{YELLOW}EOD maker timeout — fallback MARKET{RESET}")
+
+            if close_mode != "maker":
+                pos = self._get_position()
+                if pos is not None and pos["position_amt"] != 0:
+                    qty_float = abs(pos["position_amt"])
+                    qty = self._fmt_qty(qty_float)
+                    close_resp = self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side=close_side,
+                        type="MARKET",
+                        quantity=qty,
+                        reduce_only="true",
+                        new_order_resp_type="RESULT",
+                    )
+                    close_data = close_resp.data()
+                    avg_price = float(close_data.avg_price) if close_data.avg_price else 0
 
             if self._direction == "long":
                 pnl = (avg_price - self._entry_price) * self._position_qty
@@ -1467,7 +1595,8 @@ class PDHLBot:
             color = GREEN if pnl >= 0 else RED
             logger.info(
                 f"{color}EOD closed {qty} {self.symbol} ({self._direction}) "
-                f"@ ${avg_price:.{self._price_decimals}f} | P&L: ${pnl:+.2f}{RESET}"
+                f"@ ${avg_price:.{self._price_decimals}f} | P&L: ${pnl:+.2f} | "
+                f"exec={close_mode.upper()}{RESET}"
             )
             notify_eod_close(
                 self.symbol, self._direction or "", self._entry_price, avg_price, pnl

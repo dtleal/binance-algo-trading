@@ -234,6 +234,11 @@ It supports:
     - `/bots` configuration panel now allows editing/saving `be_profit_usd` per symbol.
   - Runtime note:
     - Changing `be_profit_usd` through UI updates DB/state display immediately, but running bot processes need restart to apply new threshold internally.
+- `LDOUSDT` (PDHL) was added to DB runtime config (`symbol_configs`):
+  - `strategy_name=PDHL`, `interval=1m`
+  - `tp_pct=7.0`, `sl_pct=2.0`, `confirm_bars=1`
+  - `pos_size_pct=0.40`, `leverage=30`, `mode=normal`
+  - `pdhl_prox_pct=0.000`, `be_profit_usd=0.50`
 - PostgreSQL default database naming was migrated to the new project convention:
   - Physical DB rename executed: `binance_trader` -> `binance_algo_trading` (data preserved).
   - Local defaults/config references were aligned to `binance_algo_trading` in:
@@ -265,3 +270,18 @@ It supports:
     `state=IN_POSITION` plus direction/qty/entry/SL/TP to `bot:states` right away.
   - This removes the stale `SCANNING` window after reboot (especially critical for 1h bots
     like `MAGICUSDT`, which previously waited until next candle to reflect open positions in `/bots`).
+- Maker-first execution mode was introduced for live active bots:
+  - Bots updated: `MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`.
+  - Entry flow now prefers maker (`LIMIT` + `GTX` / post-only) and falls back to `MARKET`
+    only after timeout if not filled.
+  - EOD and early-protection closes now also try maker reduce-only `LIMIT` first,
+    then fall back to reduce-only `MARKET` on timeout.
+  - `STOP_MARKET` is retained only for critical protection (hard SL / breakeven SL updates).
+  - Fixed TP orders for `MomShort`, `VWAPPullback` and `PDHL` (when `tp_pct` is configured)
+    were changed from `TAKE_PROFIT_MARKET` to maker reduce-only `LIMIT`.
+  - New env knobs (all bots above):
+    - `PREFER_MAKER_EXECUTION` (default `1`)
+    - `MAKER_PRICE_OFFSET_PCT` (default `0.0002`)
+    - `MAKER_ENTRY_TIMEOUT_SEC` (default `8`)
+    - `MAKER_EXIT_TIMEOUT_SEC` (default `6`)
+    - `MAKER_POLL_INTERVAL_SEC` (default `0.4`)
