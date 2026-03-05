@@ -420,6 +420,19 @@ class MomShortBot:
                 f"{self._position_qty} {self.asset} @ ${self._entry_price:.4f} | "
                 f"SL ${self._sl_price} | TP ${self._tp_price}{RESET}"
             )
+            _registry.update(self._reg_key, {
+                "symbol": self.symbol,
+                "strategy": "momshort",
+                "state": self._state.name,
+                "direction": "SHORT",
+                "entry_price": self._entry_price,
+                "sl_price": self._sl_price,
+                "tp_price": self._tp_price,
+                "position_qty": self._position_qty,
+                "price": pos["mark_price"],
+                "unrealized_pnl": round(pos["unrealized_profit"], 4),
+                "dry_run": self.dry_run,
+            })
             # Start fill monitor so we detect SL/TP closure
             self._monitor_task = asyncio.get_event_loop().create_task(
                 self._monitor_position_fill()
@@ -543,7 +556,7 @@ class MomShortBot:
         self._heartbeat_task = asyncio.create_task(
             _registry.heartbeat_loop(
                 self._reg_key,
-                {"symbol": self.symbol, "strategy": "momshort", "state": self._state.name, "dry_run": self.dry_run},
+                {"symbol": self.symbol, "strategy": "momshort", "dry_run": self.dry_run},
             )
         )
 

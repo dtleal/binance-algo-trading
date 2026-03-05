@@ -543,6 +543,18 @@ class PDHLBot:
             f"{self._position_qty} {self.symbol} @ ${self._entry_price:.{self._price_decimals}f} | "
             f"SL ${self._sl_price} | R=${self._r_value:.{self._price_decimals}f} (trailing){RESET}"
         )
+        _registry.update(self._reg_key, {
+            "symbol": self.symbol,
+            "strategy": "pdhl",
+            "state": self._state.name,
+            "direction": self._direction,
+            "entry_price": self._entry_price,
+            "sl_price": self._sl_price,
+            "tp_price": self._tp_price or None,
+            "position_qty": self._position_qty,
+            "unrealized_pnl": round(pos["unrealized_profit"], 4),
+            "dry_run": self.dry_run,
+        })
         self._monitor_task = asyncio.get_event_loop().create_task(
             self._monitor_position_fill()
         )
@@ -665,7 +677,7 @@ class PDHLBot:
         self._heartbeat_task = asyncio.create_task(
             _registry.heartbeat_loop(
                 self._reg_key,
-                {"symbol": self.symbol, "strategy": "pdhl", "state": self._state.name, "dry_run": self.dry_run},
+                {"symbol": self.symbol, "strategy": "pdhl", "dry_run": self.dry_run},
             )
         )
 

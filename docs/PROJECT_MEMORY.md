@@ -239,3 +239,13 @@ It supports:
   - Exchange precision parsing was made SDK-object-safe:
     - filter parsing no longer assumes dict (`f.get(...)`) and now supports object attributes.
     - avoids precision-fetch fallback warnings and reduces `-1111` precision failures.
+- Bot heartbeat state overwrite bug was fixed in registry publishing:
+  - Heartbeat loops for `MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`, `VWAPPullback-v2`
+    no longer send static `state` captured at startup.
+  - Root cause: heartbeat was repeatedly overwriting runtime state (e.g., forcing `SCANNING`)
+    and hiding real open positions in `/bots` for symbols that opened trades after startup.
+- Startup position reconciliation now updates Redis registry immediately:
+  - On restart, when a bot resumes an already-open Binance position, it now publishes
+    `state=IN_POSITION` plus direction/qty/entry/SL/TP to `bot:states` right away.
+  - This removes the stale `SCANNING` window after reboot (especially critical for 1h bots
+    like `MAGICUSDT`, which previously waited until next candle to reflect open positions in `/bots`).
