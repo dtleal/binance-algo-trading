@@ -6,6 +6,7 @@ import logging
 import math
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from enum import Enum, auto
 
@@ -98,6 +99,9 @@ class PDHLBot:
         self.tp_pct = tp_pct
         self.min_notional = 5.0
         self.interval = interval
+        self._ws_reconnect_delay_sec = 5
+        self._ws_stale_after_sec = self._compute_ws_stale_after_sec(interval)
+        self._last_closed_candle_monotonic = time.monotonic()
 
         self._price_decimals = 4
         self._qty_decimals = 3
@@ -303,6 +307,74 @@ class PDHLBot:
             return str(int(qty))
         return f"{qty:.{self._qty_decimals}f}"
 
+    @staticmethod
+    def _get_filter_field(filter_obj, camel_name: str, snake_name: str | None = None):
+        if isinstance(filter_obj, dict):
+            if camel_name in filter_obj:
+                return filter_obj.get(camel_name)
+            if snake_name:
+                return filter_obj.get(snake_name)
+            return None
+        if hasattr(filter_obj, camel_name):
+            return getattr(filter_obj, camel_name)
+        if snake_name and hasattr(filter_obj, snake_name):
+            return getattr(filter_obj, snake_name)
+        return None
+
+    @staticmethod
+    def _positive_float(value) -> float | None:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed > 0:
+            return parsed
+        return None
+
+    def _safe_trigger_price(self, raw_price: float) -> float:
+        rounded = self._round_price(raw_price)
+        if rounded > 0:
+            return rounded
+        min_tick = 10 ** (-self._price_decimals) if self._price_decimals > 0 else 1.0
+        return min_tick
+
+    def _resolve_avg_fill_price(self, order_data, fallback_price: float) -> float:
+        avg_price = self._positive_float(getattr(order_data, "avg_price", None))
+        if avg_price:
+            return avg_price
+        cum_quote = self._positive_float(getattr(order_data, "cum_quote", None))
+        executed_qty = self._positive_float(getattr(order_data, "executed_qty", None))
+        if cum_quote and executed_qty:
+            computed = cum_quote / executed_qty
+            if computed > 0:
+                return computed
+        fallback = self._positive_float(fallback_price)
+        if fallback:
+            return fallback
+        raise RuntimeError(f"Could not resolve a positive fill price for {self.symbol}")
+
+    @staticmethod
+    def _interval_seconds(interval: str) -> int:
+        if not interval:
+            return 60
+        unit = interval[-1].lower()
+        try:
+            value = int(interval[:-1])
+        except ValueError:
+            return 60
+        if unit == "m":
+            return value * 60
+        if unit == "h":
+            return value * 3600
+        if unit == "d":
+            return value * 86400
+        return 60
+
+    @classmethod
+    def _compute_ws_stale_after_sec(cls, interval: str) -> int:
+        base = cls._interval_seconds(interval)
+        return max(180, int(base * 3 + 90))
+
     # ------------------------------------------------------------------
     # REST helpers
     # ------------------------------------------------------------------
@@ -328,14 +400,23 @@ class PDHLBot:
                 if sym.symbol != self.symbol:
                     continue
                 for f in sym.filters:
-                    if f.get("filterType") == "PRICE_FILTER":
-                        self._price_decimals = _decimals_from_step(f["tickSize"])
-                    elif f.get("filterType") == "LOT_SIZE":
-                        self._qty_decimals = _decimals_from_step(f["stepSize"])
-                        step = float(f["stepSize"])
+                    f_type = self._get_filter_field(f, "filterType", "filter_type")
+                    if f_type == "PRICE_FILTER":
+                        tick_size = self._get_filter_field(f, "tickSize", "tick_size")
+                        if tick_size:
+                            self._price_decimals = _decimals_from_step(str(tick_size))
+                    elif f_type == "LOT_SIZE":
+                        step_size = self._get_filter_field(f, "stepSize", "step_size")
+                        if not step_size:
+                            continue
+                        self._qty_decimals = _decimals_from_step(str(step_size))
+                        step = float(step_size)
                         self._qty_step = step if step > 0 else 1.0
-                    elif f.get("filterType") == "MIN_NOTIONAL":
-                        self.min_notional = float(f.get("notional", 5.0))
+                    elif f_type == "MIN_NOTIONAL":
+                        notional = self._get_filter_field(f, "notional")
+                        if not notional:
+                            continue
+                        self.min_notional = float(notional)
                 return
             raise SystemExit(f"Symbol '{self.symbol}' not found on Binance USDT-M Futures.")
         except SystemExit:
@@ -527,7 +608,8 @@ class PDHLBot:
             f"{exit_mode} | "
             f"prox={self._signal.prox_pct*100:.2f}% confirm={self._signal.confirm_bars} | "
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
-            f"Max trades/day: {self._signal.max_trades_per_day}"
+            f"Max trades/day: {self._signal.max_trades_per_day} | "
+            f"WS stale watchdog: {self._ws_stale_after_sec}s"
         )
         logger.info("-" * 60)
 
@@ -613,15 +695,6 @@ class PDHLBot:
         stream = None
 
         try:
-            connection = await ws_client.websocket_streams.create_connection()
-            stream = await connection.kline_candlestick_streams(
-                symbol=self.symbol.lower(), interval=self.interval
-            )
-            stream.on("message", self._on_kline)
-            logger.info(f"Subscribed to {self.symbol.lower()}@kline_{self.interval} (futures)")
-            logger.info(f"State: {self._state.name} | Waiting for candles...")
-            logger.info("-" * 60)
-
             if not self.dry_run:
                 from trader.user_data_stream import UserDataStream
                 uds = UserDataStream(self._client, self._ws_factory, self._ws_url, self._ConfigWS)
@@ -629,7 +702,45 @@ class PDHLBot:
                 self._uds_task = asyncio.create_task(uds.run())
 
             while True:
-                await asyncio.sleep(1)
+                connection = None
+                stream = None
+                try:
+                    connection = await ws_client.websocket_streams.create_connection()
+                    stream = await connection.kline_candlestick_streams(
+                        symbol=self.symbol.lower(), interval=self.interval
+                    )
+                    stream.on("message", self._on_kline)
+                    self._last_closed_candle_monotonic = time.monotonic()
+                    logger.info(f"Subscribed to {self.symbol.lower()}@kline_{self.interval} (futures)")
+                    logger.info(f"State: {self._state.name} | Waiting for candles...")
+                    logger.info("-" * 60)
+                    while True:
+                        await asyncio.sleep(1)
+                        silence_sec = time.monotonic() - self._last_closed_candle_monotonic
+                        if silence_sec > self._ws_stale_after_sec:
+                            raise RuntimeError(
+                                f"No closed candle for {silence_sec:.0f}s "
+                                f"(limit {self._ws_stale_after_sec}s)"
+                            )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.info(
+                        f"{YELLOW}Kline stream issue ({e}) — reconnecting in "
+                        f"{self._ws_reconnect_delay_sec}s{RESET}"
+                    )
+                    await asyncio.sleep(self._ws_reconnect_delay_sec)
+                finally:
+                    if stream:
+                        try:
+                            await stream.unsubscribe()
+                        except Exception:
+                            pass
+                    if connection:
+                        try:
+                            await connection.close_connection(close_session=True)
+                        except Exception:
+                            pass
 
         except asyncio.CancelledError:
             logger.info("\nBot shutting down...")
@@ -642,16 +753,6 @@ class PDHLBot:
                 self._monitor_task.cancel()
             if self._heartbeat_task and not self._heartbeat_task.done():
                 self._heartbeat_task.cancel()
-            if stream:
-                try:
-                    await stream.unsubscribe()
-                except Exception:
-                    pass
-            if connection:
-                try:
-                    await connection.close_connection(close_session=True)
-                except Exception:
-                    pass
             if not self.dry_run:
                 notify_bot_stopped(self.symbol, "PDHL")
             logger.info("Connection closed. Goodbye.")
@@ -664,6 +765,7 @@ class PDHLBot:
         k = data.k
         if not k.x:
             return
+        self._last_closed_candle_monotonic = time.monotonic()
 
         o, h, l, c, v = float(k.o), float(k.h), float(k.l), float(k.c), float(k.v)
         candle_open_ms = int(k.t)
@@ -953,14 +1055,14 @@ class PDHLBot:
 
         side = "BUY" if direction == "long" else "SELL"
         sl_price = (
-            self._round_price(entry_price * (1 - self.sl_pct / 100))
+            self._safe_trigger_price(entry_price * (1 - self.sl_pct / 100))
             if direction == "long"
-            else self._round_price(entry_price * (1 + self.sl_pct / 100))
+            else self._safe_trigger_price(entry_price * (1 + self.sl_pct / 100))
         )
         tp_price = (
-            self._round_price(entry_price * (1 + self.tp_pct / 100))
+            self._safe_trigger_price(entry_price * (1 + self.tp_pct / 100))
             if direction == "long"
-            else self._round_price(entry_price * (1 - self.tp_pct / 100))
+            else self._safe_trigger_price(entry_price * (1 - self.tp_pct / 100))
         ) if self.tp_pct is not None else None
 
         logger.info(
@@ -1010,17 +1112,19 @@ class PDHLBot:
                 new_order_resp_type="RESULT",
             )
             order_data = order_resp.data()
-            avg_price = float(order_data.avg_price) if order_data.avg_price else entry_price
-            executed_qty = float(order_data.executed_qty)
+            avg_price = self._resolve_avg_fill_price(order_data, entry_price)
+            executed_qty = self._positive_float(getattr(order_data, "executed_qty", None)) or qty
+            if executed_qty <= 0:
+                raise RuntimeError(f"Invalid executed quantity for {self.symbol}: {executed_qty}")
 
             self._direction = direction
             self._entry_price = avg_price
             self._position_qty = executed_qty
             self._mark_position_opened()
             self._sl_price = (
-                self._round_price(avg_price * (1 - self.sl_pct / 100))
+                self._safe_trigger_price(avg_price * (1 - self.sl_pct / 100))
                 if direction == "long"
-                else self._round_price(avg_price * (1 + self.sl_pct / 100))
+                else self._safe_trigger_price(avg_price * (1 + self.sl_pct / 100))
             )
             self._r_value = abs(avg_price - self._sl_price)
             self._sl_milestone = 0

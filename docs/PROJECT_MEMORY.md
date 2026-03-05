@@ -1,6 +1,6 @@
 # Project Memory: binance-algo-trading
 
-Last updated: 2026-03-04
+Last updated: 2026-03-05
 
 ## Purpose
 
@@ -225,3 +225,17 @@ It supports:
     - `docker-compose.yml` (`POSTGRES_DB` defaults + healthcheck target)
     - `Makefile` (`db-shell` fallback DB)
     - `docs/DB_ACCESS.md` examples/defaults
+- Live bot runtime hardening was applied for stream resiliency and order-price safety:
+  - Bots updated: `MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`.
+  - WebSocket stale-candle watchdog added with automatic reconnect loop:
+    - each bot tracks last closed candle timestamp and reconnects stream when stale.
+    - stale threshold is interval-aware (`~3x interval + 90s`, minimum 180s).
+  - Order fill price safety hardened:
+    - market fill `avg_price` now requires positive value; if API returns `"0"`, bots fallback to computed/fallback positive price.
+    - prevents invalid `SL/TP` triggers derived from zero fill price.
+  - Trigger price safety hardened:
+    - `SL/TP` trigger prices are now clamped to positive minimum tick when rounding would produce `<= 0`.
+    - prevents Binance error `-4006` (`Stop price less than zero`) on very small-price symbols.
+  - Exchange precision parsing was made SDK-object-safe:
+    - filter parsing no longer assumes dict (`f.get(...)`) and now supports object attributes.
+    - avoids precision-fetch fallback warnings and reduces `-1111` precision failures.
