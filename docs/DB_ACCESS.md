@@ -23,20 +23,20 @@ Default local values in this repo:
 - host: `localhost`
 - port: `5432`
 - user: `trader`
-- db: `binance_trader`
+- db: `binance_algo_trading`
 
 ### Connect with psql
 
 ```bash
 export PGPASSWORD=trader_password
-psql -h localhost -p 5432 -U trader -d binance_trader
+psql -h localhost -p 5432 -U trader -d binance_algo_trading
 ```
 
 ### One-off SQL command
 
 ```bash
 export PGPASSWORD=trader_password
-psql -h localhost -p 5432 -U trader -d binance_trader -c "SELECT now();"
+psql -h localhost -p 5432 -U trader -d binance_algo_trading -c "SELECT now();"
 ```
 
 ## Redis Access

@@ -218,3 +218,10 @@ It supports:
   - Dependency install uses `poetry install --only main --no-root` to avoid package install before source copy.
   - Backend image now copies both `trader/` and `db/` modules; this fixes runtime startup error:
     - `ModuleNotFoundError: No module named 'db'`.
+- PostgreSQL default database naming was migrated to the new project convention:
+  - Physical DB rename executed: `binance_trader` -> `binance_algo_trading` (data preserved).
+  - Local defaults/config references were aligned to `binance_algo_trading` in:
+    - `.env` (`POSTGRES_DB`)
+    - `docker-compose.yml` (`POSTGRES_DB` defaults + healthcheck target)
+    - `Makefile` (`db-shell` fallback DB)
+    - `docs/DB_ACCESS.md` examples/defaults

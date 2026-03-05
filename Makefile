@@ -317,7 +317,7 @@ db-seed: ## Seed strategies and symbol configs from trader/config.py
 	poetry run python -m db.seed_configs
 
 db-shell: ## Open a psql shell to the PostgreSQL container
-	docker compose exec postgres psql -U $${POSTGRES_USER:-trader} $${POSTGRES_DB:-binance_trader}
+	docker compose exec postgres psql -U $${POSTGRES_USER:-trader} $${POSTGRES_DB:-binance_algo_trading}
 
 # Backtest commands
 fetch-data: ## Download historical kline data (SYMBOL=axsusdt DAYS=365)
