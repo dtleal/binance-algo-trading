@@ -226,6 +226,10 @@ It supports:
   - This fixes Binance `-4014` (`Price not increased by tick size.`) on symbols such as `UNIUSDT`, where `pricePrecision=4` but valid price grid is `tickSize=0.0010` (3 effective decimals).
   - `db/apply_champion.py` now persists `price_decimals`/`qty_decimals` from `tickSize`/`stepSize`, not from `pricePrecision`/`quantityPrecision`.
   - `trader/config.py` fallback for `UNIUSDT` was aligned to `price_decimals=3`.
+- Dashboard `Bots` page now reconciles bot registry state with live exchange positions:
+  - `frontend/src/pages/Bots.tsx` uses `/api/positions` as the source of truth for the `In Position` count/filter/grouping.
+  - This prevents undercounting when a bot registry entry is out of sync with Binance, such as an open position shown in `/api/positions` but `state=SCANNING` in `/api/bot_states`.
+  - Cards with an open exchange position but non-`IN_POSITION` registry state now show a `POSITION DESYNC` badge and still render the live position details.
 - Docker Postgres healthcheck now targets the configured DB explicitly:
   - `pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}`
   - Prevents recurring Postgres log spam like `FATAL: database "trader" does not exist`.

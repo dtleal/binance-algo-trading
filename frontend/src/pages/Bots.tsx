@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo } from "react";
-import { useBotStates, useTrades } from "../hooks/useApi";
-import { WsEvent, BotState } from "../types";
+import { useBotStates, usePositions, useTrades } from "../hooks/useApi";
+import { WsEvent, BotState, Position } from "../types";
 import BotLogsModal from "../components/BotLogsModal";
 
 type WinRateStat = { wins: number; total: number; rate: number };
@@ -52,13 +52,23 @@ function fmtPrice(n: number | undefined, decimals = 4) {
   return n.toFixed(decimals);
 }
 
+function calcPnlPct(pos: Position | null): number {
+  if (!pos || !pos.entry_price) return 0;
+  if (pos.side === "LONG") {
+    return ((pos.mark_price - pos.entry_price) / pos.entry_price) * 100;
+  }
+  return ((pos.entry_price - pos.mark_price) / pos.entry_price) * 100;
+}
+
 function BotCard({
   state,
+  livePosition,
   liveEvents,
   winRate,
   onClick
 }: {
   state: BotState;
+  livePosition: Position | null;
   liveEvents: WsEvent[];
   winRate?: WinRateStat;  // live WR from actual trades
   onClick: () => void;
@@ -69,13 +79,17 @@ function BotCard({
 
   const price    = live?.price    ?? state.price;
   const vwap     = live?.vwap     ?? state.vwap;
-  const pnl      = live?.unrealized_pnl     ?? state.unrealized_pnl ?? 0;
-  const pnlPct   = live?.unrealized_pnl_pct ?? state.unrealized_pnl_pct ?? 0;
+  const pnl      = livePosition?.unrealized_pnl ?? live?.unrealized_pnl ?? state.unrealized_pnl ?? 0;
+  const pnlPct   = livePosition ? calcPnlPct(livePosition) : (live?.unrealized_pnl_pct ?? state.unrealized_pnl_pct ?? 0);
   const botState = state.state;
   const beThreshold = state.config?.be_profit_usd ?? 0.5;
   const [beProfitInput, setBeProfitInput] = useState(beThreshold.toFixed(2));
   const [beSaving, setBeSaving] = useState(false);
   const [beStatus, setBeStatus] = useState<string | null>(null);
+  const hasLivePosition = !!livePosition;
+  const displayDirection = livePosition ? livePosition.side.toLowerCase() : state.direction;
+  const displayEntryPrice = livePosition?.entry_price ?? state.entry_price;
+  const displayQty = livePosition?.qty ?? state.position_qty;
 
   const decimals = price && price > 100 ? 2 : price && price > 1 ? 4 : 6;
 
@@ -172,6 +186,11 @@ function BotCard({
               🔴 RECUPERAÇÃO
             </span>
           )}
+          {hasLivePosition && botState !== "IN_POSITION" && (
+            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-900/50 text-amber-300 border border-amber-700/50 font-medium">
+              POSITION DESYNC
+            </span>
+          )}
           {state.dry_run && (
             <span className="text-[10px] px-2 py-0.5 rounded bg-gray-700 text-gray-400">
               DRY RUN
@@ -226,13 +245,13 @@ function BotCard({
         </div>
       )}
 
-      {/* Position info (IN_POSITION) */}
-      {botState === "IN_POSITION" && (
+      {/* Position info (registry or exchange-reconciled) */}
+      {(botState === "IN_POSITION" || hasLivePosition) && (
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className={`text-xs font-semibold uppercase tracking-wider px-2 py-0.5 rounded
-              ${state.direction === "long" ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}>
-              {state.direction}
+              ${displayDirection === "long" ? "bg-emerald-900/40 text-emerald-400" : "bg-red-900/40 text-red-400"}`}>
+              {displayDirection ?? "—"}
             </span>
             <span className={`text-sm font-bold ${pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
               {pnl >= 0 ? "+" : ""}{pnl.toFixed(2)} USDT
@@ -242,7 +261,7 @@ function BotCard({
           <div className="grid grid-cols-3 gap-2 text-[10px] text-gray-500">
             <div>
               <p>Entry</p>
-              <p className="text-gray-300 text-xs">${fmtPrice(state.entry_price, decimals)}</p>
+              <p className="text-gray-300 text-xs">${fmtPrice(displayEntryPrice, decimals)}</p>
             </div>
             <div>
               <p className="text-red-500">SL</p>
@@ -253,6 +272,11 @@ function BotCard({
               <p className="text-emerald-400 text-xs">${fmtPrice(state.tp_price, decimals)}</p>
             </div>
           </div>
+          {displayQty != null && (
+            <div className="text-[10px] text-gray-500">
+              Qty: <span className="text-gray-300">{displayQty}</span>
+            </div>
+          )}
         </div>
       )}
 
@@ -389,6 +413,7 @@ function SectionHeader({ label, count, color }: { label: string; count: number; 
 
 export default function Bots({ events }: { events: WsEvent[] }) {
   const { bots } = useBotStates();
+  const { positions } = usePositions();
   const { trades } = useTrades(30);
   const [log, setLog] = useState<{ ts: string; msg: string; color: string }[]>([]);
   const [selectedBot, setSelectedBot] = useState<{ key: string; symbol: string } | null>(null);
@@ -438,36 +463,41 @@ export default function Bots({ events }: { events: WsEvent[] }) {
   }, [events]);
 
   const botList = Object.values(bots);
+  const livePositionBySymbol = useMemo(
+    () => new Map(positions.map((p) => [p.symbol, p])),
+    [positions],
+  );
+  const hasLivePosition = (symbol: string) => livePositionBySymbol.has(symbol);
 
   const counts = useMemo(() => ({
     all:         botList.length,
-    in_position: botList.filter(b => b.state === "IN_POSITION").length,
-    scanning:    botList.filter(b => b.state === "SCANNING").length,
-    cooldown:    botList.filter(b => b.state === "COOLDOWN").length,
+    in_position: botList.filter(b => hasLivePosition(b.symbol)).length,
+    scanning:    botList.filter(b => !hasLivePosition(b.symbol) && b.state === "SCANNING").length,
+    cooldown:    botList.filter(b => !hasLivePosition(b.symbol) && b.state === "COOLDOWN").length,
     traded:      botList.filter(b => (b.trades_today ?? 0) > 0).length,
     recovery:    botList.filter(b => b.mode === "monitoring").length,
-  }), [botList]);
+  }), [botList, livePositionBySymbol]);
 
   const filteredBots = useMemo(() => {
     switch (activeFilter) {
-      case "in_position": return botList.filter(b => b.state === "IN_POSITION");
-      case "scanning":    return botList.filter(b => b.state === "SCANNING");
-      case "cooldown":    return botList.filter(b => b.state === "COOLDOWN");
+      case "in_position": return botList.filter(b => hasLivePosition(b.symbol));
+      case "scanning":    return botList.filter(b => !hasLivePosition(b.symbol) && b.state === "SCANNING");
+      case "cooldown":    return botList.filter(b => !hasLivePosition(b.symbol) && b.state === "COOLDOWN");
       case "traded":      return botList.filter(b => (b.trades_today ?? 0) > 0);
       case "recovery":    return botList.filter(b => b.mode === "monitoring");
       default:            return botList;
     }
-  }, [botList, activeFilter]);
+  }, [botList, activeFilter, livePositionBySymbol]);
 
-  // When showing all, group by state: IN_POSITION → COOLDOWN → SCANNING
+  // When showing all, group by live exchange positions first.
   const grouped = useMemo(() => {
     if (activeFilter !== "all") return null;
     return {
-      in_position: filteredBots.filter(b => b.state === "IN_POSITION"),
-      cooldown:    filteredBots.filter(b => b.state === "COOLDOWN"),
-      scanning:    filteredBots.filter(b => b.state === "SCANNING"),
+      in_position: filteredBots.filter(b => hasLivePosition(b.symbol)),
+      cooldown:    filteredBots.filter(b => !hasLivePosition(b.symbol) && b.state === "COOLDOWN"),
+      scanning:    filteredBots.filter(b => !hasLivePosition(b.symbol) && b.state === "SCANNING"),
     };
-  }, [filteredBots, activeFilter]);
+  }, [filteredBots, activeFilter, livePositionBySymbol]);
 
   const FILTERS: { key: BotFilter; label: string; countKey: keyof typeof counts }[] = [
     { key: "all",         label: "All",         countKey: "all" },
@@ -539,6 +569,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
                   <BotCard
                     key={`${b.symbol}:${b.strategy}`}
                     state={b}
+                    livePosition={livePositionBySymbol.get(b.symbol) ?? null}
                     liveEvents={events}
                     winRate={winRateBySymbol[b.symbol]}
                     onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
@@ -555,6 +586,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
                   <BotCard
                     key={`${b.symbol}:${b.strategy}`}
                     state={b}
+                    livePosition={livePositionBySymbol.get(b.symbol) ?? null}
                     liveEvents={events}
                     winRate={winRateBySymbol[b.symbol]}
                     onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
@@ -571,6 +603,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
                   <BotCard
                     key={`${b.symbol}:${b.strategy}`}
                     state={b}
+                    livePosition={livePositionBySymbol.get(b.symbol) ?? null}
                     liveEvents={events}
                     winRate={winRateBySymbol[b.symbol]}
                     onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
@@ -586,6 +619,7 @@ export default function Bots({ events }: { events: WsEvent[] }) {
             <BotCard
               key={`${b.symbol}:${b.strategy}`}
               state={b}
+              livePosition={livePositionBySymbol.get(b.symbol) ?? null}
               liveEvents={events}
               winRate={winRateBySymbol[b.symbol]}
               onClick={() => setSelectedBot({ key: `${b.symbol}:${b.strategy}`, symbol: b.symbol })}
