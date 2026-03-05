@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-ldo-pdhl bot-ldo-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download filter-overfit walk-forward backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -361,6 +361,7 @@ ifeq ($(filter command line environment,$(origin SYMBOL)),)
 	@echo "  1. Download 1m historical data"
 	@echo "  2. Aggregate to 5m, 15m, 30m, 1h  (MANDATORY)"
 	@echo "  3. Run parameter sweep on all available timeframes"
+	@echo "  4. Run anti-overfitting filter (3 layers)"
 	@echo ""
 	@exit 1
 else
@@ -395,9 +396,13 @@ else
 		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
 	done; \
 	echo ""; \
+	echo "$(YELLOW)── Step 4: Anti-overfitting filter (3 layers) ──$(NC)"; \
+	poetry run python scripts/filter_overfit.py --symbol $(SYMBOL); \
+	echo ""; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
 	echo "$(GREEN)  ✅ Onboarding complete — $(SYMBOL)$(NC)"; \
 	echo "$(GREEN)  Review sweep CSVs: data/sweeps/$(SYMBOL)_*_sweep.csv$(NC)"; \
+	echo "$(GREEN)  Review anti-overfit shortlist: data/sweeps/$(SYMBOL)_anti_overfit_final.csv$(NC)"; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"
 endif
 
@@ -410,6 +415,28 @@ else
 	mkdir -p data/klines; \
 	echo "$(YELLOW)📥 Downloading $(or $(DAYS),365) days of $$SYMBOL_UPPER data...$(NC)"; \
 	poetry run python scripts/fetch_klines.py $$SYMBOL_UPPER $(if $(DAYS),-d $(DAYS),) -o data/klines/$(SYMBOL)_1m_klines.csv
+endif
+
+filter-overfit: ## Run 3-layer anti-overfitting filter on sweep CSVs (SYMBOL=dogeusdt)
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make filter-overfit SYMBOL=dogeusdt$(NC)"
+	@exit 1
+else
+	@poetry run python scripts/filter_overfit.py --symbol $(SYMBOL)
+endif
+
+walk-forward: ## Walk-forward validation (Rust optimize + OOS test). Args: SYMBOL=x TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30 MAX_FOLDS=0
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make walk-forward SYMBOL=dogeusdt TF=1m$(NC)"
+	@exit 1
+else
+	@python scripts/walk_forward.py \
+		--symbol $(SYMBOL) \
+		--timeframe $(or $(TF),1m) \
+		--train-days $(or $(TRAIN_DAYS),180) \
+		--test-days $(or $(TEST_DAYS),30) \
+		--step-days $(or $(STEP_DAYS),30) \
+		--max-folds $(or $(MAX_FOLDS),0)
 endif
 
 onboarding-db: ## DB-first onboarding: download → aggregate → sweep → apply champion (SYMBOL=x DAYS=365)

@@ -54,7 +54,7 @@ SECRET_KEY=your_secret_key
 ### Quick Start (Recommended)
 
 ```bash
-# Start everything: 24 bots + dashboard
+# Start everything: 25 bots + dashboard
 make start
 
 # Stop everything
@@ -79,7 +79,7 @@ poetry run python -m trader serve --port 8080
 Access at http://localhost:8080
 
 **Features:**
-- Real-time bot status (all 24 bots always visible, even in COOLDOWN)
+- Real-time bot status (all 25 bots always visible, even in COOLDOWN)
 - Live price, VWAP, and P&L tracking
 - Position monitoring and trade history
 - WebSocket updates with heartbeat (bots publish state every candle)

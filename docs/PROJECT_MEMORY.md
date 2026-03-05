@@ -21,22 +21,36 @@ It supports:
    - Generates 5m, 15m, 30m, 1h files.
 3. Run sweep on all timeframes:
    - `make sweep-rust SYMBOL=dogeusdt`
-4. Pick champion (best return + acceptable drawdown/risk-adjusted profile).
-5. Run detailed backtest:
+4. Run anti-overfitting filter (3 layers):
+   - `make filter-overfit SYMBOL=dogeusdt`
+   - Generates:
+     - `data/sweeps/<symbol>_anti_overfit_layer1.csv`
+     - `data/sweeps/<symbol>_anti_overfit_layer2.csv`
+     - `data/sweeps/<symbol>_anti_overfit_final.csv`
+5. Run walk-forward validation (out-of-sample):
+   - `make walk-forward SYMBOL=dogeusdt TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30`
+   - Train optimization is Rust sweep per fold; OOS evaluation uses frozen params on the next window.
+   - Outputs:
+     - `data/sweeps/<symbol>_<tf>_walkforward_folds.csv`
+     - `data/sweeps/<symbol>_<tf>_walkforward_summary.csv`
+6. Pick champion from anti-overfit + walk-forward survivors.
+7. Run detailed backtest:
    - `make backtest-detail` (MomShort/Rejection)
    - `make backtest-detail-pullback` (VWAPPullback)
-6. Validate:
+8. Validate:
    - profitable months consistency,
    - max drawdown,
    - win rate vs R:R,
    - exit profile (EOD expected to dominate in drift-style setups).
-7. Document strategy in `docs/STRATEGY_<SYMBOL>.md`.
-8. Configure live symbol in `trader/config.py`.
-9. Paper trade 1-2 weeks minimum before live.
+9. Document strategy in `docs/STRATEGY_<SYMBOL>.md`.
+10. Configure live symbol in `trader/config.py`.
+11. Paper trade 1-2 weeks minimum before live.
 
 ## Important Onboarding Rules
 
 - Always run sweeps across all 5 timeframes (1m, 5m, 15m, 30m, 1h).
+- Run anti-overfitting filter after sweep and before champion selection.
+- Run walk-forward OOS validation before final champion promotion.
 - Skip assets when red flags appear:
   - all strategies negative on average,
   - best return < 5% with low trades,
@@ -94,11 +108,11 @@ It supports:
 
 ## Active Bot Portfolio (Current)
 
-- Total active bots: 24
+- Total active bots: 25
 - Strategy split:
   - MomShort: 4
   - VWAPPullback: 14
-  - PDHL: 5
+  - PDHL: 6
   - ORB: 1
 - Canonical roster and params:
   - `docs/ACTIVE_BOTS.md`
@@ -123,6 +137,8 @@ It supports:
 - `scripts/backtest_detail.py`: detailed backtest for MomShort/Rejection.
 - `scripts/backtest_detail_pullback.py`: detailed pullback backtest.
 - `scripts/analyze_sweep.py`: sweep result analysis.
+- `scripts/filter_overfit.py`: 3-layer anti-overfitting filter (hard thresholds, neighborhood robustness, monthly consistency re-sim).
+- `scripts/walk_forward.py`: rolling walk-forward validator (Rust train optimization + OOS window test).
 - `backtest_sweep/target/release/backtest_sweep`: sweep binary.
 - `backtest_sweep_v2/target/release/backtest_sweep_v2`: advanced trailing-stop sweep.
 - `data/klines/`: historical CSV inputs.
@@ -175,6 +191,12 @@ It supports:
     - `pdhl_prox_pct=0.005`, `vwap_dist_stop=0.03`
     - `champion_return_pct=95.61`, `champion_max_dd=13.87`
   - `make bots` now starts `manausdt` via `python -m trader pdhl --symbol manausdt`.
+- `LDOUSDT` was added to runtime portfolio as `PDHL`:
+  - Champion from 1m sweep:
+    - TP 7.0 / SL 2.0
+    - 985 trades, 40.1% win rate
+    - +79.96% return, maxDD 18.23%
+  - `make bots` now starts `ldousdt` via `python -m trader pdhl --symbol ldousdt`.
 - `MomShort` precision handling was hardened for order placement:
   - `trader/bot.py` now fetches exchange filters (`PRICE_FILTER`/`LOT_SIZE`) at startup
     and uses them to format `quantity` and `trigger_price`.
@@ -258,3 +280,14 @@ It supports:
     `state=IN_POSITION` plus direction/qty/entry/SL/TP to `bot:states` right away.
   - This removes the stale `SCANNING` window after reboot (especially critical for 1h bots
     like `MAGICUSDT`, which previously waited until next candle to reflect open positions in `/bots`).
+- Onboarding workflow now includes an automated anti-overfitting stage:
+  - `make filter-overfit SYMBOL=<symbol>`
+  - Layer 1: hard constraints (`trades`, `return`, `maxDD`, `ret/DD`)
+  - Layer 2: parameter-neighborhood robustness checks
+  - Layer 3: monthly consistency check via re-simulation on the selected timeframe kline file
+- Walk-forward validation added for OOS robustness:
+  - `make walk-forward SYMBOL=<symbol> TF=<tf> TRAIN_DAYS=<n> TEST_DAYS=<m> STEP_DAYS=<k>`
+  - Per fold:
+    1) optimize on train window with Rust sweep,
+    2) freeze best params,
+    3) evaluate on next unseen test window.

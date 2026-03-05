@@ -11,7 +11,7 @@ make onboarding SYMBOL=dogeusdt          # full process: download → aggregate 
 make onboarding SYMBOL=btcusdt DAYS=365  # explicit day count
 ```
 
-This runs all 3 steps below automatically. Use the manual steps only to re-run a specific part.
+This runs the download/aggregate/sweep pipeline automatically. Use the manual steps below to re-run specific parts (including the anti-overfitting stage).
 
 ---
 
@@ -114,6 +114,62 @@ timeframe on 1m data, much faster on higher timeframes.
 - Best return < 5% with low trade count (< 50)
 - Max drawdown > 15% on the best strategy
 - Win rate < 35% with R:R < 1.5
+
+---
+
+## Step 3.5: Run the 3-Layer Anti-Overfitting Filter
+
+After the raw sweep, run the structured filter:
+
+```bash
+make filter-overfit SYMBOL=dogeusdt
+# or:
+python scripts/filter_overfit.py --symbol dogeusdt
+```
+
+Generated files:
+- `data/sweeps/dogeusdt_anti_overfit_layer1.csv`
+- `data/sweeps/dogeusdt_anti_overfit_layer2.csv`
+- `data/sweeps/dogeusdt_anti_overfit_final.csv`
+
+What each layer does:
+
+1. **Layer 1 (Hard Filter)**  
+   Minimum trades, minimum return, max drawdown cap, minimum `return/maxDD`.
+
+2. **Layer 2 (Neighborhood Robustness)**  
+   Keeps only configs whose nearby parameter region is also strong (not just one isolated point).
+
+3. **Layer 3 (Monthly Consistency)**  
+   Re-simulates finalists on kline data and validates:
+   - positive month ratio,
+   - worst month loss limit,
+   - max losing streak.
+
+Use `*_anti_overfit_final.csv` as the shortlist for detailed backtests/live candidacy.
+
+---
+
+## Step 3.6: Walk-Forward Validation (OOS)
+
+After selecting candidates, validate robustness with walk-forward:
+
+```bash
+make walk-forward SYMBOL=dogeusdt TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30
+# optional fast smoke test:
+make walk-forward SYMBOL=dogeusdt TF=1h TRAIN_DAYS=120 TEST_DAYS=15 STEP_DAYS=15 MAX_FOLDS=2
+```
+
+How it works:
+
+1. For each fold, it runs **Rust sweep** on the train window only.
+2. Picks the best train config (metric-based, with train filters).
+3. Freezes params and evaluates on the next **out-of-sample** test window.
+4. Repeats across rolling windows and aggregates OOS-only performance.
+
+Outputs:
+- `data/sweeps/<symbol>_<tf>_walkforward_folds.csv`
+- `data/sweeps/<symbol>_<tf>_walkforward_summary.csv`
 
 ---
 
@@ -275,14 +331,17 @@ info = client.rest_api.exchange_information()
                              (or just: make onboarding SYMBOL=dogeusdt — does steps 1+2+3)
 [ ] 3. Run sweep (all TFs)   make sweep-rust SYMBOL=dogeusdt
                              → data/sweeps/dogeusdt_{1m,5m,15m,30m,1h}_sweep.csv
-[ ] 4. Identify champion     Compare TOP 30 BY RETURN + RISK-ADJUSTED across all timeframes
-[ ] 5. Detailed backtest     Edit scripts/backtest_detail.py with champion params + TF
+[ ] 4. Anti-overfit filter   make filter-overfit SYMBOL=dogeusdt
+                             → data/sweeps/dogeusdt_anti_overfit_final.csv
+[ ] 5. Walk-forward (OOS)    make walk-forward SYMBOL=dogeusdt TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30
+[ ] 6. Identify champion     Pick from anti-overfit + walk-forward survivors
+[ ] 7. Detailed backtest     Edit scripts/backtest_detail.py with champion params + TF
                              make backtest-detail
-[ ] 6. Validate results      All months profitable? DD < 10%? Consistent?
-[ ] 7. Document              docs/STRATEGY_TOKEN.md
-[ ] 8. Exchange precision    Check tick_size, step_size, min_qty
-[ ] 9. Config                Add to trader/config.py with interval field
-[ ] 10. Paper trade          Run with --dry-run for 1-2 weeks first
+[ ] 8. Validate results      All months profitable? DD < 10%? Consistent?
+[ ] 9. Document              docs/STRATEGY_TOKEN.md
+[ ] 10. Exchange precision   Check tick_size, step_size, min_qty
+[ ] 11. Config               Add to trader/config.py with interval field
+[ ] 12. Paper trade          Run with --dry-run for 1-2 weeks first
 ```
 
 ---
@@ -302,13 +361,16 @@ USDT-M futures symbol without pre-configuration.
 [ ] 2. Aggregate timeframes  python scripts/aggregate_klines.py data/klines/dogeusdt_1m_klines.csv
 [ ] 3. Run sweep (all TFs)   make sweep-rust SYMBOL=dogeusdt
                              → data/sweeps/dogeusdt_{1m,5m,15m,30m,1h}_sweep.csv
-[ ] 4. Detailed backtest     Edit scripts/backtest_detail_pullback.py with champion TF + params
+[ ] 4. Anti-overfit filter   make filter-overfit SYMBOL=dogeusdt
+                             → data/sweeps/dogeusdt_anti_overfit_final.csv
+[ ] 5. Walk-forward (OOS)    make walk-forward SYMBOL=dogeusdt TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30
+[ ] 6. Detailed backtest     Edit scripts/backtest_detail_pullback.py with champion TF + params
                              make backtest-detail-pullback
-[ ] 5. Validate results      All months profitable? DD < 10%? Long/short balanced?
-[ ] 6. Tune parameters       Edit constants at top of scripts/backtest_detail_pullback.py
-[ ] 7. Document              docs/STRATEGY_TOKEN.md
-[ ] 8. Exchange precision    Fetched automatically at startup (or check manually)
-[ ] 9. Paper trade           Run with --dry-run for 1-2 weeks first
+[ ] 7. Validate results      All months profitable? DD < 10%? Long/short balanced?
+[ ] 8. Tune parameters       Edit constants at top of scripts/backtest_detail_pullback.py
+[ ] 9. Document              docs/STRATEGY_TOKEN.md
+[ ] 10. Exchange precision   Fetched automatically at startup (or check manually)
+[ ] 11. Paper trade          Run with --dry-run for 1-2 weeks first
 ```
 
 ### Step 4: Run the VWAPPullback Detailed Backtest
