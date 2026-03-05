@@ -285,3 +285,6 @@ It supports:
     - `MAKER_ENTRY_TIMEOUT_SEC` (default `8`)
     - `MAKER_EXIT_TIMEOUT_SEC` (default `6`)
     - `MAKER_POLL_INTERVAL_SEC` (default `0.4`)
+  - MomShort (`trader/bot.py`) now treats Binance `-5022` post-only rejects as expected
+    maker misses for entry/EOD maker attempts and immediately falls back to `MARKET`
+    instead of surfacing `Entry failed`.

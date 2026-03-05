@@ -211,6 +211,15 @@ class MomShortBot:
         pos = self._get_position()
         return pos is None or pos["position_amt"] == 0
 
+    @staticmethod
+    def _is_post_only_reject(error: Exception) -> bool:
+        msg = str(error)
+        return (
+            "-5022" in msg
+            or "Post Only order will be rejected" in msg
+            or "could not be executed as maker" in msg
+        )
+
     def _position_guard_reason(self, candle_open_ms: int, o: float, c: float, pnl_pct: float) -> str | None:
         if self._risk_exit_pending:
             return None
@@ -991,32 +1000,42 @@ class MomShortBot:
 
             if self._prefer_maker:
                 maker_price = self._maker_limit_price(entry_price, "SELL")
-                maker_resp = self._client.rest_api.new_order(
-                    symbol=self.symbol,
-                    side="SELL",
-                    type="LIMIT",
-                    time_in_force="GTX",
-                    price=self._fmt_price(maker_price),
-                    quantity=self._fmt_qty(qty),
-                    new_order_resp_type="RESULT",
-                )
-                maker_data = maker_resp.data()
-                order_id = getattr(maker_data, "order_id", None)
-                logger.info(
-                    f"{CYAN}Maker entry posted @ ${maker_price:.4f} "
-                    f"(timeout {self._maker_entry_timeout_sec:.1f}s){RESET}"
-                )
-                pos = await self._wait_for_position_open(self._maker_entry_timeout_sec)
-                if pos:
-                    execution_mode = "maker"
-                    avg_price = float(pos["entry_price"])
-                    executed_qty = abs(float(pos["position_amt"]))
+                try:
+                    maker_resp = self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side="SELL",
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=self._fmt_price(maker_price),
+                        quantity=self._fmt_qty(qty),
+                        new_order_resp_type="RESULT",
+                    )
+                except Exception as maker_err:
+                    if self._is_post_only_reject(maker_err):
+                        logger.info(
+                            f"{YELLOW}Maker entry rejected by Post-Only rule "
+                            f"(@ ${maker_price:.4f}) — fallback MARKET{RESET}"
+                        )
+                    else:
+                        raise
                 else:
-                    try:
-                        self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
-                    except Exception:
-                        pass
-                    logger.info(f"{YELLOW}Maker entry timeout — fallback MARKET{RESET}")
+                    maker_data = maker_resp.data()
+                    order_id = getattr(maker_data, "order_id", None)
+                    logger.info(
+                        f"{CYAN}Maker entry posted @ ${maker_price:.4f} "
+                        f"(timeout {self._maker_entry_timeout_sec:.1f}s){RESET}"
+                    )
+                    pos = await self._wait_for_position_open(self._maker_entry_timeout_sec)
+                    if pos:
+                        execution_mode = "maker"
+                        avg_price = float(pos["entry_price"])
+                        executed_qty = abs(float(pos["position_amt"]))
+                    else:
+                        try:
+                            self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                        except Exception:
+                            pass
+                        logger.info(f"{YELLOW}Maker entry timeout — fallback MARKET{RESET}")
 
             if executed_qty <= 0:
                 sell_resp = self._client.rest_api.new_order(
@@ -1263,29 +1282,39 @@ class MomShortBot:
                 if ref_price <= 0:
                     ref_price = self._entry_price
                 maker_close_price = self._maker_limit_price(ref_price, "BUY")
-                self._client.rest_api.new_order(
-                    symbol=self.symbol,
-                    side="BUY",
-                    type="LIMIT",
-                    time_in_force="GTX",
-                    price=self._fmt_price(maker_close_price),
-                    quantity=self._fmt_qty(qty),
-                    reduce_only="true",
-                    new_order_resp_type="RESULT",
-                )
-                logger.info(
-                    f"{CYAN}EOD maker close posted @ ${maker_close_price:.4f} "
-                    f"(timeout {self._maker_exit_timeout_sec:.1f}s){RESET}"
-                )
-                if await self._wait_for_position_closed(self._maker_exit_timeout_sec):
-                    close_mode = "maker"
-                    avg_price = maker_close_price
+                try:
+                    self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side="BUY",
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=self._fmt_price(maker_close_price),
+                        quantity=self._fmt_qty(qty),
+                        reduce_only="true",
+                        new_order_resp_type="RESULT",
+                    )
+                except Exception as maker_err:
+                    if self._is_post_only_reject(maker_err):
+                        logger.info(
+                            f"{YELLOW}EOD maker close rejected by Post-Only rule "
+                            f"(@ ${maker_close_price:.4f}) — fallback MARKET{RESET}"
+                        )
+                    else:
+                        raise
                 else:
-                    try:
-                        self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
-                    except Exception:
-                        pass
-                    logger.info(f"{YELLOW}EOD maker timeout — fallback MARKET{RESET}")
+                    logger.info(
+                        f"{CYAN}EOD maker close posted @ ${maker_close_price:.4f} "
+                        f"(timeout {self._maker_exit_timeout_sec:.1f}s){RESET}"
+                    )
+                    if await self._wait_for_position_closed(self._maker_exit_timeout_sec):
+                        close_mode = "maker"
+                        avg_price = maker_close_price
+                    else:
+                        try:
+                            self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                        except Exception:
+                            pass
+                        logger.info(f"{YELLOW}EOD maker timeout — fallback MARKET{RESET}")
 
             if close_mode != "maker":
                 pos = self._get_position()
