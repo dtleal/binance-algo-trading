@@ -94,11 +94,11 @@ It supports:
 
 ## Active Bot Portfolio (Current)
 
-- Total active bots: 26
+- Total active bots: 27
 - Strategy split:
   - MomShort: 4
   - VWAPPullback: 14
-  - PDHL: 7
+  - PDHL: 8
   - ORB: 1
 - Canonical roster and params:
   - `docs/ACTIVE_BOTS.md`
@@ -182,6 +182,13 @@ It supports:
   - Fallback config in `trader/config.py` uses:
     - `price_decimals=4`, `qty_decimals=1`, `min_notional=5.0`, `vwap_dist_stop=0.05`
   - `make bots` now starts `rlcusdt` via `python -m trader pdhl --symbol rlcusdt`.
+- `MTLUSDT` was added to runtime portfolio as `PDHL`:
+  - Selected onboarding profile (2026-03-05, explicit user choice):
+    - `TF=1m`, `tp_pct=5.0`, `sl_pct=5.0`, `confirm_bars=1`, `pdhl_prox_pct=0.0`
+    - `champion_return_pct=83.58`, `champion_win_rate=53.1`, `champion_trades=980`, `champion_max_dd=14.44`
+  - Exchange precision for runtime/fallback:
+    - `price_decimals=4`, `qty_decimals=0`, `min_notional=5.0`
+  - `make bots` now starts `mtlusdt` via `python -m trader pdhl --symbol mtlusdt`.
 - `MomShort` precision handling was hardened for order placement:
   - `trader/bot.py` now fetches exchange filters (`PRICE_FILTER`/`LOT_SIZE`) at startup
     and uses them to format `quantity` and `trigger_price`.

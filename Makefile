@@ -86,6 +86,7 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		(nohup poetry run python -m trader pdhl     --symbol manausdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pdhl     --symbol ldousdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pdhl     --symbol rlcusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl     --symbol mtlusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol solusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol galausdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol avaxusdt      > /dev/null 2>&1 &) && \
@@ -108,7 +109,7 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		(nohup poetry run python -m trader pullback --symbol aaveusdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol thetausdt     > /dev/null 2>&1 &)
 	@sleep 3
-	@echo "$(GREEN)✅ Bots started — 26 bots loading config from DB$(NC)"
+	@echo "$(GREEN)✅ Bots started — 27 bots loading config from DB$(NC)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -135,10 +136,10 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo ""
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
-	@echo "$(BLUE)🤖 Active Bots:$(NC) 26 total"
+	@echo "$(BLUE)🤖 Active Bots:$(NC) 27 total"
 	@echo "   • 4 MomShort    — AXS, SAND, SOL, THETA"
 	@echo "   • 14 VWAPPullback — GALA, AVAX, DOGE, SHIB, XRP, ETH, XAU, XMR, UNI, APT, PEPE, DASH, ZEC, AAVE"
-	@echo "   • 7 PDHL        — LTC, LINK, BCH, MAGIC, MANA, LDO, RLC"
+	@echo "   • 8 PDHL        — LTC, LINK, BCH, MAGIC, MANA, LDO, RLC, MTL"
 	@echo "   • 1 ORB         — KSM"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
