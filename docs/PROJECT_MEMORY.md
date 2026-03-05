@@ -288,3 +288,8 @@ It supports:
   - MomShort (`trader/bot.py`) now treats Binance `-5022` post-only rejects as expected
     maker misses for entry/EOD maker attempts and immediately falls back to `MARKET`
     instead of surfacing `Entry failed`.
+  - MomShort TP placement hardening:
+    - Initial TP order remains maker-first (`LIMIT` + `GTX`).
+    - If TP is rejected by Binance `-5022` (would execute as taker), bot retries TP as
+      `LIMIT` + `GTC` (reduce-only) instead of failing the whole entry flow.
+    - The same GTX->GTC retry is applied when TP is re-placed during auto-breakeven SL updates.

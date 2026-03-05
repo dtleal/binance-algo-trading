@@ -579,15 +579,33 @@ class MomShortBot:
                 close_position="true",
             )
             if self._tp_price > 0:
-                self._client.rest_api.new_order(
-                    symbol=self.symbol,
-                    side="BUY",
-                    type="LIMIT",
-                    time_in_force="GTX",
-                    price=self._fmt_price(self._tp_price),
-                    quantity=self._fmt_qty(self._position_qty),
-                    reduce_only="true",
-                )
+                try:
+                    self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side="BUY",
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=self._fmt_price(self._tp_price),
+                        quantity=self._fmt_qty(self._position_qty),
+                        reduce_only="true",
+                    )
+                except Exception as tp_err:
+                    if self._is_post_only_reject(tp_err):
+                        logger.info(
+                            f"{YELLOW}BE TP post-only rejected @ ${self._tp_price} "
+                            f"— retry LIMIT GTC{RESET}"
+                        )
+                        self._client.rest_api.new_order(
+                            symbol=self.symbol,
+                            side="BUY",
+                            type="LIMIT",
+                            time_in_force="GTC",
+                            price=self._fmt_price(self._tp_price),
+                            quantity=self._fmt_qty(self._position_qty),
+                            reduce_only="true",
+                        )
+                    else:
+                        raise
             _registry.update(self._reg_key, {"sl_price": new_sl, "tp_price": self._tp_price})
             notify_stop_loss_updated(self.symbol, "short", old_sl, new_sl, reason)
             self._be_triggered = True
@@ -1080,20 +1098,41 @@ class MomShortBot:
             )
 
             # Place take-profit as maker reduce-only limit.
-            tp_resp = self._client.rest_api.new_order(
-                symbol=self.symbol,
-                side="BUY",
-                type="LIMIT",
-                time_in_force="GTX",
-                price=self._fmt_price(self._tp_price),
-                quantity=self._fmt_qty(executed_qty),
-                reduce_only="true",
-                new_order_resp_type="RESULT",
-            )
+            tp_tif = "GTX"
+            try:
+                tp_resp = self._client.rest_api.new_order(
+                    symbol=self.symbol,
+                    side="BUY",
+                    type="LIMIT",
+                    time_in_force=tp_tif,
+                    price=self._fmt_price(self._tp_price),
+                    quantity=self._fmt_qty(executed_qty),
+                    reduce_only="true",
+                    new_order_resp_type="RESULT",
+                )
+            except Exception as tp_err:
+                if self._is_post_only_reject(tp_err):
+                    tp_tif = "GTC"
+                    logger.info(
+                        f"{YELLOW}TP post-only rejected @ ${self._tp_price} "
+                        f"— retry LIMIT {tp_tif}{RESET}"
+                    )
+                    tp_resp = self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side="BUY",
+                        type="LIMIT",
+                        time_in_force=tp_tif,
+                        price=self._fmt_price(self._tp_price),
+                        quantity=self._fmt_qty(executed_qty),
+                        reduce_only="true",
+                        new_order_resp_type="RESULT",
+                    )
+                else:
+                    raise
             tp_data = tp_resp.data()
             logger.info(
                 f"{GREEN}TP placed @ ${self._tp_price} | "
-                f"Order ID: {getattr(tp_data, 'order_id', None)}{RESET}"
+                f"TIF: {tp_tif} | Order ID: {getattr(tp_data, 'order_id', None)}{RESET}"
             )
 
             self._state = _State.IN_POSITION
