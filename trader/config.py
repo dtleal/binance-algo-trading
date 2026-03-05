@@ -138,6 +138,26 @@ LDO_CONFIG = SymbolConfig(
     interval="1m",
 )
 
+RLC_CONFIG = SymbolConfig(
+    symbol="RLCUSDT",
+    asset="RLC",
+    tp_pct=3.0,         # Champion: 15m PDHL, +48.61% return (888 trades, 50.7% WR, maxDD=12.31%)
+    sl_pct=2.0,
+    min_bars=0,
+    confirm_bars=1,
+    vwap_prox=0.000,    # PDHL uses pdhl_prox_pct from DB; keep neutral in fallback config
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.40,  # 40% per trade
+    price_decimals=4,
+    qty_decimals=1,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="15m",
+    vwap_dist_stop=0.05,
+)
+
 GALA_CONFIG = SymbolConfig(
     symbol="GALAUSDT",
     asset="GALA",
@@ -577,6 +597,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "SANDUSDT": SAND_CONFIG,
     "MANAUSDT": MANA_CONFIG,
     "LDOUSDT": LDO_CONFIG,
+    "RLCUSDT": RLC_CONFIG,
     "GALAUSDT": GALA_CONFIG,
     "DOGEUSDT": DOGE_CONFIG,
     "1000SHIBUSDT": SHIB_CONFIG,

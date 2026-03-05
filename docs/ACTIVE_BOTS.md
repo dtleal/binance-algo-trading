@@ -1,4 +1,4 @@
-# Active Bots Portfolio (25)
+# Active Bots Portfolio (26)
 
 Source of truth:
 - Runtime strategy allocation: `Makefile` target `bots`
@@ -10,10 +10,10 @@ Last updated: 2026-03-05
 
 - MomShort: 4 bots
 - VWAPPullback: 14 bots
-- PDHL: 6 bots
+- PDHL: 7 bots
 - ORB: 1 bot
 
-Total: 25 bots
+Total: 26 bots
 
 ## Full Bot Matrix
 
@@ -23,6 +23,7 @@ Total: 25 bots
 | SANDUSDT | MomShort | 5m | 10.0 | 1.0 | 5 | 0 | 0.005 | yes | 0.40 | 30 | normal |
 | MANAUSDT | PDHL | 1m | 7.0 | 1.5 | 0 | 3 | 0.005 | no | 0.40 | 30 | normal |
 | LDOUSDT | PDHL | 1m | 7.0 | 2.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
+| RLCUSDT | PDHL | 15m | 3.0 | 2.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
 | SOLUSDT | MomShort | 1m | 7.0 | 5.0 | 8 | 0 | 0.002 | yes | 0.40 | 30 | normal |
 | THETAUSDT | MomShort | 5m | 3.0 | 5.0 | 3 | 2 | 0.005 | yes | 0.40 | 30 | normal |
 | GALAUSDT | VWAPPullback | 1m | 10.0 | 5.0 | 3 | 0 | 0.002 | no | 0.40 | 1 | monitoring |
@@ -57,3 +58,4 @@ Total: 25 bots
 |---|---|---|---:|---:|---|
 | MANAUSDT | PDHL | 1m | +95.61% | 13.87% | `data/sweeps/manausdt_1m_sweep.csv` |
 | LDOUSDT | PDHL | 1m | +79.96% | 18.23% | `data/sweeps/LDOUSDT_1m_sweep.csv` |
+| RLCUSDT | PDHL | 15m | +48.61% | 12.31% | `data/sweeps/RLCUSDT_15m_sweep.csv` |
