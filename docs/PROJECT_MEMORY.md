@@ -94,11 +94,11 @@ It supports:
 
 ## Active Bot Portfolio (Current)
 
-- Total active bots: 27
+- Total active bots: 28
 - Strategy split:
   - MomShort: 4
   - VWAPPullback: 14
-  - PDHL: 8
+  - PDHL: 9
   - ORB: 1
 - Canonical roster and params:
   - `docs/ACTIVE_BOTS.md`
@@ -246,6 +246,14 @@ It supports:
   - `tp_pct=7.0`, `sl_pct=2.0`, `confirm_bars=1`
   - `pos_size_pct=0.40`, `leverage=30`, `mode=normal`
   - `pdhl_prox_pct=0.000`, `be_profit_usd=0.50`
+- `ICXUSDT` was onboarded to the runtime portfolio as `PDHL` on `5m`:
+  - Selected onboarding profile (2026-03-05, explicit user choice despite robustness caveat):
+    - `tp_pct=7.0`, `sl_pct=2.0`, `confirm_bars=2`
+    - `pdhl_prox_pct=0.005`, `pos_size_pct=0.20`
+    - `champion_return_pct=47.31`, `champion_win_rate=44.6`, `champion_trades=879`, `champion_max_dd=13.27`
+  - Exchange precision for runtime/fallback:
+    - `price_decimals=4`, `qty_decimals=0`, `min_notional=5.0`
+  - `make bots` now starts `icxusdt` via `python -m trader pdhl --symbol icxusdt`.
 - PostgreSQL default database naming was migrated to the new project convention:
   - Physical DB rename executed: `binance_trader` -> `binance_algo_trading` (data preserved).
   - Local defaults/config references were aligned to `binance_algo_trading` in:
@@ -292,6 +300,9 @@ It supports:
     - `MAKER_ENTRY_TIMEOUT_SEC` (default `8`)
     - `MAKER_EXIT_TIMEOUT_SEC` (default `6`)
     - `MAKER_POLL_INTERVAL_SEC` (default `0.4`)
+- `PDHL` CLI fallback now honors per-symbol proximity from `trader/config.py` when DB is unavailable:
+  - `trader/cli.py` uses `SymbolConfig.vwap_prox` as the fallback source for `prox_pct`.
+  - This keeps fallback behavior aligned with symbol-specific PDHL configs such as `MANAUSDT`, `BCHUSDT`, and `ICXUSDT`.
 - ORB/PDHL logging stability fix:
   - Added missing ANSI color constant `CYAN` in `trader/bot_orb.py` and `trader/bot_pdhl.py`.
   - This prevents runtime close-path errors like `name 'CYAN' is not defined` during maker close logging.

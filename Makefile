@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -87,6 +87,7 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		(nohup poetry run python -m trader pdhl     --symbol ldousdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pdhl     --symbol rlcusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pdhl     --symbol mtlusdt       > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl     --symbol icxusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol solusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol galausdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol avaxusdt      > /dev/null 2>&1 &) && \
@@ -109,7 +110,7 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		(nohup poetry run python -m trader pullback --symbol aaveusdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol thetausdt     > /dev/null 2>&1 &)
 	@sleep 3
-	@echo "$(GREEN)✅ Bots started — 27 bots loading config from DB$(NC)"
+	@echo "$(GREEN)✅ Bots started — 28 bots loading config from DB$(NC)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -705,6 +706,12 @@ bot-bch-pdhl: ## Run PDHL bot for BCHUSDT (tp=10% sl=5% cf=1 prox=0.5% leverage=
 
 bot-bch-pdhl-dry: ## Run PDHL bot for BCHUSDT in dry-run mode
 	poetry run python -m trader pdhl --symbol bchusdt --leverage 30 --sl 5.0 --prox-pct 0.005 --confirm-bars 1 --pos-size 0.40 --tp 10.0 --dry-run
+
+bot-icx-pdhl: ## Run PDHL bot for ICXUSDT (5m, tp=7% sl=2% cf=2 prox=0.5%, champion +47.31%)
+	poetry run python -m trader pdhl --symbol icxusdt --leverage 30 --sl 2.0 --prox-pct 0.005 --confirm-bars 2 --pos-size 0.20 --tp 7.0
+
+bot-icx-pdhl-dry: ## Run ICXUSDT PDHL bot in dry-run mode
+	poetry run python -m trader pdhl --symbol icxusdt --dry-run --leverage 30 --sl 2.0 --prox-pct 0.005 --confirm-bars 2 --pos-size 0.20 --tp 7.0
 
 bot-magic-pdhl: ## Run PDHL bot for MAGICUSDT (tp=10% sl=5% cf=1 1h leverage=30, champion +90.75%)
 	poetry run python -m trader pdhl --symbol magicusdt --leverage 30 --sl 5.0 --prox-pct 0.0 --confirm-bars 1 --pos-size 0.40 --tp 10.0

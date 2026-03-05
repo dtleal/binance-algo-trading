@@ -108,7 +108,7 @@ MANA_CONFIG = SymbolConfig(
     sl_pct=1.5,
     min_bars=0,
     confirm_bars=3,
-    vwap_prox=0.000,    # PDHL uses pdhl_prox_pct from DB; keep neutral in fallback config
+    vwap_prox=0.005,    # 0.5% PDHL proximity (also used by config.py fallback)
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
@@ -126,7 +126,7 @@ LDO_CONFIG = SymbolConfig(
     sl_pct=2.0,
     min_bars=0,
     confirm_bars=1,
-    vwap_prox=0.000,    # PDHL uses pdhl_prox_pct from DB; keep neutral in fallback config
+    vwap_prox=0.000,
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
@@ -145,7 +145,7 @@ RLC_CONFIG = SymbolConfig(
     sl_pct=2.0,
     min_bars=0,
     confirm_bars=1,
-    vwap_prox=0.000,    # PDHL uses pdhl_prox_pct from DB; keep neutral in fallback config
+    vwap_prox=0.000,
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
@@ -165,7 +165,7 @@ MTL_CONFIG = SymbolConfig(
     sl_pct=5.0,
     min_bars=0,
     confirm_bars=1,
-    vwap_prox=0.000,    # PDHL uses pdhl_prox_pct from DB; keep neutral in fallback config
+    vwap_prox=0.000,
     entry_start_min=60,
     entry_cutoff_min=1320,
     eod_min=1430,
@@ -176,6 +176,25 @@ MTL_CONFIG = SymbolConfig(
     min_notional=5.0,
     interval="1m",
     vwap_dist_stop=0.03,
+)
+
+ICX_CONFIG = SymbolConfig(
+    symbol="ICXUSDT",
+    asset="ICX",
+    tp_pct=7.0,         # Champion: 5m PDHL, +47.31% return (879 trades, 44.6% WR, maxDD=13.27%)
+    sl_pct=2.0,
+    min_bars=0,
+    confirm_bars=2,
+    vwap_prox=0.005,    # 0.5% PDHL proximity (matches sweep champion)
+    entry_start_min=60,
+    entry_cutoff_min=1320,
+    eod_min=1430,
+    pos_size_pct=0.20,  # Keep champion risk sizing on a less-robust onboarding
+    price_decimals=4,
+    qty_decimals=0,
+    vol_filter=False,
+    min_notional=5.0,
+    interval="5m",
 )
 
 GALA_CONFIG = SymbolConfig(
@@ -619,6 +638,7 @@ SYMBOL_CONFIGS: dict[str, SymbolConfig] = {
     "LDOUSDT": LDO_CONFIG,
     "RLCUSDT": RLC_CONFIG,
     "MTLUSDT": MTL_CONFIG,
+    "ICXUSDT": ICX_CONFIG,
     "GALAUSDT": GALA_CONFIG,
     "DOGEUSDT": DOGE_CONFIG,
     "1000SHIBUSDT": SHIB_CONFIG,

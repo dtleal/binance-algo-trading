@@ -501,7 +501,12 @@ def main():
             capital=args.capital,
             dry_run=args.dry_run,
             sl_pct=_resolve(cfg.sl_pct if _db else None, args.sl, cfg.sl_pct, 0.3),
-            prox_pct=_resolve(extras.get("pdhl_prox_pct") if _db else None, args.prox_pct, None, 0.002),
+            prox_pct=_resolve(
+                extras.get("pdhl_prox_pct") if _db else None,
+                args.prox_pct,
+                None if _db else cfg.vwap_prox,
+                0.002,
+            ),
             confirm_bars=_resolve(cfg.confirm_bars if _db else None, args.confirm_bars, cfg.confirm_bars, 1),
             max_trades_per_day=_resolve(extras.get("max_trades_per_day") if _db else None, args.max_trades, None, 4),
             pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, cfg.pos_size_pct, 0.20),

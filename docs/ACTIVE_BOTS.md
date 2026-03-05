@@ -1,4 +1,4 @@
-# Active Bots Portfolio (27)
+# Active Bots Portfolio (28)
 
 Source of truth:
 - Runtime strategy allocation: `Makefile` target `bots`
@@ -10,10 +10,10 @@ Last updated: 2026-03-05
 
 - MomShort: 4 bots
 - VWAPPullback: 14 bots
-- PDHL: 8 bots
+- PDHL: 9 bots
 - ORB: 1 bot
 
-Total: 27 bots
+Total: 28 bots
 
 ## Full Bot Matrix
 
@@ -25,6 +25,7 @@ Total: 27 bots
 | LDOUSDT | PDHL | 1m | 7.0 | 2.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
 | RLCUSDT | PDHL | 15m | 3.0 | 2.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
 | MTLUSDT | PDHL | 1m | 5.0 | 5.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
+| ICXUSDT | PDHL | 5m | 7.0 | 2.0 | 0 | 2 | 0.005 | no | 0.20 | 30 | normal |
 | SOLUSDT | MomShort | 1m | 7.0 | 5.0 | 8 | 0 | 0.002 | yes | 0.40 | 30 | normal |
 | THETAUSDT | MomShort | 5m | 3.0 | 5.0 | 3 | 2 | 0.005 | yes | 0.40 | 30 | normal |
 | GALAUSDT | VWAPPullback | 1m | 10.0 | 5.0 | 3 | 0 | 0.002 | no | 0.40 | 1 | monitoring |
