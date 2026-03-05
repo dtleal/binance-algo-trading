@@ -61,6 +61,7 @@ CHAMPION_INFO: dict[str, dict] = {
     "AXSUSDT":      {"strategy": "VWAPPullback", "ret": None,   "wr": None,   "trades": None, "max_dd": None},
     "SANDUSDT":     {"strategy": "MomShort",     "ret": 27.61,  "wr": 34.0,   "trades": 250,  "max_dd": None},
     "MANAUSDT":     {"strategy": "MomShort",     "ret": 30.54,  "wr": 52.9,   "trades": 295,  "max_dd": None},
+    "LDOUSDT":      {"strategy": "PDHL",         "ret": 79.96,  "wr": 40.1,   "trades": 985,  "max_dd": 18.23},
     "GALAUSDT":     {"strategy": "VWAPPullback", "ret": 34.85,  "wr": 52.1,   "trades": 357,  "max_dd": None},
     "DOGEUSDT":     {"strategy": "VWAPPullback", "ret": 42.75,  "wr": 52.5,   "trades": 322,  "max_dd": 6.09},
     "1000SHIBUSDT": {"strategy": "VWAPPullback", "ret": 37.51,  "wr": 53.1,   "trades": 354,  "max_dd": None},

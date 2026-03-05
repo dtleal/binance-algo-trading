@@ -1,19 +1,19 @@
-# Active Bots Portfolio (24)
+# Active Bots Portfolio (25)
 
 Source of truth:
 - Runtime strategy allocation: `Makefile` target `bots`
 - Symbol parameters: `trader/config.py` (`SYMBOL_CONFIGS`)
 
-Last updated: 2026-03-04
+Last updated: 2026-03-05
 
 ## Strategy Distribution
 
 - MomShort: 4 bots
 - VWAPPullback: 14 bots
-- PDHL: 5 bots
+- PDHL: 6 bots
 - ORB: 1 bot
 
-Total: 24 bots
+Total: 25 bots
 
 ## Full Bot Matrix
 
@@ -22,6 +22,7 @@ Total: 24 bots
 | AXSUSDT | MomShort | 1m | 10.0 | 5.0 | 3 | 2 | 0.005 | no | 0.40 | 30 | normal |
 | SANDUSDT | MomShort | 5m | 10.0 | 1.0 | 5 | 0 | 0.005 | yes | 0.40 | 30 | normal |
 | MANAUSDT | PDHL | 1m | 7.0 | 1.5 | 0 | 3 | 0.005 | no | 0.40 | 30 | normal |
+| LDOUSDT | PDHL | 1m | 7.0 | 2.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
 | SOLUSDT | MomShort | 1m | 7.0 | 5.0 | 8 | 0 | 0.002 | yes | 0.40 | 30 | normal |
 | THETAUSDT | MomShort | 5m | 3.0 | 5.0 | 3 | 2 | 0.005 | yes | 0.40 | 30 | normal |
 | GALAUSDT | VWAPPullback | 1m | 10.0 | 5.0 | 3 | 0 | 0.002 | no | 0.40 | 1 | monitoring |
@@ -55,3 +56,4 @@ Total: 24 bots
 | Symbol | Candidate Strategy | TF | Return | Max DD | Source |
 |---|---|---|---:|---:|---|
 | MANAUSDT | PDHL | 1m | +95.61% | 13.87% | `data/sweeps/manausdt_1m_sweep.csv` |
+| LDOUSDT | PDHL | 1m | +79.96% | 18.23% | `data/sweeps/LDOUSDT_1m_sweep.csv` |

@@ -84,6 +84,7 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		(nohup poetry run python -m trader bot      --symbol axsusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol sandusdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pdhl     --symbol manausdt      > /dev/null 2>&1 &) && \
+		(nohup poetry run python -m trader pdhl     --symbol ldousdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol solusdt       > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol galausdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader pullback --symbol avaxusdt      > /dev/null 2>&1 &) && \
@@ -106,7 +107,7 @@ bots: redis ## Start all trading bots — strategy params auto-loaded from DB (f
 		(nohup poetry run python -m trader pullback --symbol aaveusdt      > /dev/null 2>&1 &) && \
 		(nohup poetry run python -m trader bot      --symbol thetausdt     > /dev/null 2>&1 &)
 	@sleep 3
-	@echo "$(GREEN)✅ Bots started — 24 bots loading config from DB$(NC)"
+	@echo "$(GREEN)✅ Bots started — 25 bots loading config from DB$(NC)"
 	@echo ""
 
 start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
@@ -133,10 +134,10 @@ start: redis ## 🚀 Start EVERYTHING (dashboard + all bots)
 	@echo ""
 	@echo "$(BLUE)📊 Dashboard:$(NC) $(YELLOW)http://localhost:8080$(NC)"
 	@echo ""
-	@echo "$(BLUE)🤖 Active Bots:$(NC) 24 total"
+	@echo "$(BLUE)🤖 Active Bots:$(NC) 25 total"
 	@echo "   • 4 MomShort    — AXS, SAND, SOL, THETA"
 	@echo "   • 14 VWAPPullback — GALA, AVAX, DOGE, SHIB, XRP, ETH, XAU, XMR, UNI, APT, PEPE, DASH, ZEC, AAVE"
-	@echo "   • 5 PDHL        — LTC, LINK, BCH, MAGIC, MANA"
+	@echo "   • 6 PDHL        — LTC, LINK, BCH, MAGIC, MANA, LDO"
 	@echo "   • 1 ORB         — KSM"
 	@echo ""
 	@echo "$(BLUE)📝 Useful commands:$(NC)"
@@ -227,6 +228,12 @@ bot-mana: ## Run PDHL bot for MANAUSDT (1m, tp=7% sl=1.5% cf=3)
 
 bot-mana-dry: ## Run MANAUSDT PDHL bot in dry-run mode
 	poetry run python -m trader pdhl --symbol manausdt --dry-run --leverage $(LEVERAGE)
+
+bot-ldo-pdhl: ## Run PDHL bot for LDOUSDT (1m, tp=7% sl=2% cf=1, champion +79.96%)
+	poetry run python -m trader pdhl --symbol ldousdt --leverage $(LEVERAGE) --tp 7.0 --sl 2.0 --confirm-bars 1 --prox-pct 0.0 --pos-size 0.40
+
+bot-ldo-pdhl-dry: ## Run LDOUSDT PDHL bot in dry-run mode
+	poetry run python -m trader pdhl --symbol ldousdt --dry-run --leverage $(LEVERAGE) --tp 7.0 --sl 2.0 --confirm-bars 1 --prox-pct 0.0 --pos-size 0.40
 
 bot-gala: ## Run VWAPPullback trading bot for GALAUSDT
 	poetry run python -m trader pullback --symbol galausdt --leverage $(LEVERAGE)
