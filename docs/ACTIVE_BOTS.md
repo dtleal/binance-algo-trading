@@ -22,7 +22,7 @@ Total: 24 bots
 | AXSUSDT | MomShort | 1m | 10.0 | 5.0 | 3 | 2 | 0.005 | no | 0.40 | 30 | normal |
 | SANDUSDT | MomShort | 5m | 10.0 | 1.0 | 5 | 0 | 0.005 | yes | 0.40 | 30 | normal |
 | MANAUSDT | PDHL | 1m | 7.0 | 1.5 | 0 | 3 | 0.005 | no | 0.40 | 30 | normal |
-| SOLUSDT | MomShort | 1m | 7.0 | 5.0 | 8 | 0 | 0.002 | yes | 0.40 | 1 | monitoring |
+| SOLUSDT | MomShort | 1m | 7.0 | 5.0 | 8 | 0 | 0.002 | yes | 0.40 | 30 | normal |
 | THETAUSDT | MomShort | 5m | 3.0 | 5.0 | 3 | 2 | 0.005 | yes | 0.40 | 30 | normal |
 | GALAUSDT | VWAPPullback | 1m | 10.0 | 5.0 | 3 | 0 | 0.002 | no | 0.40 | 1 | monitoring |
 | AVAXUSDT | VWAPPullback | 1m | 7.0 | 2.0 | 30 | 0 | 0.005 | no | 0.40 | 30 | normal |

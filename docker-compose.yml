@@ -1,9 +1,8 @@
-version: '3.8'
+name: binance-algo-trading
 
 services:
   redis:
     image: redis:7-alpine
-    container_name: binance-trader-redis
     ports:
       - "6379:6379"
     volumes:
@@ -20,7 +19,6 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    container_name: binance-trader-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-trader}
@@ -40,7 +38,6 @@ services:
 
   pgadmin:
     image: dpage/pgadmin4:latest
-    container_name: binance-trader-pgadmin
     restart: unless-stopped
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@trader.com
@@ -57,7 +54,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: binance-trader-backend
     ports:
       - "8080:8080"
     environment:
@@ -84,9 +80,11 @@ services:
 
 volumes:
   redis-data:
-    driver: local
+    name: binance-algo-trading_redis-data
+    external: true
   pg_data:
-    driver: local
+    name: binance-algo-trading_pg_data
+    external: true
 
 networks:
   trader-network:

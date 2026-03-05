@@ -7,19 +7,20 @@ RUN apt-get update && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
-RUN pip install poetry==1.8.2
+# Install Poetry (2.x supports PEP 621 [project] metadata in pyproject.toml)
+RUN pip install poetry==2.1.3
 
 # Copy dependency files
 COPY pyproject.toml ./
 COPY poetry.lock* ./
 
-# Install dependencies (no dev dependencies in production)
+# Install dependencies (main group only, no dev dependencies in production)
 RUN poetry config virtualenvs.create false \
-    && poetry install --no-dev --no-interaction --no-ansi
+    && poetry install --only main --no-root --no-interaction --no-ansi
 
 # Copy application code
 COPY trader/ ./trader/
+COPY db/ ./db/
 COPY frontend/dist/ ./frontend/dist/
 
 # Expose port

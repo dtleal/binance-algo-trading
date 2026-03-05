@@ -158,10 +158,16 @@ It supports:
   - If OpenAI key is missing, backend falls back to Anthropic when available.
   - Runtime provider failures no longer return HTTP 500 HTML:
     - `/api/chat` now returns JSON with human-readable error and tries provider fallback when possible.
-- For symbols `ETHUSDT`, `GALAUSDT`, `SOLUSDT`, `XAUUSDT`, `1000SHIBUSDT`:
+- For symbols `ETHUSDT`, `GALAUSDT`, `XAUUSDT`, `1000SHIBUSDT`:
   - `symbol_configs.pos_size_pct = 0.40`
   - `leverage = 1`
   - This avoids low notional startup failures with small account balances.
+- `SOLUSDT` was moved out of recovery mode:
+  - DB `symbol_configs.mode` set to `normal` (was `monitoring`)
+  - Runtime risk params restored to standard MomShort profile:
+    - `pos_size_pct = 0.40`
+    - `leverage = 30`
+  - Reason: only 1 closed trade on 2026-03-04 (BRT), no longer treated as recovery symbol.
 - `MANAUSDT` was migrated from `MomShort` to `PDHL` in runtime portfolio:
   - DB `symbol_configs` updated to:
     - `strategy_name=PDHL`, `interval=1m`
@@ -199,3 +205,16 @@ It supports:
 - Docker Postgres healthcheck now targets the configured DB explicitly:
   - `pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}`
   - Prevents recurring Postgres log spam like `FATAL: database "trader" does not exist`.
+- Docker Compose naming was normalized for this repo:
+  - `docker-compose.yml` now sets `name: binance-algo-trading`.
+  - Fixed `container_name` entries were removed to avoid cross-project name conflicts.
+  - Containers now follow Compose default naming (project/service/index), e.g. `binance-algo-trading-postgres-1`.
+  - Finalized migration to `binance-algo-trading` volume names:
+    - Postgres: `binance-algo-trading_pg_data`
+    - Redis: `binance-algo-trading_redis-data`
+  - Both named volumes are declared as `external: true` in Compose to avoid project-label warnings.
+- Docker backend image build was fixed for current project layout:
+  - `Dockerfile` now uses `poetry==2.1.3` (compatible with `pyproject.toml` PEP 621 `[project]` metadata).
+  - Dependency install uses `poetry install --only main --no-root` to avoid package install before source copy.
+  - Backend image now copies both `trader/` and `db/` modules; this fixes runtime startup error:
+    - `ModuleNotFoundError: No module named 'db'`.

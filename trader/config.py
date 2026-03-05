@@ -215,8 +215,8 @@ SOL_CONFIG = SymbolConfig(
     min_notional=5.0,
     vol_filter=True,    # Volume filter enabled for MomShort
     interval="1m",
-    leverage=1,
-    mode="monitoring",
+    leverage=30,
+    mode="normal",
 )
 
 AVAX_CONFIG = SymbolConfig(
