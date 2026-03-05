@@ -21,7 +21,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -186,6 +186,10 @@ def _safe_float(v, default=0.0) -> float:
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+class ProtectionConfigUpdate(BaseModel):
+    be_profit_usd: float
 
 
 # ── REST endpoints ────────────────────────────────────────────────────────────
@@ -398,6 +402,56 @@ async def api_invert_position(symbol: str):
         "ok": True, "symbol": sym,
         "closed": direction, "opened": new_direction,
         "qty": qty, "entry": new_entry, "sl": sl_price, "tp": tp_price,
+    }
+
+
+@app.patch("/api/symbol_configs/{symbol}/protection")
+async def api_update_symbol_protection(symbol: str, payload: ProtectionConfigUpdate):
+    """Update per-symbol protection params stored in DB."""
+    sym = symbol.upper()
+    value = float(payload.be_profit_usd)
+    if value <= 0:
+        raise HTTPException(status_code=400, detail="be_profit_usd must be > 0")
+
+    try:
+        import db
+        pool = db.get_pool()
+        row = await pool.fetchrow(
+            """
+            UPDATE symbol_configs
+            SET be_profit_usd = $1, updated_at = NOW()
+            WHERE symbol = $2
+            RETURNING symbol, be_profit_usd
+            """,
+            value,
+            sym,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"DB update failed: {e}") from e
+
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Symbol {sym} not found")
+
+    # Reflect new value in Redis bot state config so UI shows it immediately.
+    updated_state_keys: list[str] = []
+    try:
+        states = bot_registry.get_states()
+        for key, state in states.items():
+            if state.get("symbol", "").upper() != sym:
+                continue
+            cfg = dict(state.get("config") or {})
+            cfg["be_profit_usd"] = float(row["be_profit_usd"])
+            bot_registry.update(key, {"config": cfg})
+            updated_state_keys.append(key)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "symbol": row["symbol"],
+        "be_profit_usd": float(row["be_profit_usd"]),
+        "updated_state_keys": updated_state_keys,
+        "restart_required_for_running_bots": True,
     }
 
 

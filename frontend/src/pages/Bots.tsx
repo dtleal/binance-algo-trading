@@ -72,8 +72,43 @@ function BotCard({
   const pnl      = live?.unrealized_pnl     ?? state.unrealized_pnl ?? 0;
   const pnlPct   = live?.unrealized_pnl_pct ?? state.unrealized_pnl_pct ?? 0;
   const botState = state.state;
+  const beThreshold = state.config?.be_profit_usd ?? 0.5;
+  const [beProfitInput, setBeProfitInput] = useState(beThreshold.toFixed(2));
+  const [beSaving, setBeSaving] = useState(false);
+  const [beStatus, setBeStatus] = useState<string | null>(null);
 
   const decimals = price && price > 100 ? 2 : price && price > 1 ? 4 : 6;
+
+  useEffect(() => {
+    setBeProfitInput(beThreshold.toFixed(2));
+  }, [beThreshold, state.symbol]);
+
+  async function saveBeProfitUsd() {
+    const value = parseFloat(beProfitInput);
+    if (!Number.isFinite(value) || value <= 0) {
+      setBeStatus("Valor inválido");
+      return;
+    }
+    setBeSaving(true);
+    setBeStatus(null);
+    try {
+      const resp = await fetch(`/api/symbol_configs/${state.symbol}/protection`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ be_profit_usd: value }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data?.ok === false) {
+        throw new Error(data?.detail || data?.error || "Falha ao salvar");
+      }
+      setBeStatus("Salvo (reinicie os bots para aplicar)");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Falha ao salvar";
+      setBeStatus(msg);
+    } finally {
+      setBeSaving(false);
+    }
+  }
 
   return (
     <div
@@ -300,6 +335,36 @@ function BotCard({
                 <span className="text-gray-300 font-medium">{state.config.max_trades_per_day}</span>
               </div>
             )}
+            <div className="col-span-2 mt-1 pt-2 border-t border-gray-800">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-gray-500">Auto 0a0 em lucro (USDT):</span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    value={beProfitInput}
+                    onChange={(e) => setBeProfitInput(e.target.value)}
+                    className="w-20 bg-gray-950 border border-gray-700 rounded px-2 py-1 text-gray-200 text-xs
+                      focus:outline-none focus:border-gray-500 [appearance:textfield]
+                      [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={saveBeProfitUsd}
+                    disabled={beSaving}
+                    className="px-2 py-1 rounded border border-emerald-700 text-emerald-300 hover:bg-emerald-900/30 disabled:opacity-50"
+                  >
+                    {beSaving ? "..." : "Salvar"}
+                  </button>
+                </div>
+              </div>
+              {beStatus && (
+                <div className={`mt-1 text-[10px] ${beStatus === "Salvo" ? "text-emerald-400" : "text-amber-400"}`}>
+                  {beStatus}
+                </div>
+              )}
+            </div>
             {state.config.min_notional != null && (
               <div className="flex justify-between">
                 <span className="text-gray-500">Min Notional:</span>

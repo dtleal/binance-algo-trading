@@ -33,7 +33,7 @@ from trader import events as _events, bot_registry as _registry
 from trader.notifications import (
     notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
     notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
-    notify_startup_error,
+    notify_startup_error, notify_stop_loss_updated,
 )
 
 
@@ -101,6 +101,7 @@ class VWAPPullbackBot:
         vwap_dist_stop: float = 0.0,
         price_decimals: int | None = None,
         qty_decimals: int | None = None,
+        be_profit_usd: float = 0.50,
         time_stop_minutes: int = 20,
         time_stop_min_progress_pct: float = 0.0,
         adverse_exit_bars: int = 3,
@@ -115,6 +116,7 @@ class VWAPPullbackBot:
         self.eod_min = eod_min
         self.pos_size_pct = pos_size_pct
         self.vwap_dist_stop = vwap_dist_stop
+        self.be_profit_usd = max(0.0, float(be_profit_usd))
         self.min_notional = 5.0  # Binance default minimum
         self.interval = interval
         self._ws_reconnect_delay_sec = 5
@@ -193,6 +195,7 @@ class VWAPPullbackBot:
         self._entry_ts_ms: int | None = None
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
         self.time_stop_minutes = time_stop_minutes
         self.time_stop_min_progress_pct = time_stop_min_progress_pct
         self.adverse_exit_bars = adverse_exit_bars
@@ -218,11 +221,13 @@ class VWAPPullbackBot:
         self._entry_ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
 
     def _reset_position_guard(self) -> None:
         self._entry_ts_ms = None
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
 
     def _position_guard_reason(
         self,
@@ -640,6 +645,73 @@ class VWAPPullbackBot:
                 return
         raise SystemExit("Could not find USDT balance")
 
+    def _is_sl_at_or_better_than_entry(self) -> bool:
+        if self._entry_price <= 0 or self._sl_price <= 0 or not self._direction:
+            return False
+        if self._direction == "long":
+            return self._sl_price >= self._entry_price
+        return self._sl_price <= self._entry_price
+
+    async def _move_sl_to_breakeven(self, reason: str) -> bool:
+        if self._entry_price <= 0 or self._position_qty <= 0 or not self._direction:
+            return False
+        if self._is_sl_at_or_better_than_entry():
+            self._be_triggered = True
+            return True
+
+        old_sl = self._sl_price
+        new_sl = self._safe_trigger_price(self._entry_price)
+        close_side = "SELL" if self._direction == "long" else "BUY"
+        self._sl_price = new_sl
+
+        if self.dry_run:
+            logger.info(
+                f"{YELLOW}[DRY-RUN] Auto BE: SL ${old_sl} → ${new_sl}{RESET}"
+            )
+            _registry.update(self._reg_key, {"sl_price": new_sl, "tp_price": self._tp_price})
+            self._be_triggered = True
+            return True
+
+        from binance_common.errors import BadRequestError
+
+        try:
+            try:
+                self._client.rest_api.cancel_all_algo_open_orders(symbol=self.symbol)
+            except BadRequestError:
+                pass
+
+            self._client.rest_api.new_algo_order(
+                algo_type="CONDITIONAL",
+                symbol=self.symbol,
+                side=close_side,
+                type="STOP_MARKET",
+                trigger_price=new_sl,
+                close_position="true",
+            )
+            if self._tp_price > 0:
+                self._client.rest_api.new_algo_order(
+                    algo_type="CONDITIONAL",
+                    symbol=self.symbol,
+                    side=close_side,
+                    type="TAKE_PROFIT_MARKET",
+                    trigger_price=self._tp_price,
+                    close_position="true",
+                )
+            _registry.update(self._reg_key, {"sl_price": new_sl, "tp_price": self._tp_price})
+            notify_stop_loss_updated(
+                self.symbol,
+                self._direction,
+                old_sl,
+                new_sl,
+                reason,
+            )
+            self._be_triggered = True
+            return True
+        except Exception as e:
+            logger.info(f"{RED}Failed to move SL to breakeven: {e}{RESET}")
+            self._sl_price = old_sl
+            return False
+
     # ------------------------------------------------------------------
     # Main entry
     # ------------------------------------------------------------------
@@ -654,6 +726,7 @@ class VWAPPullbackBot:
             f"Leverage: {self.leverage}x | "
             f"Interval: {self.interval} | "
             f"TP: {self.tp_pct}% | SL: {self.sl_pct}% | "
+            f"Auto BE: +${self.be_profit_usd:.2f} | "
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
             f"EMA period: {self._ema.period} | "
             f"Max trades/day: {self._signal.max_trades_per_day} | "
@@ -710,6 +783,7 @@ class VWAPPullbackBot:
                 "vwap_prox": self._signal.vwap_prox,
                 "vwap_window_days": self._vwap.window_days,
                 "max_trades_per_day": self._signal.max_trades_per_day,
+                "be_profit_usd": self.be_profit_usd,
                 "capital": self.capital,
                 "per_trade": per_trade,
             },
@@ -921,6 +995,16 @@ class VWAPPullbackBot:
             else:
                 pnl = (self._entry_price - c) * self._position_qty
                 pnl_pct = ((self._entry_price - c) / self._entry_price) * 100
+            if (
+                not self._be_triggered
+                and self.be_profit_usd > 0
+                and pnl >= self.be_profit_usd
+            ):
+                asyncio.get_event_loop().create_task(
+                    self._move_sl_to_breakeven(
+                        f"Auto BE +${self.be_profit_usd:.2f}"
+                    )
+                )
             color = GREEN if pnl >= 0 else RED
             guard_reason = self._position_guard_reason(candle_open_ms, o, c, pnl_pct, self._direction or "short")
             if guard_reason:

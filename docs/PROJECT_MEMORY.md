@@ -218,6 +218,15 @@ It supports:
   - Dependency install uses `poetry install --only main --no-root` to avoid package install before source copy.
   - Backend image now copies both `trader/` and `db/` modules; this fixes runtime startup error:
     - `ModuleNotFoundError: No module named 'db'`.
+- New configurable protection was added for live bots:
+  - `symbol_configs.be_profit_usd` (default `0.50`) defines unrealized profit in USDT that triggers auto-breakeven.
+  - When position PnL reaches `be_profit_usd`, bot moves SL to entry (`0a0`) automatically and sends Telegram notification via `notify_stop_loss_updated(...)`.
+  - Implemented in active bots: `MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`.
+  - UI/API support:
+    - `PATCH /api/symbol_configs/{symbol}/protection` updates `be_profit_usd` in DB.
+    - `/bots` configuration panel now allows editing/saving `be_profit_usd` per symbol.
+  - Runtime note:
+    - Changing `be_profit_usd` through UI updates DB/state display immediately, but running bot processes need restart to apply new threshold internally.
 - PostgreSQL default database naming was migrated to the new project convention:
   - Physical DB rename executed: `binance_trader` -> `binance_algo_trading` (data preserved).
   - Local defaults/config references were aligned to `binance_algo_trading` in:

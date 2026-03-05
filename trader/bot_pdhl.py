@@ -78,6 +78,7 @@ class PDHLBot:
         pos_size_pct: float = 0.20,
         be_r: float = 2.0,
         trail_step: float = 0.5,
+        be_profit_usd: float = 0.50,
         tp_pct: float | None = None,
         interval: str = "1m",
         price_decimals: int | None = None,
@@ -96,6 +97,7 @@ class PDHLBot:
         self.pos_size_pct = pos_size_pct
         self.be_r = be_r
         self.trail_step = trail_step
+        self.be_profit_usd = max(0.0, float(be_profit_usd))
         self.tp_pct = tp_pct
         self.min_notional = 5.0
         self.interval = interval
@@ -173,6 +175,7 @@ class PDHLBot:
         self._entry_ts_ms: int | None = None
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
         self.time_stop_minutes = time_stop_minutes
         self.time_stop_min_progress_pct = time_stop_min_progress_pct
         self.adverse_exit_bars = adverse_exit_bars
@@ -196,11 +199,13 @@ class PDHLBot:
         self._entry_ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
 
     def _reset_position_guard(self) -> None:
         self._entry_ts_ms = None
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
 
     def _position_guard_reason(
         self,
@@ -600,6 +605,79 @@ class PDHLBot:
                 return
         raise SystemExit("Could not find USDT balance")
 
+    def _is_sl_at_or_better_than_entry(self) -> bool:
+        if self._entry_price <= 0 or self._sl_price <= 0 or not self._direction:
+            return False
+        if self._direction == "long":
+            return self._sl_price >= self._entry_price
+        return self._sl_price <= self._entry_price
+
+    async def _move_sl_to_breakeven(self, reason: str) -> bool:
+        if self._entry_price <= 0 or self._position_qty <= 0 or not self._direction:
+            return False
+        if self._is_sl_at_or_better_than_entry():
+            self._be_triggered = True
+            if self.tp_pct is None:
+                self._sl_milestone = max(self._sl_milestone, 2)
+            return True
+
+        old_sl = self._sl_price
+        old_milestone = self._sl_milestone
+        new_sl = self._safe_trigger_price(self._entry_price)
+        close_side = "SELL" if self._direction == "long" else "BUY"
+        self._sl_price = new_sl
+        if self.tp_pct is None:
+            self._sl_milestone = max(self._sl_milestone, 2)
+
+        if self.dry_run:
+            logger.info(
+                f"{YELLOW}[DRY-RUN] Auto BE: SL ${old_sl} → ${new_sl}{RESET}"
+            )
+            _registry.update(self._reg_key, {"sl_price": new_sl, "tp_price": self._tp_price or None})
+            self._be_triggered = True
+            return True
+
+        from binance_common.errors import BadRequestError
+
+        try:
+            try:
+                self._client.rest_api.cancel_all_algo_open_orders(symbol=self.symbol)
+            except BadRequestError:
+                pass
+
+            self._client.rest_api.new_algo_order(
+                algo_type="CONDITIONAL",
+                symbol=self.symbol,
+                side=close_side,
+                type="STOP_MARKET",
+                trigger_price=new_sl,
+                close_position="true",
+            )
+            if self._tp_price > 0:
+                self._client.rest_api.new_algo_order(
+                    algo_type="CONDITIONAL",
+                    symbol=self.symbol,
+                    side=close_side,
+                    type="TAKE_PROFIT_MARKET",
+                    trigger_price=self._tp_price,
+                    close_position="true",
+                )
+            _registry.update(self._reg_key, {"sl_price": new_sl, "tp_price": self._tp_price or None})
+            notify_stop_loss_updated(
+                self.symbol,
+                self._direction,
+                old_sl,
+                new_sl,
+                reason,
+            )
+            self._be_triggered = True
+            return True
+        except Exception as e:
+            logger.info(f"{RED}Failed to move SL to breakeven: {e}{RESET}")
+            self._sl_price = old_sl
+            self._sl_milestone = old_milestone
+            return False
+
     # ------------------------------------------------------------------
     # Main entry
     # ------------------------------------------------------------------
@@ -618,6 +696,7 @@ class PDHLBot:
             f"Leverage: {self.leverage}x | "
             f"Interval: {self.interval} | "
             f"{exit_mode} | "
+            f"Auto BE: +${self.be_profit_usd:.2f} | "
             f"prox={self._signal.prox_pct*100:.2f}% confirm={self._signal.confirm_bars} | "
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
             f"Max trades/day: {self._signal.max_trades_per_day} | "
@@ -669,6 +748,7 @@ class PDHLBot:
                 "prox_pct": self._signal.prox_pct,
                 "confirm_bars": self._signal.confirm_bars,
                 "max_trades_per_day": self._signal.max_trades_per_day,
+                "be_profit_usd": self.be_profit_usd,
                 "capital": self.capital,
                 "per_trade": per_trade,
             },
@@ -868,14 +948,25 @@ class PDHLBot:
                     })
                     return
 
-            self._check_trailing_sl(h, l)
-
             if self._direction == "long":
                 pnl = (c - self._entry_price) * self._position_qty
                 pnl_pct = ((c - self._entry_price) / self._entry_price) * 100
             else:
                 pnl = (self._entry_price - c) * self._position_qty
                 pnl_pct = ((self._entry_price - c) / self._entry_price) * 100
+            if (
+                not self._be_triggered
+                and self.be_profit_usd > 0
+                and pnl >= self.be_profit_usd
+            ):
+                asyncio.get_event_loop().create_task(
+                    self._move_sl_to_breakeven(
+                        f"Auto BE +${self.be_profit_usd:.2f}"
+                    )
+                )
+
+            self._check_trailing_sl(h, l)
+
             color = GREEN if pnl >= 0 else RED
             guard_reason = self._position_guard_reason(candle_open_ms, o, c, pnl_pct, self._direction or "short")
             if guard_reason:

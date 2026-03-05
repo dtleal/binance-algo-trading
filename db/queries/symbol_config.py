@@ -10,7 +10,8 @@ async def get_symbol_config(pool: asyncpg.Pool, symbol: str):
     SymbolConfig: standard fields used by all bots.
     extras_dict: strategy-specific fields not in the dataclass
                  (ema_period, fast_period, slow_period, range_mins,
-                  pdhl_prox_pct, max_trades_per_day, be_r, trail_step, leverage).
+                  pdhl_prox_pct, max_trades_per_day, be_r, trail_step,
+                  leverage, be_profit_usd).
 
     Raises RuntimeError if symbol not found.
     """
@@ -45,6 +46,11 @@ async def get_symbol_config(pool: asyncpg.Pool, symbol: str):
         mode=row["mode"] or "normal",
     )
 
+    try:
+        be_profit_usd = row["be_profit_usd"]
+    except Exception:
+        be_profit_usd = None
+
     extras = {
         "strategy_name":      row["strategy_name"],
         "ema_period":         row["ema_period"],
@@ -56,6 +62,7 @@ async def get_symbol_config(pool: asyncpg.Pool, symbol: str):
         "be_r":               float(row["be_r"]) if row["be_r"] else None,
         "trail_step":         float(row["trail_step"]) if row["trail_step"] else None,
         "leverage":           row["leverage"] or 30,
+        "be_profit_usd":      float(be_profit_usd) if be_profit_usd is not None else 0.50,
         "mode":               row["mode"] or "normal",
         "active":             row["active"],
     }

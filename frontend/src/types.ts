@@ -65,6 +65,7 @@ export interface BotState {
     vwap_prox?: number;
     vwap_window_days?: number;
     max_trades_per_day?: number;
+    be_profit_usd?: number;
   };
 }
 

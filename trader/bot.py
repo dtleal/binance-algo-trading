@@ -24,7 +24,7 @@ from trader import events as _events, bot_registry as _registry
 from trader.notifications import (
     notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
     notify_position_closed, notify_eod_close, notify_error, notify_cooldown,
-    notify_startup_error,
+    notify_startup_error, notify_stop_loss_updated,
 )
 
 def _parse_proxy(url: str) -> dict | None:
@@ -70,6 +70,7 @@ class MomShortBot:
         leverage: int = DEFAULT_LEVERAGE,
         capital: float | None = None,
         dry_run: bool = False,
+        be_profit_usd: float = 0.50,
         time_stop_minutes: int = 20,
         time_stop_min_progress_pct: float = 0.0,
         adverse_exit_bars: int = 3,
@@ -81,6 +82,7 @@ class MomShortBot:
         self.leverage = leverage
         self.capital = capital
         self.dry_run = dry_run
+        self.be_profit_usd = max(0.0, float(be_profit_usd))
 
         # Precision (runtime-adjusted from exchange info at startup)
         self._price_decimals = cfg.price_decimals
@@ -140,6 +142,7 @@ class MomShortBot:
         self._entry_ts_ms: int | None = None
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
         self.time_stop_minutes = time_stop_minutes
         self.time_stop_min_progress_pct = time_stop_min_progress_pct
         self.adverse_exit_bars = adverse_exit_bars
@@ -165,11 +168,13 @@ class MomShortBot:
         self._entry_ts_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
 
     def _reset_position_guard(self) -> None:
         self._entry_ts_ms = None
         self._adverse_count = 0
         self._risk_exit_pending = False
+        self._be_triggered = False
 
     def _position_guard_reason(self, candle_open_ms: int, o: float, c: float, pnl_pct: float) -> str | None:
         if self._risk_exit_pending:
@@ -485,6 +490,64 @@ class MomShortBot:
                 return
         raise SystemExit("Could not find USDT balance")
 
+    def _is_sl_at_or_better_than_entry(self) -> bool:
+        # For shorts, "better" SL means lower or equal than entry.
+        return self._sl_price > 0 and self._entry_price > 0 and self._sl_price <= self._entry_price
+
+    async def _move_sl_to_breakeven(self, reason: str) -> bool:
+        if self._entry_price <= 0 or self._position_qty <= 0:
+            return False
+        if self._is_sl_at_or_better_than_entry():
+            self._be_triggered = True
+            return True
+
+        old_sl = self._sl_price
+        new_sl = self._safe_trigger_price(self._entry_price)
+        self._sl_price = new_sl
+
+        if self.dry_run:
+            logger.info(
+                f"{YELLOW}[DRY-RUN] Auto BE: SL ${old_sl} → ${new_sl}{RESET}"
+            )
+            _registry.update(self._reg_key, {"sl_price": new_sl})
+            self._be_triggered = True
+            return True
+
+        from binance_common.errors import BadRequestError
+
+        try:
+            try:
+                self._client.rest_api.cancel_all_algo_open_orders(symbol=self.symbol)
+            except BadRequestError:
+                pass
+
+            # Re-place SL at entry (breakeven) and re-place TP unchanged.
+            self._client.rest_api.new_algo_order(
+                algo_type="CONDITIONAL",
+                symbol=self.symbol,
+                side="BUY",
+                type="STOP_MARKET",
+                trigger_price=self._fmt_price(new_sl),
+                close_position="true",
+            )
+            if self._tp_price > 0:
+                self._client.rest_api.new_algo_order(
+                    algo_type="CONDITIONAL",
+                    symbol=self.symbol,
+                    side="BUY",
+                    type="TAKE_PROFIT_MARKET",
+                    trigger_price=self._fmt_price(self._tp_price),
+                    close_position="true",
+                )
+            _registry.update(self._reg_key, {"sl_price": new_sl, "tp_price": self._tp_price})
+            notify_stop_loss_updated(self.symbol, "short", old_sl, new_sl, reason)
+            self._be_triggered = True
+            return True
+        except Exception as e:
+            logger.info(f"{RED}Failed to move SL to breakeven: {e}{RESET}")
+            self._sl_price = old_sl
+            return False
+
     # ------------------------------------------------------------------
     # Main entry
     # ------------------------------------------------------------------
@@ -499,6 +562,7 @@ class MomShortBot:
             f"Leverage: {self.leverage}x | "
             f"Interval: {self.cfg.interval} | "
             f"TP: {self.cfg.tp_pct}% | SL: {self.cfg.sl_pct}% | "
+            f"Auto BE: +${self.be_profit_usd:.2f} | "
             f"Position size: {self.cfg.pos_size_pct * 100:.0f}% | "
             f"WS stale watchdog: {self._ws_stale_after_sec}s"
             f"{vwap_dist_label}"
@@ -547,6 +611,7 @@ class MomShortBot:
                 "tp_pct": self.cfg.tp_pct,
                 "sl_pct": self.cfg.sl_pct,
                 "pos_size_pct": self.cfg.pos_size_pct,
+                "be_profit_usd": self.be_profit_usd,
                 "min_notional": self.cfg.min_notional,
                 "capital": self.capital,
                 "per_trade": per_trade,
@@ -743,6 +808,16 @@ class MomShortBot:
             pnl_per_unit = self._entry_price - c
             total_pnl = pnl_per_unit * self._position_qty
             pnl_pct = (pnl_per_unit / self._entry_price) * 100 if self._entry_price else 0
+            if (
+                not self._be_triggered
+                and self.be_profit_usd > 0
+                and total_pnl >= self.be_profit_usd
+            ):
+                asyncio.get_event_loop().create_task(
+                    self._move_sl_to_breakeven(
+                        f"Auto BE +${self.be_profit_usd:.2f}"
+                    )
+                )
             guard_reason = self._position_guard_reason(candle_open_ms, o, c, pnl_pct)
             if guard_reason:
                 self._risk_exit_pending = True

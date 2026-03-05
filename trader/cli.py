@@ -14,7 +14,8 @@ def _load_symbol_config(symbol: str, strategy_name: str):
 
     Also checks active flag — exits with 0 if symbol or strategy is disabled.
     extras dict has: ema_period, max_trades_per_day, fast_period, slow_period,
-                     range_mins, pdhl_prox_pct, be_r, trail_step, leverage, active.
+                     range_mins, pdhl_prox_pct, be_r, trail_step, leverage,
+                     be_profit_usd, active.
     """
     from dotenv import load_dotenv as _ld
     _ld()
@@ -83,6 +84,7 @@ def _load_symbol_config(symbol: str, strategy_name: str):
             "fast_period": None, "slow_period": None,
             "range_mins": None, "pdhl_prox_pct": None,
             "be_r": None, "trail_step": None,
+            "be_profit_usd": None,
             "leverage": cfg.leverage, "active": True,
             "_source": "fallback",
         }
@@ -412,6 +414,7 @@ def main():
             pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, cfg.pos_size_pct, 0.20),
             ema_period=_resolve(extras.get("ema_period") if _db else None, args.ema_period, None, 200),
             max_trades_per_day=_resolve(extras.get("max_trades_per_day") if _db else None, args.max_trades, None, 4),
+            be_profit_usd=_resolve(extras.get("be_profit_usd") if _db else None, None, None, 0.50),
             interval=cfg.interval,
             vwap_dist_stop=cfg.vwap_dist_stop,
             price_decimals=cfg.price_decimals if _db else None,
@@ -457,6 +460,7 @@ def main():
             pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, cfg.pos_size_pct, 0.20),
             be_r=_resolve(extras.get("be_r") if _db else None, args.be_r, None, 2.0),
             trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, None, 0.5),
+            be_profit_usd=_resolve(extras.get("be_profit_usd") if _db else None, None, None, 0.50),
             interval=cfg.interval,
             price_decimals=cfg.price_decimals if _db else None,
             qty_decimals=cfg.qty_decimals if _db else None,
@@ -480,6 +484,7 @@ def main():
             pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, cfg.pos_size_pct, 0.20),
             be_r=_resolve(extras.get("be_r") if _db else None, args.be_r, None, 2.0),
             trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, None, 0.5),
+            be_profit_usd=_resolve(extras.get("be_profit_usd") if _db else None, None, None, 0.50),
             interval=cfg.interval,
             price_decimals=cfg.price_decimals if _db else None,
             qty_decimals=cfg.qty_decimals if _db else None,
@@ -502,6 +507,7 @@ def main():
             pos_size_pct=_resolve(cfg.pos_size_pct if _db else None, args.pos_size, cfg.pos_size_pct, 0.20),
             be_r=_resolve(extras.get("be_r") if _db else None, args.be_r, None, 2.0),
             trail_step=_resolve(extras.get("trail_step") if _db else None, args.trail_step, None, 0.5),
+            be_profit_usd=_resolve(extras.get("be_profit_usd") if _db else None, None, None, 0.50),
             tp_pct=_resolve(cfg.tp_pct if _db else None, args.tp, cfg.tp_pct, None),
             interval=cfg.interval,
             price_decimals=cfg.price_decimals if _db else None,
@@ -524,6 +530,7 @@ def main():
             leverage=_resolve(extras["leverage"] if _db else None, args.leverage, cfg.leverage, DEFAULT_LEVERAGE),
             capital=args.capital,
             dry_run=args.dry_run,
+            be_profit_usd=_resolve(extras.get("be_profit_usd") if _db else None, None, None, 0.50),
         )
         _run_async(bot.run())
 
@@ -553,7 +560,7 @@ async def _load_cfg_async(symbol: str, strategy_name: str):
             f"⚠️ DB unavailable for {symbol.upper()} ({strategy_name}) — using trader/config.py "
             f"(ALLOW_CONFIG_FALLBACK=1). Reason: {e}"
         )
-        return cfg, {"leverage": cfg.leverage, "_source": "fallback"}
+        return cfg, {"leverage": cfg.leverage, "be_profit_usd": 0.50, "_source": "fallback"}
 
 
 async def _serve(args):
@@ -579,6 +586,7 @@ async def _serve(args):
             vwap_prox=cfg.vwap_prox,
             pos_size_pct=cfg.pos_size_pct,
             vol_filter=cfg.vol_filter,
+            be_profit_usd=extras.get("be_profit_usd", 0.50),
             interval=cfg.interval,
             vwap_dist_stop=cfg.vwap_dist_stop,
             price_decimals=cfg.price_decimals if _db else None,
@@ -590,7 +598,12 @@ async def _serve(args):
     for sym in args.momshort_symbols:
         from trader.bot import MomShortBot
         cfg, extras = await _load_cfg_async(sym, "MomShort")
-        bot = MomShortBot(cfg=cfg, leverage=extras["leverage"], dry_run=args.dry_run)
+        bot = MomShortBot(
+            cfg=cfg,
+            leverage=extras["leverage"],
+            dry_run=args.dry_run,
+            be_profit_usd=extras.get("be_profit_usd", 0.50),
+        )
         tasks.append(asyncio.create_task(bot.run()))
 
     config = uvicorn.Config(app, host=args.host, port=args.port, loop="none")
