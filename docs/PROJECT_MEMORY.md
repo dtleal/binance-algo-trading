@@ -292,6 +292,9 @@ It supports:
     - `MAKER_ENTRY_TIMEOUT_SEC` (default `8`)
     - `MAKER_EXIT_TIMEOUT_SEC` (default `6`)
     - `MAKER_POLL_INTERVAL_SEC` (default `0.4`)
+- ORB/PDHL logging stability fix:
+  - Added missing ANSI color constant `CYAN` in `trader/bot_orb.py` and `trader/bot_pdhl.py`.
+  - This prevents runtime close-path errors like `name 'CYAN' is not defined` during maker close logging.
   - MomShort (`trader/bot.py`) now treats Binance `-5022` post-only rejects as expected
     maker misses for entry/EOD maker attempts and immediately falls back to `MARKET`
     instead of surfacing `Entry failed`.
