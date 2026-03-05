@@ -262,6 +262,15 @@ info = client.rest_api.exchange_information()
 #   - min_notional.notional   → minimum order value in USDT
 ```
 
+If you need to reload bots after changing live config/runtime behavior, use:
+
+```bash
+make stop && make start
+```
+
+- The assistant should ask the user to run this in their own terminal.
+- The assistant should not restart live bots directly unless the user explicitly requests it.
+
 ---
 
 ## Quick Checklist — Standard Onboarding
@@ -276,8 +285,12 @@ info = client.rest_api.exchange_information()
 [ ] 3. Run sweep (all TFs)   make sweep-rust SYMBOL=dogeusdt
                              → data/sweeps/dogeusdt_{1m,5m,15m,30m,1h}_sweep.csv
 [ ] 4. Identify champion     Compare TOP 30 BY RETURN + RISK-ADJUSTED across all timeframes
-[ ] 5. Detailed backtest     Edit scripts/backtest_detail.py with champion params + TF
-                             make backtest-detail
+[ ] 5. Detailed backtest     Use the strategy-specific detailed backtest:
+                             - MomShort/Rejection: edit scripts/backtest_detail.py
+                               and run make backtest-detail
+                             - PDHL: run make backtest-detail-pdhl with CLI overrides if needed
+                             - VWAPPullback: edit scripts/backtest_detail_pullback.py
+                               and run make backtest-detail-pullback
 [ ] 6. Validate results      All months profitable? DD < 10%? Consistent?
 [ ] 7. Document              docs/STRATEGY_TOKEN.md
 [ ] 8. Exchange precision    Check tick_size, step_size, min_qty
@@ -387,6 +400,7 @@ make sweep-v2 SYMBOL=btcusdt # results → data/sweeps/btcusdt_{1m,5m,...}_sweep
 | `backtest_sweep/target/release/backtest_sweep` | Rust sweep binary (8 strategies: RejS, RejL, MomS, MomL, VWAPPullback, EMAScalp, ORB, PDHL) |
 | `backtest_sweep_v2/target/release/backtest_sweep_v2` | V2 Rust sweep binary (trailing stop, explicit request only) |
 | `scripts/backtest_detail.py` | Detailed backtest for MomShort/Rejection strategies |
+| `scripts/backtest_detail_pdhl.py` | Detailed backtest for PDHL (fixed TP/SL, optional runtime protections) |
 | `scripts/backtest_detail_pullback.py` | Detailed backtest for VWAPPullback (bidirectional + EMA) |
 | `scripts/analyze_sweep.py` | Analyze sweep CSV results, show top configs |
 | `data/klines/` | Historical kline CSVs (`SYMBOL_TF_klines.csv`) |

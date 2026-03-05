@@ -13,6 +13,7 @@ import argparse
 import asyncio
 
 import requests
+from trader.exchange_precision import decimals_from_step
 
 
 _EXCHANGE_INFO_URL = "https://fapi.binance.com/fapi/v1/exchangeInfo"
@@ -51,7 +52,12 @@ def _get_exchange_info(symbol: str) -> dict:
             qty_decimals = s.get("quantityPrecision", 0)
             min_notional = 5.0
             for f in s.get("filters", []):
-                if f.get("filterType") == "MIN_NOTIONAL":
+                filter_type = f.get("filterType")
+                if filter_type == "PRICE_FILTER" and f.get("tickSize"):
+                    price_decimals = decimals_from_step(f["tickSize"])
+                elif filter_type == "LOT_SIZE" and f.get("stepSize"):
+                    qty_decimals = decimals_from_step(f["stepSize"])
+                elif filter_type == "MIN_NOTIONAL":
                     min_notional = float(f.get("notional", 5.0))
             return {
                 "price_decimals": price_decimals,

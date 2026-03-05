@@ -121,6 +121,7 @@ It supports:
 - `scripts/fetch_klines.py`: download historical 1m data.
 - `scripts/aggregate_klines.py`: build higher timeframes.
 - `scripts/backtest_detail.py`: detailed backtest for MomShort/Rejection.
+- `scripts/backtest_detail_pdhl.py`: detailed backtest for PDHL (signal engine `live|sweep`, optional runtime protections).
 - `scripts/backtest_detail_pullback.py`: detailed pullback backtest.
 - `scripts/analyze_sweep.py`: sweep result analysis.
 - `backtest_sweep/target/release/backtest_sweep`: sweep binary.
@@ -128,6 +129,7 @@ It supports:
 - `data/klines/`: historical CSV inputs.
 - `data/sweeps/`: sweep outputs.
 - `trader/config.py`: live symbol configuration.
+- `trader/exchange_precision.py`: helper for Binance tick/step quantization.
 - `docs/STRATEGY_*.md`: per-symbol implementation records.
 - `docs/DB_ACCESS.md`: canonical database access and query guide (Postgres/Redis).
 
@@ -137,6 +139,8 @@ It supports:
 - Treat V2 sweep as advanced/optional (explicit request only).
 - If champion comes from broadly negative sweep averages, treat as suspect and validate longer.
 - Keep one-trade-per-day and EOD close behavior unless there is a clear, tested reason to change.
+- When bots need reload/restart during support or debugging, the assistant should ask the user to run `make stop && make start` in their own terminal.
+- Do not restart live bots from the assistant side unless the user explicitly asks for that action.
 
 ## Runtime Notes (2026-03-04)
 
@@ -216,6 +220,12 @@ It supports:
     - `BOT_HEARTBEAT_INTERVAL_SEC=10`
     - `BOT_REGISTRY_TTL_SEC=7200`
   - This prevents the `bot:states` hash from expiring between sparse candles (e.g., 1h interval bots).
+- `VWAPPullback` execution precision was fixed for maker entries and protective prices:
+  - `trader/bot_vwap_pullback.py` no longer trusts DB/config `price_decimals` alone for live execution.
+  - On every live startup, it refreshes `PRICE_FILTER`/`LOT_SIZE` from Binance and quantizes prices/qty by the actual `tickSize`/`stepSize`.
+  - This fixes Binance `-4014` (`Price not increased by tick size.`) on symbols such as `UNIUSDT`, where `pricePrecision=4` but valid price grid is `tickSize=0.0010` (3 effective decimals).
+  - `db/apply_champion.py` now persists `price_decimals`/`qty_decimals` from `tickSize`/`stepSize`, not from `pricePrecision`/`quantityPrecision`.
+  - `trader/config.py` fallback for `UNIUSDT` was aligned to `price_decimals=3`.
 - Docker Postgres healthcheck now targets the configured DB explicitly:
   - `pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}`
   - Prevents recurring Postgres log spam like `FATAL: database "trader" does not exist`.
@@ -303,6 +313,13 @@ It supports:
 - `PDHL` CLI fallback now honors per-symbol proximity from `trader/config.py` when DB is unavailable:
   - `trader/cli.py` uses `SymbolConfig.vwap_prox` as the fallback source for `prox_pct`.
   - This keeps fallback behavior aligned with symbol-specific PDHL configs such as `MANAUSDT`, `BCHUSDT`, and `ICXUSDT`.
+- Dedicated PDHL detailed backtest workflow was added:
+  - `make backtest-detail-pdhl` runs `scripts/backtest_detail_pdhl.py`.
+  - The script supports:
+    - `signal_engine=live|sweep`
+    - fixed `TP/SL/EOD` replay
+    - optional runtime protections (`be_profit_usd`, time stop, adverse momentum)
+  - It is single-position and serial by design, so results can differ from the Rust sweep when the sweep emitted overlapping same-day PDHL entries.
 - ORB/PDHL logging stability fix:
   - Added missing ANSI color constant `CYAN` in `trader/bot_orb.py` and `trader/bot_pdhl.py`.
   - This prevents runtime close-path errors like `name 'CYAN' is not defined` during maker close logging.

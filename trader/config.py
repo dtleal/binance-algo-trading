@@ -486,7 +486,7 @@ UNI_CONFIG = SymbolConfig(
     entry_cutoff_min=1320,
     eod_min=1430,
     pos_size_pct=0.40,  # 40% per trade
-    price_decimals=4,
+    price_decimals=3,   # Binance tickSize=0.0010; pricePrecision=4 is not the execution grid
     qty_decimals=0,
     vol_filter=False,
     min_notional=5.0,

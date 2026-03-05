@@ -41,4 +41,4 @@ The selected onboarding profile uses the best `5m` PDHL sweep result:
   - all strategies remained negative on average across all tested timeframes,
   - the selected `PDHL 5m` setup is a strong champion, but still an outlier inside a broadly weak search space.
 - Because of that, runtime onboarding keeps the champion `pos_size_pct=0.20` instead of the portfolio-wide `0.40` default used by many other bots.
-- No dedicated detailed `PDHL` trade-by-trade backtest script was added in this task; this onboarding is based on the sweep champion plus current live bot protection rules.
+- Detailed validation can now be run with `make backtest-detail-pdhl`, which defaults to the `ICXUSDT 5m` setup and supports runtime protections such as auto-breakeven and early exits.
