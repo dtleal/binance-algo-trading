@@ -4,15 +4,16 @@ Works with any USDT-M futures symbol. Trend is determined per-candle via an EMA:
   - close > EMA → uptrend  → look for LONG entries
   - close < EMA → downtrend → look for SHORT entries
 
-Exchange precision (tick_size, step_size) is fetched from Binance at startup for
-symbols not pre-configured in SYMBOL_CONFIGS. In dry-run mode, sensible defaults
-are used.
+Exchange precision (tick_size, step_size) is refreshed from Binance at startup so
+live orders are quantized on the real execution grid. In dry-run mode, sensible
+defaults are used.
 """
 
 import asyncio
 import collections
 import logging
 import math
+import os
 import re
 import sys
 import time
@@ -29,6 +30,12 @@ from trader.config import (
 )
 from trader.strategy import VWAPRollingTracker
 from trader.strategy_vwap_pullback import EMATracker, VWAPPullbackSignal
+from trader.exchange_precision import (
+    decimals_from_step,
+    floor_to_step,
+    parse_step,
+    step_from_decimals,
+)
 from trader import events as _events, bot_registry as _registry
 from trader.notifications import (
     notify_bot_started, notify_bot_stopped, notify_signal, notify_position_opened,
@@ -45,14 +52,6 @@ def _parse_proxy(url: str) -> dict | None:
     if not parsed.hostname or not parsed.port:
         raise SystemExit(f"Invalid SOCKS_PROXY format: '{url}'. Expected 'socks5://host:port'")
     return {"protocol": parsed.scheme, "host": parsed.hostname, "port": parsed.port}
-
-
-def _decimals_from_step(step_str: str) -> int:
-    """Derive decimal places from a Binance step/tick string (e.g. '0.001' → 3)."""
-    step_str = step_str.rstrip("0")
-    if "." not in step_str:
-        return 0
-    return len(step_str.split(".")[1])
 
 
 GREEN = "\033[92m"
@@ -126,20 +125,23 @@ class VWAPPullbackBot:
         # Precision — resolved at startup
         self._price_decimals = 4  # default, overridden from exchange info
         self._qty_decimals = 3    # default, overridden from exchange info
-        self._qty_step = 0.001    # default
+        self._price_tick = step_from_decimals(self._price_decimals)
+        self._qty_step = step_from_decimals(self._qty_decimals)
         self._precision_from_db = False
 
         if price_decimals is not None and qty_decimals is not None:
-            # Values from DB — most accurate, skip Binance API call at startup
+            # Values from DB are a startup fallback. Live filters still override them.
             self._price_decimals = price_decimals
             self._qty_decimals = qty_decimals
-            self._qty_step = 10 ** (-qty_decimals) if qty_decimals > 0 else 1
+            self._price_tick = step_from_decimals(price_decimals)
+            self._qty_step = step_from_decimals(qty_decimals)
             self._precision_from_db = True
         elif self.symbol in SYMBOL_CONFIGS:
             cfg = SYMBOL_CONFIGS[self.symbol]
             self._price_decimals = cfg.price_decimals
             self._qty_decimals = cfg.qty_decimals
-            self._qty_step = 10 ** (-cfg.qty_decimals) if cfg.qty_decimals > 0 else 1
+            self._price_tick = step_from_decimals(cfg.price_decimals)
+            self._qty_step = step_from_decimals(cfg.qty_decimals)
             self.min_notional = cfg.min_notional
 
         self._client = None
@@ -200,6 +202,11 @@ class VWAPPullbackBot:
         self.time_stop_min_progress_pct = time_stop_min_progress_pct
         self.adverse_exit_bars = adverse_exit_bars
         self.adverse_body_min_pct = adverse_body_min_pct
+        self._prefer_maker = os.getenv("PREFER_MAKER_EXECUTION", "1").strip().lower() not in {"0", "false", "no", "off"}
+        self._maker_price_offset_pct = max(0.0, float(os.getenv("MAKER_PRICE_OFFSET_PCT", "0.0002")))
+        self._maker_entry_timeout_sec = max(0.5, float(os.getenv("MAKER_ENTRY_TIMEOUT_SEC", "8")))
+        self._maker_exit_timeout_sec = max(0.5, float(os.getenv("MAKER_EXIT_TIMEOUT_SEC", "6")))
+        self._maker_poll_interval_sec = max(0.1, float(os.getenv("MAKER_POLL_INTERVAL_SEC", "0.4")))
 
         # Background tasks
         self._eod_task: asyncio.Task | None = None
@@ -228,6 +235,48 @@ class VWAPPullbackBot:
         self._adverse_count = 0
         self._risk_exit_pending = False
         self._be_triggered = False
+
+    def _maker_limit_price(self, reference_price: float, side: str) -> float:
+        if side.upper() == "BUY":
+            raw = reference_price * (1 - self._maker_price_offset_pct)
+        else:
+            raw = reference_price * (1 + self._maker_price_offset_pct)
+        return self._safe_trigger_price(raw)
+
+    async def _wait_for_position_open(self, timeout_sec: float, direction: str) -> dict | None:
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            pos = self._get_position()
+            if pos:
+                amt = float(pos["position_amt"])
+                if (direction == "long" and amt > 0) or (direction == "short" and amt < 0):
+                    return pos
+            await asyncio.sleep(self._maker_poll_interval_sec)
+        pos = self._get_position()
+        if pos:
+            amt = float(pos["position_amt"])
+            if (direction == "long" and amt > 0) or (direction == "short" and amt < 0):
+                return pos
+        return None
+
+    async def _wait_for_position_closed(self, timeout_sec: float) -> bool:
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            pos = self._get_position()
+            if pos is None or pos["position_amt"] == 0:
+                return True
+            await asyncio.sleep(self._maker_poll_interval_sec)
+        pos = self._get_position()
+        return pos is None or pos["position_amt"] == 0
+
+    @staticmethod
+    def _is_post_only_reject(error: Exception) -> bool:
+        msg = str(error)
+        return (
+            "-5022" in msg
+            or "Post Only order will be rejected" in msg
+            or "could not be executed as maker" in msg
+        )
 
     def _position_guard_reason(
         self,
@@ -323,19 +372,20 @@ class VWAPPullbackBot:
     # ------------------------------------------------------------------
 
     def _round_price(self, price: float) -> float:
-        factor = 10 ** self._price_decimals
-        return math.floor(price * factor) / factor
+        return floor_to_step(price, self._price_tick)
 
     def _round_qty(self, qty: float) -> float:
         if self._qty_decimals == 0:
             return float(int(math.floor(qty)))
-        step = self._qty_step
-        return math.floor(qty / step) * step
+        return floor_to_step(qty, self._qty_step)
 
     def _fmt_qty(self, qty: float) -> str:
         if self._qty_decimals == 0:
             return str(int(qty))
         return f"{qty:.{self._qty_decimals}f}"
+
+    def _fmt_price(self, price: float) -> str:
+        return f"{price:.{self._price_decimals}f}"
 
     @staticmethod
     def _get_filter_field(filter_obj, camel_name: str, snake_name: str | None = None):
@@ -365,7 +415,7 @@ class VWAPPullbackBot:
         rounded = self._round_price(raw_price)
         if rounded > 0:
             return rounded
-        min_tick = 10 ** (-self._price_decimals) if self._price_decimals > 0 else 1.0
+        min_tick = float(self._price_tick)
         return min_tick
 
     def _resolve_avg_fill_price(self, order_data, fallback_price: float) -> float:
@@ -423,8 +473,6 @@ class VWAPPullbackBot:
 
     def _fetch_exchange_precision(self):
         """Fetch tick_size and step_size from Binance exchange info."""
-        if self._precision_from_db:
-            return
         try:
             info = self._client.rest_api.exchange_information()
             for sym in info.data().symbols:
@@ -435,14 +483,14 @@ class VWAPPullbackBot:
                     if f_type == "PRICE_FILTER":
                         tick_size = self._get_filter_field(f, "tickSize", "tick_size")
                         if tick_size:
-                            self._price_decimals = _decimals_from_step(str(tick_size))
+                            self._price_tick = parse_step(tick_size, self._price_decimals)
+                            self._price_decimals = decimals_from_step(tick_size)
                     elif f_type == "LOT_SIZE":
                         step_size = self._get_filter_field(f, "stepSize", "step_size")
                         if not step_size:
                             continue
-                        self._qty_decimals = _decimals_from_step(str(step_size))
-                        step = float(step_size)
-                        self._qty_step = step if step > 0 else 1.0
+                        self._qty_step = parse_step(step_size, self._qty_decimals)
+                        self._qty_decimals = decimals_from_step(step_size)
                     elif f_type == "MIN_NOTIONAL":
                         notional = self._get_filter_field(f, "notional")
                         if notional:
@@ -450,7 +498,9 @@ class VWAPPullbackBot:
                 logger.info(
                     f"Exchange precision for {self.symbol}: "
                     f"price_decimals={self._price_decimals}, "
-                    f"qty_decimals={self._qty_decimals}"
+                    f"price_tick={self._fmt_price(float(self._price_tick))}, "
+                    f"qty_decimals={self._qty_decimals}, "
+                    f"qty_step={self._fmt_qty(float(self._qty_step))}"
                 )
                 return
             raise SystemExit(
@@ -550,6 +600,33 @@ class VWAPPullbackBot:
     # Startup checks
     # ------------------------------------------------------------------
 
+    def _restore_protection_stop(self, reason: str) -> None:
+        if self.dry_run or not self._direction or self._position_qty <= 0 or self._sl_price <= 0:
+            return
+        from binance_common.errors import BadRequestError
+
+        sl_side = "SELL" if self._direction == "long" else "BUY"
+        try:
+            try:
+                self._client.rest_api.cancel_all_algo_open_orders(symbol=self.symbol)
+            except BadRequestError:
+                pass
+            sl_resp = self._client.rest_api.new_algo_order(
+                algo_type="CONDITIONAL",
+                symbol=self.symbol,
+                side=sl_side,
+                type="STOP_MARKET",
+                trigger_price=self._fmt_price(self._sl_price),
+                close_position="true",
+            )
+            logger.info(
+                f"{YELLOW}Protection restored ({reason}): SL @ ${self._sl_price} | "
+                f"Algo ID: {sl_resp.data().algo_id}{RESET}"
+            )
+        except Exception as e:
+            logger.info(f"{RED}Failed to restore protection stop: {e}{RESET}")
+            notify_error(self.symbol, str(e), "Protection restore failed")
+
     def _check_startup_position(self):
         if self.dry_run:
             return
@@ -585,6 +662,7 @@ class VWAPPullbackBot:
             f"{self._position_qty} {self.symbol} @ ${self._entry_price:.{self._price_decimals}f} | "
             f"SL ${self._sl_price} | TP ${self._tp_price}{RESET}"
         )
+        self._restore_protection_stop("startup resume")
         _registry.update(self._reg_key, {
             "symbol": self.symbol,
             "strategy": "pullback",
@@ -676,6 +754,10 @@ class VWAPPullbackBot:
 
         try:
             try:
+                self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+            except BadRequestError:
+                pass
+            try:
                 self._client.rest_api.cancel_all_algo_open_orders(symbol=self.symbol)
             except BadRequestError:
                 pass
@@ -685,17 +767,18 @@ class VWAPPullbackBot:
                 symbol=self.symbol,
                 side=close_side,
                 type="STOP_MARKET",
-                trigger_price=new_sl,
+                trigger_price=self._fmt_price(new_sl),
                 close_position="true",
             )
             if self._tp_price > 0:
-                self._client.rest_api.new_algo_order(
-                    algo_type="CONDITIONAL",
+                self._client.rest_api.new_order(
                     symbol=self.symbol,
                     side=close_side,
-                    type="TAKE_PROFIT_MARKET",
-                    trigger_price=self._tp_price,
-                    close_position="true",
+                    type="LIMIT",
+                    time_in_force="GTX",
+                    price=self._fmt_price(self._tp_price),
+                    quantity=self._fmt_qty(self._position_qty),
+                    reduce_only="true",
                 )
             _registry.update(self._reg_key, {"sl_price": new_sl, "tp_price": self._tp_price})
             notify_stop_loss_updated(
@@ -730,7 +813,8 @@ class VWAPPullbackBot:
             f"Position size: {self.pos_size_pct * 100:.0f}% | "
             f"EMA period: {self._ema.period} | "
             f"Max trades/day: {self._signal.max_trades_per_day} | "
-            f"WS stale watchdog: {self._ws_stale_after_sec}s"
+            f"WS stale watchdog: {self._ws_stale_after_sec}s | "
+            f"Maker mode: {'ON' if self._prefer_maker else 'OFF'}"
             f"{vwap_dist_label}"
         )
         logger.info("-" * 60)
@@ -1153,18 +1237,64 @@ class VWAPPullbackBot:
                 symbol=self.symbol, leverage=self.leverage
             )
 
-            order_resp = self._client.rest_api.new_order(
-                symbol=self.symbol,
-                side=side,
-                type="MARKET",
-                quantity=self._fmt_qty(qty),
-                new_order_resp_type="RESULT",
-            )
-            order_data = order_resp.data()
-            avg_price = self._resolve_avg_fill_price(order_data, entry_price)
-            executed_qty = self._positive_float(getattr(order_data, "executed_qty", None)) or qty
+            avg_price = entry_price
+            executed_qty = 0.0
+            execution_mode = "market"
+            order_id = None
+
+            if self._prefer_maker:
+                maker_price = self._maker_limit_price(entry_price, side)
+                try:
+                    maker_resp = self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side=side,
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=self._fmt_price(maker_price),
+                        quantity=self._fmt_qty(qty),
+                        new_order_resp_type="RESULT",
+                    )
+                except Exception as maker_err:
+                    if self._is_post_only_reject(maker_err):
+                        logger.info(
+                            f"{YELLOW}Maker entry rejected by Post-Only rule "
+                            f"(@ ${maker_price:.{self._price_decimals}f}) — fallback MARKET{RESET}"
+                        )
+                    else:
+                        raise
+                else:
+                    maker_data = maker_resp.data()
+                    order_id = getattr(maker_data, "order_id", None)
+                    logger.info(
+                        f"{CYAN}Maker entry posted @ ${maker_price:.{self._price_decimals}f} "
+                        f"(timeout {self._maker_entry_timeout_sec:.1f}s){RESET}"
+                    )
+                    pos = await self._wait_for_position_open(self._maker_entry_timeout_sec, direction)
+                    if pos:
+                        execution_mode = "maker"
+                        avg_price = float(pos["entry_price"])
+                        executed_qty = abs(float(pos["position_amt"]))
+                    else:
+                        try:
+                            self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                        except Exception:
+                            pass
+                        logger.info(f"{YELLOW}Maker entry timeout — fallback MARKET{RESET}")
+
             if executed_qty <= 0:
-                raise RuntimeError(f"Invalid executed quantity for {self.symbol}: {executed_qty}")
+                order_resp = self._client.rest_api.new_order(
+                    symbol=self.symbol,
+                    side=side,
+                    type="MARKET",
+                    quantity=self._fmt_qty(qty),
+                    new_order_resp_type="RESULT",
+                )
+                order_data = order_resp.data()
+                avg_price = self._resolve_avg_fill_price(order_data, entry_price)
+                executed_qty = self._positive_float(getattr(order_data, "executed_qty", None)) or qty
+                order_id = getattr(order_data, "order_id", None)
+                if executed_qty <= 0:
+                    raise RuntimeError(f"Invalid executed quantity for {self.symbol}: {executed_qty}")
 
             self._direction = direction
             self._entry_price = avg_price
@@ -1184,21 +1314,20 @@ class VWAPPullbackBot:
             color = GREEN if direction == "long" else RED
             logger.info(
                 f"{color}{side} {executed_qty} {self.symbol} @ ${avg_price:.{self._price_decimals}f} | "
-                f"Order ID: {order_data.order_id}{RESET}"
+                f"Order ID: {order_id} | exec={execution_mode.upper()}{RESET}"
             )
 
             # SL order — opposite side to close position
             sl_side = "SELL" if direction == "long" else "BUY"
             tp_side = sl_side
             sl_type = "STOP_MARKET"
-            tp_type = "TAKE_PROFIT_MARKET"
 
             sl_resp = self._client.rest_api.new_algo_order(
                 algo_type="CONDITIONAL",
                 symbol=self.symbol,
                 side=sl_side,
                 type=sl_type,
-                trigger_price=self._sl_price,
+                trigger_price=self._fmt_price(self._sl_price),
                 close_position="true",
             )
             logger.info(
@@ -1206,17 +1335,20 @@ class VWAPPullbackBot:
                 f"Algo ID: {sl_resp.data().algo_id}{RESET}"
             )
 
-            tp_resp = self._client.rest_api.new_algo_order(
-                algo_type="CONDITIONAL",
+            tp_resp = self._client.rest_api.new_order(
                 symbol=self.symbol,
                 side=tp_side,
-                type=tp_type,
-                trigger_price=self._tp_price,
-                close_position="true",
+                type="LIMIT",
+                time_in_force="GTX",
+                price=self._fmt_price(self._tp_price),
+                quantity=self._fmt_qty(executed_qty),
+                reduce_only="true",
+                new_order_resp_type="RESULT",
             )
+            tp_data = tp_resp.data()
             logger.info(
                 f"{color}TP placed @ ${self._tp_price} | "
-                f"Algo ID: {tp_resp.data().algo_id}{RESET}"
+                f"Order ID: {getattr(tp_data, 'order_id', None)}{RESET}"
             )
 
             self._state = _State.IN_POSITION
@@ -1368,6 +1500,33 @@ class VWAPPullbackBot:
 
         from binance_common.errors import BadRequestError
 
+        def _keep_position_open(log_message: str, err: Exception | None = None) -> None:
+            live_pos = self._get_position()
+            if live_pos is not None and live_pos["position_amt"] != 0:
+                amt = float(live_pos["position_amt"])
+                self._direction = "long" if amt > 0 else "short"
+                self._position_qty = abs(amt)
+                live_entry = float(live_pos.get("entry_price", 0.0))
+                if live_entry > 0:
+                    self._entry_price = live_entry
+            self._state = _State.IN_POSITION
+            self._risk_exit_pending = False
+            logger.info(log_message)
+            notify_error(
+                self.symbol,
+                str(err) if err is not None else "Close attempt did not flatten position",
+                "Exit failed",
+            )
+            _registry.update(self._reg_key, {
+                "state": self._state.name,
+                "direction": self._direction,
+                "entry_price": self._entry_price,
+                "sl_price": self._sl_price,
+                "tp_price": self._tp_price,
+                "position_qty": self._position_qty,
+            })
+            self._restore_protection_stop("close retry fallback")
+
         try:
             try:
                 self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
@@ -1387,19 +1546,80 @@ class VWAPPullbackBot:
                 self._direction = None
                 return
 
-            qty = self._fmt_qty(abs(pos["position_amt"]))
+            qty_float = abs(pos["position_amt"])
+            qty = self._fmt_qty(qty_float)
             close_side = "SELL" if self._direction == "long" else "BUY"
+            close_mode = "market"
+            avg_price = 0.0
 
-            close_resp = self._client.rest_api.new_order(
-                symbol=self.symbol,
-                side=close_side,
-                type="MARKET",
-                quantity=qty,
-                reduce_only="true",
-                new_order_resp_type="RESULT",
-            )
-            close_data = close_resp.data()
-            avg_price = float(close_data.avg_price) if close_data.avg_price else 0
+            if self._prefer_maker:
+                ref_price = self._entry_price
+                try:
+                    price_resp = self._client.rest_api.symbol_price_ticker(symbol=self.symbol)
+                    price_data = price_resp.data()
+                    if hasattr(price_data, "actual_instance"):
+                        ref_price = float(price_data.actual_instance.price)
+                    else:
+                        ref_price = float(price_data.price)
+                except Exception:
+                    pass
+                maker_close_price = self._maker_limit_price(ref_price, close_side)
+                try:
+                    self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side=close_side,
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=self._fmt_price(maker_close_price),
+                        quantity=qty,
+                        reduce_only="true",
+                        new_order_resp_type="RESULT",
+                    )
+                except Exception as maker_err:
+                    if self._is_post_only_reject(maker_err):
+                        logger.info(
+                            f"{YELLOW}EOD maker close rejected by Post-Only rule "
+                            f"(@ ${maker_close_price:.{self._price_decimals}f}) — fallback MARKET{RESET}"
+                        )
+                    else:
+                        raise
+                else:
+                    logger.info(
+                        f"{CYAN}EOD maker close posted @ ${maker_close_price:.{self._price_decimals}f} "
+                        f"(timeout {self._maker_exit_timeout_sec:.1f}s){RESET}"
+                    )
+                    if await self._wait_for_position_closed(self._maker_exit_timeout_sec):
+                        close_mode = "maker"
+                        avg_price = maker_close_price
+                    else:
+                        try:
+                            self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                        except Exception:
+                            pass
+                        logger.info(f"{YELLOW}EOD maker timeout — fallback MARKET{RESET}")
+
+            if close_mode != "maker":
+                pos = self._get_position()
+                if pos is not None and pos["position_amt"] != 0:
+                    qty_float = abs(pos["position_amt"])
+                    qty = self._fmt_qty(qty_float)
+                    close_resp = self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side=close_side,
+                        type="MARKET",
+                        quantity=qty,
+                        reduce_only="true",
+                        new_order_resp_type="RESULT",
+                    )
+                    close_data = close_resp.data()
+                    avg_price = float(close_data.avg_price) if close_data.avg_price else 0
+
+            pos = self._get_position()
+            if pos is not None and pos["position_amt"] != 0:
+                _keep_position_open(
+                    f"{RED}EOD close attempted but position remains open — keeping state IN_POSITION{RESET}"
+                )
+                return
 
             if self._direction == "long":
                 pnl = (avg_price - self._entry_price) * self._position_qty
@@ -1409,16 +1629,33 @@ class VWAPPullbackBot:
             color = GREEN if pnl >= 0 else RED
             logger.info(
                 f"{color}EOD closed {qty} {self.symbol} ({self._direction}) "
-                f"@ ${avg_price:.{self._price_decimals}f} | P&L: ${pnl:+.2f}{RESET}"
+                f"@ ${avg_price:.{self._price_decimals}f} | P&L: ${pnl:+.2f} | "
+                f"exec={close_mode.upper()}{RESET}"
             )
             notify_eod_close(
                 self.symbol, self._direction or "", self._entry_price, avg_price, pnl
             )
 
         except BadRequestError as e:
-            logger.info(f"{YELLOW}EOD close: position already closed ({e}){RESET}")
+            pos = self._get_position()
+            if pos is None or pos["position_amt"] == 0:
+                logger.info(f"{YELLOW}EOD close: position already closed ({e}){RESET}")
+            else:
+                _keep_position_open(
+                    f"{RED}EOD close rejected and position remains open: {e}{RESET}",
+                    e,
+                )
+                return
         except Exception as e:
-            logger.info(f"{RED}EOD close error: {e}{RESET}")
+            pos = self._get_position()
+            if pos is None or pos["position_amt"] == 0:
+                logger.info(f"{YELLOW}EOD close completed despite client error ({e}){RESET}")
+            else:
+                _keep_position_open(
+                    f"{RED}EOD close error: {e}{RESET}",
+                    e,
+                )
+                return
 
         self._state = _State.COOLDOWN
         self._reset_position_guard()

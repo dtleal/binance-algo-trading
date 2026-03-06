@@ -1,19 +1,20 @@
-# Active Bots Portfolio (25)
+# Active Bots Portfolio (28)
 
 Source of truth:
 - Runtime strategy allocation: `Makefile` target `bots`
-- Symbol parameters: `trader/config.py` (`SYMBOL_CONFIGS`)
+- Live symbol parameters: PostgreSQL `symbol_configs` (DB-first at runtime)
+- `trader/config.py` is fallback only when DB is unavailable / fallback is enabled
 
-Last updated: 2026-03-05
+Last updated: 2026-03-06
 
 ## Strategy Distribution
 
 - MomShort: 4 bots
 - VWAPPullback: 14 bots
-- PDHL: 6 bots
+- PDHL: 9 bots
 - ORB: 1 bot
 
-Total: 25 bots
+Total: 28 bots
 
 ## Full Bot Matrix
 
@@ -23,15 +24,18 @@ Total: 25 bots
 | SANDUSDT | MomShort | 5m | 10.0 | 1.0 | 5 | 0 | 0.005 | yes | 0.40 | 30 | normal |
 | MANAUSDT | PDHL | 1m | 7.0 | 1.5 | 0 | 3 | 0.005 | no | 0.40 | 30 | normal |
 | LDOUSDT | PDHL | 1m | 7.0 | 2.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
+| RLCUSDT | PDHL | 15m | 3.0 | 2.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
+| MTLUSDT | PDHL | 1m | 5.0 | 5.0 | 0 | 1 | 0.000 | no | 0.40 | 30 | normal |
+| ICXUSDT | PDHL | 5m | 7.0 | 2.0 | 0 | 2 | 0.005 | no | 0.20 | 30 | normal |
 | SOLUSDT | MomShort | 1m | 7.0 | 5.0 | 8 | 0 | 0.002 | yes | 0.40 | 30 | normal |
 | THETAUSDT | MomShort | 5m | 3.0 | 5.0 | 3 | 2 | 0.005 | yes | 0.40 | 30 | normal |
-| GALAUSDT | VWAPPullback | 1m | 10.0 | 5.0 | 3 | 0 | 0.002 | no | 0.40 | 1 | monitoring |
+| GALAUSDT | VWAPPullback | 1m | 10.0 | 2.0 | 3 | 0 | 0.002 | no | 0.05 | 1 | monitoring |
 | AVAXUSDT | VWAPPullback | 1m | 7.0 | 2.0 | 30 | 0 | 0.005 | no | 0.40 | 30 | normal |
 | DOGEUSDT | VWAPPullback | 5m | 10.0 | 5.0 | 3 | 0 | 0.002 | no | 0.40 | 30 | normal |
-| 1000SHIBUSDT | VWAPPullback | 5m | 7.0 | 5.0 | 3 | 0 | 0.005 | no | 0.40 | 1 | monitoring |
+| 1000SHIBUSDT | VWAPPullback | 5m | 7.0 | 2.0 | 3 | 0 | 0.005 | no | 0.05 | 1 | monitoring |
 | XRPUSDT | VWAPPullback | 5m | 10.0 | 2.0 | 3 | 0 | 0.005 | no | 0.40 | 30 | normal |
-| ETHUSDT | VWAPPullback | 5m | 10.0 | 5.0 | 20 | 0 | 0.005 | no | 0.40 | 1 | monitoring |
-| XAUUSDT | VWAPPullback | 1m | 5.0 | 5.0 | 3 | 1 | 0.005 | no | 0.40 | 1 | monitoring |
+| ETHUSDT | VWAPPullback | 5m | 10.0 | 2.0 | 20 | 0 | 0.005 | no | 0.20 | 1 | monitoring |
+| XAUUSDT | VWAPPullback | 1m | 5.0 | 2.0 | 3 | 1 | 0.005 | no | 0.05 | 1 | monitoring |
 | XMRUSDT | VWAPPullback | 1m | 7.0 | 5.0 | 8 | 0 | 0.002 | no | 0.40 | 30 | normal |
 | UNIUSDT | VWAPPullback | 15m | 10.0 | 2.0 | 3 | 1 | 0.005 | no | 0.40 | 30 | normal |
 | APTUSDT | VWAPPullback | 5m | 10.0 | 5.0 | 3 | 0 | 0.005 | no | 0.40 | 30 | normal |
@@ -48,7 +52,7 @@ Total: 25 bots
 ## Notes
 
 - `PEPEUSDT` exists in config as `PEPE_CONFIG` but is intentionally not active in `SYMBOL_CONFIGS`.
-- Some bots run in `monitoring` mode with lower leverage/position size.
+- Some bots run in `monitoring` mode with reduced DB-side risk (`sl_pct`, `pos_size_pct`, `be_profit_usd`) that may be stricter than `trader/config.py`.
 - If `symbol_configs` in DB differs from Python config, runtime loads DB first and uses `trader/config.py` as fallback.
 
 ## Portfolio Candidates (Onboarding)
@@ -57,3 +61,5 @@ Total: 25 bots
 |---|---|---|---:|---:|---|
 | MANAUSDT | PDHL | 1m | +95.61% | 13.87% | `data/sweeps/manausdt_1m_sweep.csv` |
 | LDOUSDT | PDHL | 1m | +79.96% | 18.23% | `data/sweeps/LDOUSDT_1m_sweep.csv` |
+| RLCUSDT | PDHL | 15m | +48.61% | 12.31% | `data/sweeps/RLCUSDT_15m_sweep.csv` |
+| MTLUSDT | PDHL | 1m | +83.58% | 14.44% | `data/sweeps/MTLUSDT_1m_sweep.csv` |
