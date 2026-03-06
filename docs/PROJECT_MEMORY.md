@@ -229,7 +229,7 @@ It supports:
 - Dashboard `Bots` page now reconciles bot registry state with live exchange positions:
   - `frontend/src/pages/Bots.tsx` uses `/api/positions` as the source of truth for the `In Position` count/filter/grouping.
   - This prevents undercounting when a bot registry entry is out of sync with Binance, such as an open position shown in `/api/positions` but `state=SCANNING` in `/api/bot_states`.
-  - Cards with an open exchange position but non-`IN_POSITION` registry state now show a `POSITION DESYNC` badge and still render the live position details.
+  - Cards with an open exchange position but non-`IN_POSITION` registry state now show a `POSITION DESYNC` badge, render the live position details, and display effective status `IN_POSITION` in the UI.
 - Docker Postgres healthcheck now targets the configured DB explicitly:
   - `pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}`
   - Prevents recurring Postgres log spam like `FATAL: database "trader" does not exist`.
@@ -260,6 +260,28 @@ It supports:
   - `tp_pct=7.0`, `sl_pct=2.0`, `confirm_bars=1`
   - `pos_size_pct=0.40`, `leverage=30`, `mode=normal`
   - `pdhl_prox_pct=0.000`, `be_profit_usd=0.50`
+- `GALAUSDT` runtime risk was tightened directly in DB (`symbol_configs`) on 2026-03-06:
+  - `strategy_name=VWAPPullback`, `interval=1m`, `mode=monitoring`, `leverage=1`
+  - `tp_pct=10.0`, `sl_pct=2.0`, `min_bars=3`, `confirm_bars=0`, `vwap_prox=0.002`
+  - `pos_size_pct=0.05`, `be_profit_usd=0.05`
+  - Practical effect:
+    - next entries target notional near Binance minimum (~5 USDT), so PnL moves should stay in low-cent range;
+    - with account capital around 109 USDT, a full `2%` stop is roughly ~0.11 USDT gross loss before fees/rounding;
+    - further reductions may start skipping entries because `GALAUSDT` uses integer quantity and ~5 USDT min notional.
+- Remaining recovery-mode symbols were tightened directly in DB (`symbol_configs`) on 2026-03-06:
+  - `1000SHIBUSDT` (`VWAPPullback`, `5m`, `monitoring`, `leverage=1`):
+    - `sl_pct=2.0`, `pos_size_pct=0.05`, `be_profit_usd=0.05`
+  - `ETHUSDT` (`VWAPPullback`, `5m`, `monitoring`, `leverage=1`):
+    - `sl_pct=2.0`, `pos_size_pct=0.20`, `be_profit_usd=0.10`
+  - `XAUUSDT` (`VWAPPullback`, `1m`, `monitoring`, `leverage=1`):
+    - `sl_pct=2.0`, `pos_size_pct=0.05`, `be_profit_usd=0.05`
+  - Validation method:
+    - use signed Binance Futures `/fapi/v1/order/test` with the exact proposed maker `price`/`qty`;
+    - do not rely only on raw `exchangeInfo` filter fields for micro-sizing decisions on recovery symbols, because the filter payload may look inconsistent for some contracts while `order/test` accepts the intended order.
+  - Accepted live test notionals on 2026-03-06:
+    - `1000SHIBUSDT`: ~`5.31` USDT
+    - `ETHUSDT`: ~`20.46` USDT
+    - `XAUUSDT`: ~`5.11` USDT
 - `ICXUSDT` was onboarded to the runtime portfolio as `PDHL` on `5m`:
   - Selected onboarding profile (2026-03-05, explicit user choice despite robustness caveat):
     - `tp_pct=7.0`, `sl_pct=2.0`, `confirm_bars=2`
@@ -335,3 +357,29 @@ It supports:
     - If TP is rejected by Binance `-5022` (would execute as taker), bot retries TP as
       `LIMIT` + `GTC` (reduce-only) instead of failing the whole entry flow.
     - The same GTX->GTC retry is applied when TP is re-placed during auto-breakeven SL updates.
+- Maker reject hardening for non-`MomShort` bots:
+  - Bots updated: `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`.
+  - Entry flow now treats Binance `-5022` as an expected maker miss:
+    - immediate post-only reject on maker entry no longer raises `Entry failed`;
+      the bot logs the reject and falls back to `MARKET`.
+  - EOD/early-exit close flow now treats Binance `-5022` on maker reduce-only close
+    the same way:
+    - immediate post-only reject falls back to reduce-only `MARKET`;
+    - the bot only transitions to `COOLDOWN` after re-checking that the live position
+      is actually flat on Binance.
+  - If a close attempt still fails and the position remains open, the bot now:
+    - keeps `state=IN_POSITION`,
+    - clears `_risk_exit_pending` so the protection can retry on later candles,
+    - updates Redis registry with the still-open live position,
+    - re-arms exchange-side `STOP_MARKET` protection immediately,
+    - emits `notify_error(..., "Exit failed")` instead of logging
+      `position already closed`.
+  - Startup resume hardening:
+    - when `VWAPPullback`, `PDHL`, `ORB`, or `EMAScalp` adopt an already-open Binance
+      position on startup, they now re-arm the exchange-side `STOP_MARKET`
+      before returning to live monitoring.
+    - This is specifically important after any prior failed close path that cancelled
+      algo orders but left the position open.
+  - This fixes the class of incidents where `LINKUSDT` / `LDOUSDT` / `GALAUSDT`
+    could hit early-exit logic, receive maker close reject `-5022`, and be left
+    open while the bot incorrectly moved to `COOLDOWN`.

@@ -247,6 +247,15 @@ class PDHLBot:
         pos = self._get_position()
         return pos is None or pos["position_amt"] == 0
 
+    @staticmethod
+    def _is_post_only_reject(error: Exception) -> bool:
+        msg = str(error)
+        return (
+            "-5022" in msg
+            or "Post Only order will be rejected" in msg
+            or "could not be executed as maker" in msg
+        )
+
     def _position_guard_reason(
         self,
         candle_open_ms: int,
@@ -552,6 +561,33 @@ class PDHLBot:
     # Startup checks
     # ------------------------------------------------------------------
 
+    def _restore_protection_stop(self, reason: str) -> None:
+        if self.dry_run or not self._direction or self._position_qty <= 0 or self._sl_price <= 0:
+            return
+        from binance_common.errors import BadRequestError
+
+        sl_side = "SELL" if self._direction == "long" else "BUY"
+        try:
+            try:
+                self._client.rest_api.cancel_all_algo_open_orders(symbol=self.symbol)
+            except BadRequestError:
+                pass
+            sl_resp = self._client.rest_api.new_algo_order(
+                algo_type="CONDITIONAL",
+                symbol=self.symbol,
+                side=sl_side,
+                type="STOP_MARKET",
+                trigger_price=self._sl_price,
+                close_position="true",
+            )
+            logger.info(
+                f"{YELLOW}Protection restored ({reason}): SL @ ${self._sl_price} | "
+                f"Algo ID: {sl_resp.data().algo_id}{RESET}"
+            )
+        except Exception as e:
+            logger.info(f"{RED}Failed to restore protection stop: {e}{RESET}")
+            notify_error(self.symbol, str(e), "Protection restore failed")
+
     def _check_startup_position(self):
         if self.dry_run:
             return
@@ -588,6 +624,7 @@ class PDHLBot:
             f"{self._position_qty} {self.symbol} @ ${self._entry_price:.{self._price_decimals}f} | "
             f"SL ${self._sl_price} | R=${self._r_value:.{self._price_decimals}f} (trailing){RESET}"
         )
+        self._restore_protection_stop("startup resume")
         _registry.update(self._reg_key, {
             "symbol": self.symbol,
             "strategy": "pdhl",
@@ -1260,32 +1297,42 @@ class PDHLBot:
 
             if self._prefer_maker:
                 maker_price = self._maker_limit_price(entry_price, side)
-                maker_resp = self._client.rest_api.new_order(
-                    symbol=self.symbol,
-                    side=side,
-                    type="LIMIT",
-                    time_in_force="GTX",
-                    price=maker_price,
-                    quantity=self._fmt_qty(qty),
-                    new_order_resp_type="RESULT",
-                )
-                maker_data = maker_resp.data()
-                order_id = getattr(maker_data, "order_id", None)
-                logger.info(
-                    f"{CYAN}Maker entry posted @ ${maker_price:.{self._price_decimals}f} "
-                    f"(timeout {self._maker_entry_timeout_sec:.1f}s){RESET}"
-                )
-                pos = await self._wait_for_position_open(self._maker_entry_timeout_sec, direction)
-                if pos:
-                    execution_mode = "maker"
-                    avg_price = float(pos["entry_price"])
-                    executed_qty = abs(float(pos["position_amt"]))
+                try:
+                    maker_resp = self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side=side,
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=maker_price,
+                        quantity=self._fmt_qty(qty),
+                        new_order_resp_type="RESULT",
+                    )
+                except Exception as maker_err:
+                    if self._is_post_only_reject(maker_err):
+                        logger.info(
+                            f"{YELLOW}Maker entry rejected by Post-Only rule "
+                            f"(@ ${maker_price:.{self._price_decimals}f}) — fallback MARKET{RESET}"
+                        )
+                    else:
+                        raise
                 else:
-                    try:
-                        self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
-                    except Exception:
-                        pass
-                    logger.info(f"{YELLOW}Maker entry timeout — fallback MARKET{RESET}")
+                    maker_data = maker_resp.data()
+                    order_id = getattr(maker_data, "order_id", None)
+                    logger.info(
+                        f"{CYAN}Maker entry posted @ ${maker_price:.{self._price_decimals}f} "
+                        f"(timeout {self._maker_entry_timeout_sec:.1f}s){RESET}"
+                    )
+                    pos = await self._wait_for_position_open(self._maker_entry_timeout_sec, direction)
+                    if pos:
+                        execution_mode = "maker"
+                        avg_price = float(pos["entry_price"])
+                        executed_qty = abs(float(pos["position_amt"]))
+                    else:
+                        try:
+                            self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                        except Exception:
+                            pass
+                        logger.info(f"{YELLOW}Maker entry timeout — fallback MARKET{RESET}")
 
             if executed_qty <= 0:
                 order_resp = self._client.rest_api.new_order(
@@ -1509,6 +1556,33 @@ class PDHLBot:
 
         from binance_common.errors import BadRequestError
 
+        def _keep_position_open(log_message: str, err: Exception | None = None) -> None:
+            live_pos = self._get_position()
+            if live_pos is not None and live_pos["position_amt"] != 0:
+                amt = float(live_pos["position_amt"])
+                self._direction = "long" if amt > 0 else "short"
+                self._position_qty = abs(amt)
+                live_entry = float(live_pos.get("entry_price", 0.0))
+                if live_entry > 0:
+                    self._entry_price = live_entry
+            self._state = _State.IN_POSITION
+            self._risk_exit_pending = False
+            logger.info(log_message)
+            notify_error(
+                self.symbol,
+                str(err) if err is not None else "Close attempt did not flatten position",
+                "Exit failed",
+            )
+            _registry.update(self._reg_key, {
+                "state": self._state.name,
+                "direction": self._direction,
+                "entry_price": self._entry_price,
+                "sl_price": self._sl_price,
+                "tp_price": self._tp_price or None,
+                "position_qty": self._position_qty,
+            })
+            self._restore_protection_stop("close retry fallback")
+
         try:
             try:
                 self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
@@ -1548,29 +1622,39 @@ class PDHLBot:
                 except Exception:
                     pass
                 maker_close_price = self._maker_limit_price(ref_price, close_side)
-                self._client.rest_api.new_order(
-                    symbol=self.symbol,
-                    side=close_side,
-                    type="LIMIT",
-                    time_in_force="GTX",
-                    price=maker_close_price,
-                    quantity=qty,
-                    reduce_only="true",
-                    new_order_resp_type="RESULT",
-                )
-                logger.info(
-                    f"{CYAN}EOD maker close posted @ ${maker_close_price:.{self._price_decimals}f} "
-                    f"(timeout {self._maker_exit_timeout_sec:.1f}s){RESET}"
-                )
-                if await self._wait_for_position_closed(self._maker_exit_timeout_sec):
-                    close_mode = "maker"
-                    avg_price = maker_close_price
+                try:
+                    self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side=close_side,
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=maker_close_price,
+                        quantity=qty,
+                        reduce_only="true",
+                        new_order_resp_type="RESULT",
+                    )
+                except Exception as maker_err:
+                    if self._is_post_only_reject(maker_err):
+                        logger.info(
+                            f"{YELLOW}EOD maker close rejected by Post-Only rule "
+                            f"(@ ${maker_close_price:.{self._price_decimals}f}) — fallback MARKET{RESET}"
+                        )
+                    else:
+                        raise
                 else:
-                    try:
-                        self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
-                    except Exception:
-                        pass
-                    logger.info(f"{YELLOW}EOD maker timeout — fallback MARKET{RESET}")
+                    logger.info(
+                        f"{CYAN}EOD maker close posted @ ${maker_close_price:.{self._price_decimals}f} "
+                        f"(timeout {self._maker_exit_timeout_sec:.1f}s){RESET}"
+                    )
+                    if await self._wait_for_position_closed(self._maker_exit_timeout_sec):
+                        close_mode = "maker"
+                        avg_price = maker_close_price
+                    else:
+                        try:
+                            self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                        except Exception:
+                            pass
+                        logger.info(f"{YELLOW}EOD maker timeout — fallback MARKET{RESET}")
 
             if close_mode != "maker":
                 pos = self._get_position()
@@ -1588,6 +1672,13 @@ class PDHLBot:
                     close_data = close_resp.data()
                     avg_price = float(close_data.avg_price) if close_data.avg_price else 0
 
+            pos = self._get_position()
+            if pos is not None and pos["position_amt"] != 0:
+                _keep_position_open(
+                    f"{RED}EOD close attempted but position remains open — keeping state IN_POSITION{RESET}"
+                )
+                return
+
             if self._direction == "long":
                 pnl = (avg_price - self._entry_price) * self._position_qty
             else:
@@ -1604,9 +1695,25 @@ class PDHLBot:
             )
 
         except BadRequestError as e:
-            logger.info(f"{YELLOW}EOD close: position already closed ({e}){RESET}")
+            pos = self._get_position()
+            if pos is None or pos["position_amt"] == 0:
+                logger.info(f"{YELLOW}EOD close: position already closed ({e}){RESET}")
+            else:
+                _keep_position_open(
+                    f"{RED}EOD close rejected and position remains open: {e}{RESET}",
+                    e,
+                )
+                return
         except Exception as e:
-            logger.info(f"{RED}EOD close error: {e}{RESET}")
+            pos = self._get_position()
+            if pos is None or pos["position_amt"] == 0:
+                logger.info(f"{YELLOW}EOD close completed despite client error ({e}){RESET}")
+            else:
+                _keep_position_open(
+                    f"{RED}EOD close error: {e}{RESET}",
+                    e,
+                )
+                return
 
         self._state = _State.COOLDOWN
         self._reset_position_guard()

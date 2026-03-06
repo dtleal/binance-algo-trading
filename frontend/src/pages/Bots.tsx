@@ -82,11 +82,12 @@ function BotCard({
   const pnl      = livePosition?.unrealized_pnl ?? live?.unrealized_pnl ?? state.unrealized_pnl ?? 0;
   const pnlPct   = livePosition ? calcPnlPct(livePosition) : (live?.unrealized_pnl_pct ?? state.unrealized_pnl_pct ?? 0);
   const botState = state.state;
+  const hasLivePosition = !!livePosition;
+  const effectiveBotState = hasLivePosition ? "IN_POSITION" : botState;
   const beThreshold = state.config?.be_profit_usd ?? 0.5;
   const [beProfitInput, setBeProfitInput] = useState(beThreshold.toFixed(2));
   const [beSaving, setBeSaving] = useState(false);
   const [beStatus, setBeStatus] = useState<string | null>(null);
-  const hasLivePosition = !!livePosition;
   const displayDirection = livePosition ? livePosition.side.toLowerCase() : state.direction;
   const displayEntryPrice = livePosition?.entry_price ?? state.entry_price;
   const displayQty = livePosition?.qty ?? state.position_qty;
@@ -196,9 +197,9 @@ function BotCard({
               DRY RUN
             </span>
           )}
-          <span className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${STATE_STYLE[botState] ?? ""}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${STATE_DOT[botState] ?? "bg-gray-400"}`} />
-            {botState}
+          <span className={`flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${STATE_STYLE[effectiveBotState] ?? ""}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${STATE_DOT[effectiveBotState] ?? "bg-gray-400"}`} />
+            {effectiveBotState}
           </span>
         </div>
       </div>
@@ -227,7 +228,7 @@ function BotCard({
       </div>
 
       {/* Signal progress (SCANNING) */}
-      {botState === "SCANNING" && (
+      {effectiveBotState === "SCANNING" && (
         <div className="bg-gray-900/50 rounded-lg px-3 py-2 text-xs text-gray-400">
           {state.confirming ? (
             <span>
