@@ -136,7 +136,9 @@ def choose_candidate(train_results: pd.DataFrame, timeframe: str, args: argparse
         dedup_cols = [c for c in [
             "strategy", "tp_pct", "sl_pct", "min_bars", "confirm_bars", "entry_window", "vwap_prox",
             "vwap_window", "ema_period", "max_trades_per_day", "fast_period", "slow_period",
-            "orb_range_mins", "pdhl_prox_pct", "max_hold", "vwap_dist_stop", "pos_size_pct",
+            "orb_range_mins", "pdhl_prox_pct", "max_hold", "vwap_dist_stop",
+            "time_stop_minutes", "time_stop_min_progress_pct", "adverse_exit_bars", "adverse_body_min_pct",
+            "pos_size_pct",
         ] if c in filt.columns]
         if dedup_cols:
             filt = filt.drop_duplicates(subset=dedup_cols, keep="first")
@@ -202,6 +204,21 @@ def eval_candidate_on_test(test_csv: Path, candidate: pd.Series) -> dict[str, An
     }
 
 
+def empty_test_metrics(error: str = "") -> dict[str, Any]:
+    return {
+        "test_trades": 0,
+        "test_wins": 0,
+        "test_win_rate": 0.0,
+        "test_return_pct": 0.0,
+        "test_max_dd_pct": 0.0,
+        "test_months_total": 0,
+        "test_positive_month_ratio": 0.0,
+        "test_worst_month_return_pct": 0.0,
+        "test_max_losing_streak": 0,
+        "test_error": error,
+    }
+
+
 def main() -> None:
     args = parse_args()
 
@@ -264,7 +281,7 @@ def main() -> None:
             cand = choose_candidate(train_results, timeframe=tf, args=args)
             if cand is None:
                 print("  no candidate passed train filters")
-                fold_rows.append({
+                row = {
                     "fold": fs.fold,
                     "train_start_day": fs.train_start_day,
                     "train_end_day_exclusive": fs.train_end_day_exclusive,
@@ -272,7 +289,9 @@ def main() -> None:
                     "test_end_day_exclusive": fs.test_end_day_exclusive,
                     "candidate_found": False,
                     "candidate_error": "no candidate passed train filters",
-                })
+                }
+                row.update(empty_test_metrics())
+                fold_rows.append(row)
                 continue
 
             test_metrics = eval_candidate_on_test(test_csv, cand)
@@ -307,6 +326,10 @@ def main() -> None:
                 "pdhl_prox_pct": float(cand.get("pdhl_prox_pct", math.nan)),
                 "max_hold": int(cand.get("max_hold", 0)),
                 "vwap_dist_stop": float(cand.get("vwap_dist_stop", math.nan)),
+                "time_stop_minutes": int(cand.get("time_stop_minutes", 0)),
+                "time_stop_min_progress_pct": float(cand.get("time_stop_min_progress_pct", 0.0)),
+                "adverse_exit_bars": int(cand.get("adverse_exit_bars", 0)),
+                "adverse_body_min_pct": float(cand.get("adverse_body_min_pct", 0.0)),
                 "pos_size_pct": float(cand.get("pos_size_pct", math.nan)),
                 "train_trades": int(cand.get("trades", 0)),
                 "train_win_rate": float(cand.get("win_rate", 0.0)),
@@ -320,6 +343,9 @@ def main() -> None:
     folds_df = pd.DataFrame(fold_rows)
     if folds_df.empty:
         raise SystemExit("❌ No fold rows generated.")
+
+    if "test_error" not in folds_df.columns:
+        folds_df["test_error"] = ""
 
     out_prefix = args.out_prefix.strip() or f"{symbol}_{tf}"
     folds_out = sweeps_dir / f"{out_prefix}_walkforward_folds.csv"

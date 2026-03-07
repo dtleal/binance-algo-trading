@@ -431,7 +431,9 @@ ifeq ($(filter command line environment,$(origin SYMBOL)),)
 	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make filter-overfit SYMBOL=dogeusdt$(NC)"
 	@exit 1
 else
-	@poetry run python scripts/filter_overfit.py --symbol $(SYMBOL)
+	@poetry run python scripts/filter_overfit.py --symbol $(SYMBOL) \
+		$(if $(SUFFIX),--sweep-suffix $(SUFFIX),) \
+		$(if $(OUT_TAG),--output-tag $(OUT_TAG),)
 endif
 
 walk-forward: ## Walk-forward validation (Rust optimize + OOS test). Args: SYMBOL=x TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30 MAX_FOLDS=0
@@ -439,13 +441,15 @@ ifeq ($(filter command line environment,$(origin SYMBOL)),)
 	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make walk-forward SYMBOL=dogeusdt TF=1m$(NC)"
 	@exit 1
 else
-	@python scripts/walk_forward.py \
+	@poetry run python scripts/walk_forward.py \
 		--symbol $(SYMBOL) \
 		--timeframe $(or $(TF),1m) \
+		$(if $(BINARY),--binary $(BINARY),) \
 		--train-days $(or $(TRAIN_DAYS),180) \
 		--test-days $(or $(TEST_DAYS),30) \
 		--step-days $(or $(STEP_DAYS),30) \
-		--max-folds $(or $(MAX_FOLDS),0)
+		--max-folds $(or $(MAX_FOLDS),0) \
+		$(if $(OUT_PREFIX),--out-prefix $(OUT_PREFIX),)
 endif
 
 onboarding-db: ## DB-first onboarding: download → aggregate → sweep → apply champion (SYMBOL=x DAYS=365)
@@ -515,7 +519,7 @@ backtest-eth-5m: ## Run ETH 5min VWAPPullback backtest with optimized params (+3
 
 # Rust sweep (240x faster!)
 build-sweep: ## Build Rust sweep (release mode)
-	cd backtest_sweep && cargo build --release
+	cd backtest_sweep && cargo build --release --bins
 
 sweep-rust: ## Run standard sweep across all available timeframes (SYMBOL=axsusdt)
 ifeq ($(filter command line environment,$(origin SYMBOL)),)
@@ -537,6 +541,54 @@ else
 		$$BINARY $$CSV; \
 		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep.csv" 2>/dev/null || true; \
 		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
+	done; \
+	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
+endif
+
+sweep-pdhl-guards: ## Run dedicated PDHL guard sweep across all available timeframes (SYMBOL=icxusdt)
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make sweep-pdhl-guards SYMBOL=icxusdt$(NC)"
+	@exit 1
+else
+	@mkdir -p data/sweeps; \
+	BINARY=./backtest_sweep/target/release/pdhl_guard_sweep; \
+	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep$(NC)"; exit 1; fi; \
+	FOUND=0; \
+	for TF in 1m 5m 15m 30m 1h; do \
+		CSV="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
+		if [ ! -f "$$CSV" ]; then echo "  ⏭  $$CSV not found, skipping"; continue; fi; \
+		FOUND=1; \
+		echo ""; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		echo "$(YELLOW)  PDHL Guard Sweep: $$TF  →  $$CSV$(NC)"; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		$$BINARY $$CSV; \
+		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_pdhl_guard_sweep.csv" 2>/dev/null || true; \
+		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_pdhl_guard_sweep.csv"; \
+	done; \
+	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
+endif
+
+sweep-pullback-guards: ## Run dedicated VWAPPullback guard sweep across all available timeframes (SYMBOL=ethusdt)
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make sweep-pullback-guards SYMBOL=ethusdt$(NC)"
+	@exit 1
+else
+	@mkdir -p data/sweeps; \
+	BINARY=./backtest_sweep/target/release/pullback_guard_sweep; \
+	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep$(NC)"; exit 1; fi; \
+	FOUND=0; \
+	for TF in 1m 5m 15m 30m 1h; do \
+		CSV="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
+		if [ ! -f "$$CSV" ]; then echo "  ⏭  $$CSV not found, skipping"; continue; fi; \
+		FOUND=1; \
+		echo ""; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		echo "$(YELLOW)  Pullback Guard Sweep: $$TF  →  $$CSV$(NC)"; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		$$BINARY $$CSV; \
+		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_pullback_guard_sweep.csv" 2>/dev/null || true; \
+		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_pullback_guard_sweep.csv"; \
 	done; \
 	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
 endif

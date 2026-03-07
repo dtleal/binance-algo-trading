@@ -66,6 +66,19 @@ Use the Makefile target (recommended — handles all TFs automatically):
 make sweep-rust SYMBOL=dogeusdt
 ```
 
+If you are testing runtime protection guards without blowing up the global search space,
+use the dedicated strategy sweeps instead of modifying the standard sweep:
+
+```bash
+make sweep-pdhl-guards SYMBOL=icxusdt
+make sweep-pullback-guards SYMBOL=ethusdt
+```
+
+These dedicated sweeps:
+- keep the standard multi-strategy sweep unchanged,
+- add `time_stop_minutes`, `time_stop_min_progress_pct`, `adverse_exit_bars`, and `adverse_body_min_pct`,
+- use a focused parameter grid so they remain runnable on a normal workstation.
+
 Or run manually per timeframe:
 
 ```bash
@@ -127,6 +140,13 @@ make filter-overfit SYMBOL=dogeusdt
 python scripts/filter_overfit.py --symbol dogeusdt
 ```
 
+For dedicated guard sweeps, pass the file suffix so the filter reads the correct CSV family:
+
+```bash
+make filter-overfit SYMBOL=icxusdt SUFFIX=pdhl_guard_sweep OUT_TAG=pdhl_guard
+make filter-overfit SYMBOL=ethusdt SUFFIX=pullback_guard_sweep OUT_TAG=pullback_guard
+```
+
 Generated files:
 - `data/sweeps/dogeusdt_anti_overfit_layer1.csv`
 - `data/sweeps/dogeusdt_anti_overfit_layer2.csv`
@@ -158,6 +178,15 @@ After selecting candidates, validate robustness with walk-forward:
 make walk-forward SYMBOL=dogeusdt TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30
 # optional fast smoke test:
 make walk-forward SYMBOL=dogeusdt TF=1h TRAIN_DAYS=120 TEST_DAYS=15 STEP_DAYS=15 MAX_FOLDS=2
+```
+
+If you want walk-forward on a dedicated sweep binary, pass the Rust binary and an output prefix:
+
+```bash
+make walk-forward SYMBOL=icxusdt TF=5m \
+  BINARY=./backtest_sweep/target/release/pdhl_guard_sweep \
+  OUT_PREFIX=icxusdt_5m_pdhl_guard \
+  TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30
 ```
 
 How it works:

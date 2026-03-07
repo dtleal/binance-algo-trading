@@ -61,6 +61,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeframes", default="1m,5m,15m,30m,1h", help="Comma-separated timeframes")
     parser.add_argument("--sweeps-dir", default="data/sweeps")
     parser.add_argument("--klines-dir", default="data/klines")
+    parser.add_argument("--sweep-suffix", default="sweep", help="Sweep file suffix without timeframe prefix, e.g. sweep or pdhl_guard_sweep")
+    parser.add_argument("--output-tag", default="", help="Optional tag added to anti-overfit output filenames")
     parser.add_argument("--layer3-top-n", type=int, default=12, help="Top candidates from Layer 2 to validate in Layer 3")
 
     # Layer 1 thresholds
@@ -80,6 +82,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--confirm-radius", type=int, default=1)
     parser.add_argument("--vwap-prox-radius", type=float, default=0.30, help="VWAP proximity radius in percentage points")
     parser.add_argument("--vwap-dist-radius", type=float, default=1.0, help="VWAP distance stop radius in percentage points")
+    parser.add_argument("--time-stop-progress-radius", type=float, default=0.25, help="Time-stop progress radius in percentage points")
+    parser.add_argument("--adverse-body-radius", type=float, default=0.10, help="Adverse candle body radius in percentage points")
     parser.add_argument("--ema-radius", type=int, default=100)
     parser.add_argument("--max-trades-radius", type=int, default=1)
     parser.add_argument("--pdhl-prox-radius", type=float, default=0.25, help="PDHL proximity radius in percentage points")
@@ -133,13 +137,13 @@ def _parse_window(v: Any) -> tuple[int, int]:
     return ENTRY_WINDOW_MAP["01-22"]
 
 
-def load_sweeps(symbol: str, timeframes: list[str], sweeps_dir: Path) -> tuple[pd.DataFrame, list[str]]:
+def load_sweeps(symbol: str, timeframes: list[str], sweeps_dir: Path, sweep_suffix: str) -> tuple[pd.DataFrame, list[str]]:
     rows: list[pd.DataFrame] = []
     missing: list[str] = []
 
     symbol_lower = symbol.lower()
     for tf in timeframes:
-        p = sweeps_dir / f"{symbol_lower}_{tf}_sweep.csv"
+        p = sweeps_dir / f"{symbol_lower}_{tf}_{sweep_suffix}.csv"
         if not p.exists():
             missing.append(tf)
             continue
@@ -162,7 +166,8 @@ def normalize_sweep_df(df: pd.DataFrame) -> pd.DataFrame:
     for col in [
         "tp_pct", "sl_pct", "rr_ratio", "min_bars", "confirm_bars", "vwap_prox", "vwap_window",
         "ema_period", "max_trades_per_day", "fast_period", "slow_period", "orb_range_mins", "pdhl_prox_pct",
-        "max_hold", "vwap_dist_stop", "pos_size_pct", "trades", "wins", "losses", "eods",
+        "max_hold", "vwap_dist_stop", "time_stop_minutes", "time_stop_min_progress_pct",
+        "adverse_exit_bars", "adverse_body_min_pct", "pos_size_pct", "trades", "wins", "losses", "eods",
         "win_rate", "return_pct", "final_capital", "max_dd_pct", "max_consec_loss",
     ]:
         if col not in out.columns:
@@ -171,15 +176,19 @@ def normalize_sweep_df(df: pd.DataFrame) -> pd.DataFrame:
     for col in [
         "tp_pct", "sl_pct", "rr_ratio", "vwap_prox", "vwap_window", "ema_period", "max_trades_per_day",
         "fast_period", "slow_period", "orb_range_mins", "pdhl_prox_pct", "vwap_dist_stop",
+        "time_stop_min_progress_pct", "adverse_body_min_pct",
         "pos_size_pct", "win_rate", "return_pct", "final_capital", "max_dd_pct",
     ]:
         out[col] = out[col].map(_to_float)
 
-    for col in ["min_bars", "confirm_bars", "max_hold", "trades", "wins", "losses", "eods", "max_consec_loss"]:
+    for col in ["min_bars", "confirm_bars", "max_hold", "time_stop_minutes", "adverse_exit_bars", "trades", "wins", "losses", "eods", "max_consec_loss"]:
         if col == "max_hold":
             out[col] = out[col].map(_parse_max_hold).astype(int)
         else:
             out[col] = out[col].map(_to_int).astype(int)
+
+    for col in ["time_stop_min_progress_pct", "adverse_body_min_pct"]:
+        out[col] = out[col].fillna(0.0)
 
     for col in ["vol_filter", "trend_filter"]:
         if col not in out.columns:
@@ -231,6 +240,12 @@ def _neighbors_mask(all_df: pd.DataFrame, cand: pd.Series, args: argparse.Namesp
     # Keep same categorical risk profile.
     mask &= (all_df["entry_window"] == cand["entry_window"])
     mask &= (all_df["max_hold"] == cand["max_hold"])
+    mask &= (all_df["time_stop_minutes"] == cand["time_stop_minutes"])
+    mask &= (all_df["adverse_exit_bars"] == cand["adverse_exit_bars"])
+    if int(cand["time_stop_minutes"]) > 0:
+        mask &= np.abs(all_df["time_stop_min_progress_pct"] - cand["time_stop_min_progress_pct"]) <= args.time_stop_progress_radius
+    if int(cand["adverse_exit_bars"]) > 0:
+        mask &= np.abs(all_df["adverse_body_min_pct"] - cand["adverse_body_min_pct"]) <= args.adverse_body_radius
 
     # Strategy-specific neighborhood constraints.
     strategy = str(cand["strategy"])
@@ -400,6 +415,10 @@ def _simulate_exit(
     sl_pct: float,
     max_hold: int,
     vwap_dist_stop: float,
+    time_stop_minutes: int,
+    time_stop_min_progress_pct: float,
+    adverse_exit_bars: int,
+    adverse_body_min_pct: float,
     vwap_arr: np.ndarray,
 ) -> tuple[int, float, str]:
     entry_price = prep.close[entry_idx]
@@ -420,6 +439,7 @@ def _simulate_exit(
     exit_idx = eod_idx
     exit_price = float(prep.close[eod_idx])
     reason = "EOD"
+    adverse_count = 0
 
     for j in range(entry_idx + 1, day_end):
         minute = int(prep.minute[j])
@@ -471,7 +491,41 @@ def _simulate_exit(
                 reason = "TP"
                 break
 
+        close = float(prep.close[j])
+        pnl_pct = ((entry_price - close) / entry_price * 100.0) if is_short else ((close - entry_price) / entry_price * 100.0)
+        if (
+            time_stop_minutes > 0
+            and minute >= entry_minute + time_stop_minutes
+            and pnl_pct <= time_stop_min_progress_pct
+        ):
+            exit_idx = j
+            exit_price = close
+            reason = "TIME_STOP"
+            break
+
+        open_ = float(prep.open[j])
+        body_pct = (abs(close - open_) / open_ * 100.0) if open_ else 0.0
+        adverse_candle = (
+            ((not is_short and close < open_) or (is_short and close > open_))
+            and body_pct >= adverse_body_min_pct
+        )
+        adverse_count = adverse_count + 1 if adverse_candle else 0
+        if adverse_exit_bars > 0 and adverse_count >= adverse_exit_bars and pnl_pct < 0.0:
+            exit_idx = j
+            exit_price = close
+            reason = "ADVERSE_MOMENTUM"
+            break
+
     return exit_idx, exit_price, reason
+
+
+def _extract_exit_guards(row: pd.Series) -> tuple[int, float, int, float]:
+    return (
+        int(row["time_stop_minutes"]),
+        float(row["time_stop_min_progress_pct"]),
+        int(row["adverse_exit_bars"]),
+        float(row["adverse_body_min_pct"]),
+    )
 
 
 def _append_trade(
@@ -523,6 +577,7 @@ def _simulate_momentum_or_rejection(
     vol_filter = bool(row["vol_filter"])
     trend_filter = bool(row["trend_filter"])
     entry_start, entry_cutoff = _parse_window(row["entry_window"])
+    time_stop_minutes, time_stop_min_progress_pct, adverse_exit_bars, adverse_body_min_pct = _extract_exit_guards(row)
 
     trades: list[dict[str, Any]] = []
     capital = INITIAL_CAPITAL
@@ -637,6 +692,10 @@ def _simulate_momentum_or_rejection(
                 sl_pct=sl,
                 max_hold=max_hold,
                 vwap_dist_stop=vwap_dist,
+                time_stop_minutes=time_stop_minutes,
+                time_stop_min_progress_pct=time_stop_min_progress_pct,
+                adverse_exit_bars=adverse_exit_bars,
+                adverse_body_min_pct=adverse_body_min_pct,
                 vwap_arr=vwap_arr,
             )
             capital, win = _append_trade(
@@ -674,6 +733,7 @@ def _simulate_pullback(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray)
     entry_start, entry_cutoff = _parse_window(row["entry_window"])
     max_trades_per_day = max(0, int(row["max_trades_per_day"]))
     ema_period = int(row["ema_period"])
+    time_stop_minutes, time_stop_min_progress_pct, adverse_exit_bars, adverse_body_min_pct = _extract_exit_guards(row)
     ema_arr = prep.ema_pullback.get(ema_period)
     if ema_arr is None:
         raise ValueError(f"EMA period {ema_period} not precomputed for VWAPPullback")
@@ -730,6 +790,10 @@ def _simulate_pullback(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray)
                             sl_pct=sl,
                             max_hold=max_hold,
                             vwap_dist_stop=vwap_dist,
+                            time_stop_minutes=time_stop_minutes,
+                            time_stop_min_progress_pct=time_stop_min_progress_pct,
+                            adverse_exit_bars=adverse_exit_bars,
+                            adverse_body_min_pct=adverse_body_min_pct,
                             vwap_arr=vwap_arr,
                         )
                         capital, win = _append_trade(
@@ -781,6 +845,10 @@ def _simulate_pullback(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray)
                             sl_pct=sl,
                             max_hold=max_hold,
                             vwap_dist_stop=vwap_dist,
+                            time_stop_minutes=time_stop_minutes,
+                            time_stop_min_progress_pct=time_stop_min_progress_pct,
+                            adverse_exit_bars=adverse_exit_bars,
+                            adverse_body_min_pct=adverse_body_min_pct,
                             vwap_arr=vwap_arr,
                         )
                         capital, win = _append_trade(
@@ -820,6 +888,7 @@ def _simulate_ema_scalp(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray
     max_hold = int(row["max_hold"])
     vwap_dist = float(row["vwap_dist_stop"]) / 100.0
     max_trades_per_day = max(0, int(row["max_trades_per_day"]))
+    time_stop_minutes, time_stop_min_progress_pct, adverse_exit_bars, adverse_body_min_pct = _extract_exit_guards(row)
 
     fast_period = int(row["fast_period"])
     slow_period = int(row["slow_period"])
@@ -868,6 +937,10 @@ def _simulate_ema_scalp(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray
                 sl_pct=sl,
                 max_hold=max_hold,
                 vwap_dist_stop=vwap_dist,
+                time_stop_minutes=time_stop_minutes,
+                time_stop_min_progress_pct=time_stop_min_progress_pct,
+                adverse_exit_bars=adverse_exit_bars,
+                adverse_body_min_pct=adverse_body_min_pct,
                 vwap_arr=vwap_arr,
             )
             capital, win = _append_trade(
@@ -900,6 +973,7 @@ def _simulate_pdhl(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray) -> 
     vwap_dist = float(row["vwap_dist_stop"]) / 100.0
     prox = float(row["pdhl_prox_pct"]) / 100.0
     confirm_bars = int(row["confirm_bars"])
+    time_stop_minutes, time_stop_min_progress_pct, adverse_exit_bars, adverse_body_min_pct = _extract_exit_guards(row)
 
     pdh: float | None = None
     pdl: float | None = None
@@ -952,6 +1026,10 @@ def _simulate_pdhl(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray) -> 
                         sl_pct=sl,
                         max_hold=max_hold,
                         vwap_dist_stop=vwap_dist,
+                        time_stop_minutes=time_stop_minutes,
+                        time_stop_min_progress_pct=time_stop_min_progress_pct,
+                        adverse_exit_bars=adverse_exit_bars,
+                        adverse_body_min_pct=adverse_body_min_pct,
                         vwap_arr=vwap_arr,
                     )
                     capital, win = _append_trade(
@@ -996,6 +1074,10 @@ def _simulate_pdhl(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray) -> 
                         sl_pct=sl,
                         max_hold=max_hold,
                         vwap_dist_stop=vwap_dist,
+                        time_stop_minutes=time_stop_minutes,
+                        time_stop_min_progress_pct=time_stop_min_progress_pct,
+                        adverse_exit_bars=adverse_exit_bars,
+                        adverse_body_min_pct=adverse_body_min_pct,
                         vwap_arr=vwap_arr,
                     )
                     capital, win = _append_trade(
@@ -1042,6 +1124,7 @@ def _simulate_orb(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray) -> t
     vwap_dist = float(row["vwap_dist_stop"]) / 100.0
     range_mins = int(row["orb_range_mins"])
     buffer_pct = 0.002
+    time_stop_minutes, time_stop_min_progress_pct, adverse_exit_bars, adverse_body_min_pct = _extract_exit_guards(row)
 
     trades: list[dict[str, Any]] = []
     capital = INITIAL_CAPITAL
@@ -1088,6 +1171,10 @@ def _simulate_orb(prep: PreparedData, row: pd.Series, vwap_arr: np.ndarray) -> t
                 sl_pct=sl,
                 max_hold=max_hold,
                 vwap_dist_stop=vwap_dist,
+                time_stop_minutes=time_stop_minutes,
+                time_stop_min_progress_pct=time_stop_min_progress_pct,
+                adverse_exit_bars=adverse_exit_bars,
+                adverse_body_min_pct=adverse_body_min_pct,
                 vwap_arr=vwap_arr,
             )
             capital, win = _append_trade(
@@ -1277,12 +1364,13 @@ def run_layer3(
     return out
 
 
-def save_outputs(symbol: str, sweeps_dir: Path, layer1: pd.DataFrame, layer2: pd.DataFrame, layer3: pd.DataFrame) -> tuple[Path, Path, Path]:
+def save_outputs(symbol: str, sweeps_dir: Path, layer1: pd.DataFrame, layer2: pd.DataFrame, layer3: pd.DataFrame, output_tag: str) -> tuple[Path, Path, Path]:
     sweeps_dir.mkdir(parents=True, exist_ok=True)
     symbol_lower = symbol.lower()
-    out1 = sweeps_dir / f"{symbol_lower}_anti_overfit_layer1.csv"
-    out2 = sweeps_dir / f"{symbol_lower}_anti_overfit_layer2.csv"
-    out3 = sweeps_dir / f"{symbol_lower}_anti_overfit_final.csv"
+    prefix = f"{symbol_lower}_{output_tag}" if output_tag else symbol_lower
+    out1 = sweeps_dir / f"{prefix}_anti_overfit_layer1.csv"
+    out2 = sweeps_dir / f"{prefix}_anti_overfit_layer2.csv"
+    out3 = sweeps_dir / f"{prefix}_anti_overfit_final.csv"
     layer1.to_csv(out1, index=False)
     layer2.to_csv(out2, index=False)
     layer3.to_csv(out3, index=False)
@@ -1298,10 +1386,11 @@ def main() -> None:
 
     sweeps_dir = Path(args.sweeps_dir)
     klines_dir = Path(args.klines_dir)
+    output_tag = args.output_tag.strip() or ("" if args.sweep_suffix == "sweep" else args.sweep_suffix)
 
     print(f"Loading sweeps for {symbol.upper()} from {sweeps_dir} ...")
     try:
-        all_df, missing_tfs = load_sweeps(symbol, timeframes, sweeps_dir)
+        all_df, missing_tfs = load_sweeps(symbol, timeframes, sweeps_dir, args.sweep_suffix.strip())
     except FileNotFoundError as exc:
         raise SystemExit(f"❌ {exc}") from exc
     except Exception as exc:
@@ -1319,7 +1408,7 @@ def main() -> None:
     layer3 = run_layer3(layer2, symbol, klines_dir, args)
     print(f"Layer 3 passed: {len(layer3):,}")
 
-    out1, out2, out3 = save_outputs(symbol, sweeps_dir, layer1, layer2, layer3)
+    out1, out2, out3 = save_outputs(symbol, sweeps_dir, layer1, layer2, layer3, output_tag)
     print("")
     print("Outputs:")
     print(f"  Layer 1: {out1}")
@@ -1328,7 +1417,8 @@ def main() -> None:
 
     if not layer3.empty:
         cols = [
-            "strategy", "timeframe", "tp_pct", "sl_pct", "trades", "win_rate",
+            "strategy", "timeframe", "tp_pct", "sl_pct", "time_stop_minutes",
+            "time_stop_min_progress_pct", "adverse_exit_bars", "adverse_body_min_pct", "trades", "win_rate",
             "return_pct", "max_dd_pct", "ret_dd", "final_score",
             "months_total", "positive_month_ratio", "worst_month_return_pct", "layer3_max_losing_streak",
         ]

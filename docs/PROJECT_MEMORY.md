@@ -21,12 +21,18 @@ It supports:
    - Generates 5m, 15m, 30m, 1h files.
 3. Run sweep on all timeframes:
    - `make sweep-rust SYMBOL=dogeusdt`
+   - For guard research without exploding the global search space:
+     - `make sweep-pdhl-guards SYMBOL=icxusdt`
+     - `make sweep-pullback-guards SYMBOL=ethusdt`
 4. Run anti-overfitting filter (3 layers):
    - `make filter-overfit SYMBOL=dogeusdt`
    - Generates:
      - `data/sweeps/<symbol>_anti_overfit_layer1.csv`
      - `data/sweeps/<symbol>_anti_overfit_layer2.csv`
      - `data/sweeps/<symbol>_anti_overfit_final.csv`
+   - Dedicated sweeps can be filtered with suffixes:
+     - `make filter-overfit SYMBOL=icxusdt SUFFIX=pdhl_guard_sweep OUT_TAG=pdhl_guard`
+     - `make filter-overfit SYMBOL=ethusdt SUFFIX=pullback_guard_sweep OUT_TAG=pullback_guard`
 5. Run walk-forward validation (out-of-sample):
    - `make walk-forward SYMBOL=dogeusdt TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30`
    - Train optimization is Rust sweep per fold; OOS evaluation uses frozen params on the next window.
@@ -141,6 +147,8 @@ It supports:
 - `scripts/filter_overfit.py`: 3-layer anti-overfitting filter (hard thresholds, neighborhood robustness, monthly consistency re-sim).
 - `scripts/walk_forward.py`: rolling walk-forward validator (Rust train optimization + OOS window test).
 - `backtest_sweep/target/release/backtest_sweep`: sweep binary.
+- `backtest_sweep/target/release/pdhl_guard_sweep`: dedicated PDHL sweep with focused runtime-guard grid.
+- `backtest_sweep/target/release/pullback_guard_sweep`: dedicated VWAPPullback sweep with focused runtime-guard grid.
 - `backtest_sweep_v2/target/release/backtest_sweep_v2`: advanced trailing-stop sweep.
 - `data/klines/`: historical CSV inputs.
 - `data/sweeps/`: sweep outputs.
@@ -155,6 +163,8 @@ It supports:
 - Treat V2 sweep as advanced/optional (explicit request only).
 - If champion comes from broadly negative sweep averages, treat as suspect and validate longer.
 - Keep one-trade-per-day and EOD close behavior unless there is a clear, tested reason to change.
+- Do not add runtime guards (`time_stop`, `adverse_exit`) to the global multi-strategy sweep unless the combinatorial cost is explicitly accepted.
+- Use the dedicated guard sweeps for `PDHL` and `VWAPPullback` instead of expanding the global sweep space.
 - When bots need reload/restart during support or debugging, the assistant should ask the user to run `make stop && make start` in their own terminal.
 - Do not restart live bots from the assistant side unless the user explicitly asks for that action.
 
@@ -354,6 +364,8 @@ It supports:
     1) optimize on train window with Rust sweep,
     2) freeze best params,
     3) evaluate on next unseen test window.
+  - If no fold produces a train candidate, `scripts/walk_forward.py` now still writes the
+    folds/summary CSVs cleanly instead of crashing on a missing `test_error` column.
 - Maker-first execution mode was introduced for live active bots:
   - Bots updated: `MomShort`, `VWAPPullback`, `PDHL`, `ORB`, `EMAScalp`.
   - Entry flow now prefers maker (`LIMIT` + `GTX` / post-only) and falls back to `MARKET`
