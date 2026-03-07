@@ -6,6 +6,8 @@ logs/
 *.csv
 *.html
 *.png
+!data/klines/
+!data/klines/*.csv
 
 # Frontend
 frontend/node_modules/
