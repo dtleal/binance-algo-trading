@@ -24,6 +24,8 @@ It supports:
    - For guard research without exploding the global search space:
      - `make sweep-pdhl-guards SYMBOL=icxusdt`
      - `make sweep-pullback-guards SYMBOL=ethusdt`
+   - For intraday-only pullback research with shorter TP/SL/max-hold:
+     - `make sweep-pullback-intraday SYMBOL=dogeusdt`
 4. Run anti-overfitting filter (3 layers):
    - `make filter-overfit SYMBOL=dogeusdt`
    - Generates:
@@ -33,8 +35,12 @@ It supports:
    - Dedicated sweeps can be filtered with suffixes:
      - `make filter-overfit SYMBOL=icxusdt SUFFIX=pdhl_guard_sweep OUT_TAG=pdhl_guard`
      - `make filter-overfit SYMBOL=ethusdt SUFFIX=pullback_guard_sweep OUT_TAG=pullback_guard`
+   - Intraday pullback wrapper uses its own thresholds:
+     - `make filter-overfit-intraday SYMBOL=dogeusdt`
 5. Run walk-forward validation (out-of-sample):
    - `make walk-forward SYMBOL=dogeusdt TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30`
+   - Intraday pullback wrapper:
+     - `make walk-forward-intraday SYMBOL=dogeusdt TF=5m`
    - Train optimization is Rust sweep per fold; OOS evaluation uses frozen params on the next window.
    - Outputs:
      - `data/sweeps/<symbol>_<tf>_walkforward_folds.csv`
@@ -149,6 +155,7 @@ It supports:
 - `backtest_sweep/target/release/backtest_sweep`: sweep binary.
 - `backtest_sweep/target/release/pdhl_guard_sweep`: dedicated PDHL sweep with focused runtime-guard grid.
 - `backtest_sweep/target/release/pullback_guard_sweep`: dedicated VWAPPullback sweep with focused runtime-guard grid.
+- `backtest_sweep/target/release/pullback_intraday_sweep`: dedicated VWAPPullback intraday sweep with short TP/SL, short max-hold, and `max_trades_per_day` in `{2,4}`.
 - `backtest_sweep_v2/target/release/backtest_sweep_v2`: advanced trailing-stop sweep.
 - `data/klines/`: historical CSV inputs.
 - `data/sweeps/`: sweep outputs.
@@ -165,8 +172,41 @@ It supports:
 - Keep one-trade-per-day and EOD close behavior unless there is a clear, tested reason to change.
 - Do not add runtime guards (`time_stop`, `adverse_exit`) to the global multi-strategy sweep unless the combinatorial cost is explicitly accepted.
 - Use the dedicated guard sweeps for `PDHL` and `VWAPPullback` instead of expanding the global sweep space.
+- Use the dedicated `pullback_intraday_sweep` when the goal is true intraday rotation instead of EOD drift.
+- The intraday pullback wrapper currently uses:
+  - `TP = {0.5,1.0,1.5,2.0,3.0}%`
+  - `SL = {0.4,0.6,0.8,1.0,1.5,2.0}%`
+  - `min_bars = {2,3,5}`
+  - `confirm_bars = {0,1}`
+  - `vwap_prox = {0.1%,0.2%,0.3%}`
+  - `ema_period = {100,200}`
+  - `max_hold = {15m,30m,60m}`
+  - `time_stop_minutes = {20,40,60}`
+  - `max_trades_per_day = {2,4}`
+- Intraday filter wrapper defaults are intentionally different from the standard anti-overfit gate:
+  - `min_trades=50`
+  - `min_return=5`
+  - `max_dd=8`
+  - `min_ret_dd=1.5`
+  - `min_neighbors=12`
+  - `min_avg_trades_per_day=1.0`
+  - `max_eod_ratio=50`
+  - `max_avg_hold_minutes=120`
+- Intraday walk-forward wrapper defaults are also relaxed relative to the standard gate:
+  - `min_train_trades=30`
+  - `max_train_dd=8`
+  - `min_train_return=2`
+  - `min_train_trades_per_day=1.0`
+  - `max_train_eod_ratio=50`
+  - `max_train_avg_hold=120`
+- `pullback_intraday_sweep` now exports `avg_trades_per_day` in its CSV results, and both
+  `filter_overfit.py` and `walk_forward.py` can reject low-frequency setups explicitly.
+- Re-running `DOGEUSDT` under the tighter intraday grid confirmed the intended behavior change:
+  `EOD` dependence went to ~0 and average hold dropped to roughly 25-60 minutes, but the
+  symbol still failed because even the best setups remained below `1.0` trade/day on average.
 - When bots need reload/restart during support or debugging, the assistant should ask the user to run `make stop && make start` in their own terminal.
 - Do not restart live bots from the assistant side unless the user explicitly asks for that action.
+- `scripts/walk_forward.py` cache keys must include the sweep binary identity (path + size + mtime). Without that, dedicated binaries such as `pullback_guard_sweep` and `pullback_intraday_sweep` can incorrectly reuse old train caches from another sweep family.
 
 ## Runtime Notes (2026-03-04)
 

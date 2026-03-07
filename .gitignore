@@ -27,4 +27,4 @@ backtest_sweep_v2/target/
 dump.rdb
 
 # Data (klines are too large for git)
-data/klines/
+#data/klines/

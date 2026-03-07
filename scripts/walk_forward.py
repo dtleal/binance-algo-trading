@@ -57,12 +57,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--min-train-trades", type=int, default=80)
     p.add_argument("--max-train-dd", type=float, default=15.0)
     p.add_argument("--min-train-return", type=float, default=0.0)
+    p.add_argument("--max-train-eod-ratio", type=float, default=-1.0, help="Reject train candidates above this EOD exit ratio percentage; <=0 disables")
+    p.add_argument("--max-train-avg-hold", type=float, default=-1.0, help="Reject train candidates above this average hold in minutes; <=0 disables")
+    p.add_argument("--min-train-trades-per-day", type=float, default=-1.0, help="Reject train candidates below this average trades-per-day when the metric is available; <=0 disables")
     p.add_argument("--require-unique", action="store_true", help="Drop duplicate param sets before ranking")
     return p.parse_args()
 
 
-def _hash_fold(symbol: str, timeframe: str, train_start: int, train_end: int) -> str:
-    raw = f"{symbol}|{timeframe}|{train_start}|{train_end}"
+def _hash_fold(symbol: str, timeframe: str, train_start: int, train_end: int, binary: Path) -> str:
+    binary_resolved = binary.resolve()
+    binary_stat = binary_resolved.stat()
+    raw = (
+        f"{symbol}|{timeframe}|{train_start}|{train_end}|"
+        f"{binary_resolved}|{binary_stat.st_size}|{binary_stat.st_mtime_ns}"
+    )
     return hashlib.md5(raw.encode("utf-8")).hexdigest()[:10]
 
 
@@ -128,6 +136,12 @@ def choose_candidate(train_results: pd.DataFrame, timeframe: str, args: argparse
         & (norm["max_dd_pct"] <= args.max_train_dd)
         & (norm["return_pct"] >= args.min_train_return)
     ].copy()
+    if args.max_train_eod_ratio > 0 and "eod_ratio_pct" in filt.columns:
+        filt = filt[filt["eod_ratio_pct"].fillna(0.0) <= args.max_train_eod_ratio].copy()
+    if args.max_train_avg_hold > 0 and "avg_hold_minutes" in filt.columns:
+        filt = filt[filt["avg_hold_minutes"].fillna(0.0) <= args.max_train_avg_hold].copy()
+    if args.min_train_trades_per_day > 0 and "avg_trades_per_day" in filt.columns:
+        filt = filt[filt["avg_trades_per_day"].fillna(0.0) >= args.min_train_trades_per_day].copy()
 
     if filt.empty:
         return None
@@ -158,6 +172,9 @@ def eval_candidate_on_test(test_csv: Path, candidate: pd.Series) -> dict[str, An
             "test_win_rate": 0.0,
             "test_return_pct": 0.0,
             "test_max_dd_pct": 0.0,
+            "test_eod_ratio_pct": 0.0,
+            "test_avg_hold_minutes": 0.0,
+            "test_avg_trades_per_day": 0.0,
             "test_months_total": 0,
             "test_positive_month_ratio": 0.0,
             "test_worst_month_return_pct": 0.0,
@@ -172,6 +189,9 @@ def eval_candidate_on_test(test_csv: Path, candidate: pd.Series) -> dict[str, An
             "test_win_rate": 0.0,
             "test_return_pct": 0.0,
             "test_max_dd_pct": 0.0,
+            "test_eod_ratio_pct": 0.0,
+            "test_avg_hold_minutes": 0.0,
+            "test_avg_trades_per_day": 0.0,
             "test_months_total": 0,
             "test_positive_month_ratio": 0.0,
             "test_worst_month_return_pct": 0.0,
@@ -190,12 +210,20 @@ def eval_candidate_on_test(test_csv: Path, candidate: pd.Series) -> dict[str, An
     ret = (float(equity[-1]) / INITIAL_CAPITAL - 1.0) * 100.0
 
     months_total, pos_ratio, worst_month = compute_monthly_metrics(trades)
+    hold_minutes = [
+        max((pd.Timestamp(t["exit_time"]) - pd.Timestamp(t["entry_time"])).total_seconds() / 60.0, 0.0)
+        for t in trades
+    ]
+    eod_ratio_pct = float(sum(1 for t in trades if str(t.get("reason", "")).upper() == "EOD") / n * 100.0)
     return {
         "test_trades": n,
         "test_wins": wins,
         "test_win_rate": win_rate,
         "test_return_pct": ret,
         "test_max_dd_pct": max_dd,
+        "test_eod_ratio_pct": eod_ratio_pct,
+        "test_avg_hold_minutes": float(np.mean(hold_minutes)) if hold_minutes else 0.0,
+        "test_avg_trades_per_day": float(n / max(len(prep.day_slices), 1)),
         "test_months_total": months_total,
         "test_positive_month_ratio": pos_ratio,
         "test_worst_month_return_pct": worst_month,
@@ -211,6 +239,9 @@ def empty_test_metrics(error: str = "") -> dict[str, Any]:
         "test_win_rate": 0.0,
         "test_return_pct": 0.0,
         "test_max_dd_pct": 0.0,
+        "test_eod_ratio_pct": 0.0,
+        "test_avg_hold_minutes": 0.0,
+        "test_avg_trades_per_day": 0.0,
         "test_months_total": 0,
         "test_positive_month_ratio": 0.0,
         "test_worst_month_return_pct": 0.0,
@@ -257,7 +288,7 @@ def main() -> None:
             print(f"\n[Fold {fs.fold}] train={fs.train_start_day}->{fs.train_end_day_exclusive - 1} "
                   f"test={fs.test_start_day}->{fs.test_end_day_exclusive - 1}")
 
-            fold_hash = _hash_fold(symbol, tf, fs.train_start_day, fs.train_end_day_exclusive)
+            fold_hash = _hash_fold(symbol, tf, fs.train_start_day, fs.train_end_day_exclusive, binary)
             cache_train_sweep = cache_dir / f"{symbol}_{tf}_{fold_hash}_train_sweep.csv"
             train_csv = tpath / f"train_{fs.fold}.csv"
             test_csv = tpath / f"test_{fs.fold}.csv"
@@ -335,6 +366,9 @@ def main() -> None:
                 "train_win_rate": float(cand.get("win_rate", 0.0)),
                 "train_return_pct": float(cand.get("return_pct", 0.0)),
                 "train_max_dd_pct": float(cand.get("max_dd_pct", 0.0)),
+                "train_eod_ratio_pct": float(cand.get("eod_ratio_pct", 0.0)),
+                "train_avg_hold_minutes": float(cand.get("avg_hold_minutes", 0.0)),
+                "train_avg_trades_per_day": float(cand.get("avg_trades_per_day", 0.0)),
                 "train_ret_dd": float(cand.get("ret_dd", 0.0)),
             }
             row.update(test_metrics)
@@ -365,6 +399,9 @@ def main() -> None:
             "median_test_return_pct": 0.0,
             "positive_test_fold_ratio": 0.0,
             "avg_test_max_dd_pct": 0.0,
+            "avg_test_eod_ratio_pct": 0.0,
+            "avg_test_avg_hold_minutes": 0.0,
+            "avg_test_avg_trades_per_day": 0.0,
         }])
     else:
         cap = INITIAL_CAPITAL
@@ -382,6 +419,9 @@ def main() -> None:
             "median_test_return_pct": float(valid["test_return_pct"].median()),
             "positive_test_fold_ratio": float((valid["test_return_pct"] > 0.0).mean()),
             "avg_test_max_dd_pct": float(valid["test_max_dd_pct"].mean()),
+            "avg_test_eod_ratio_pct": float(valid["test_eod_ratio_pct"].mean()),
+            "avg_test_avg_hold_minutes": float(valid["test_avg_hold_minutes"].mean()),
+            "avg_test_avg_trades_per_day": float(valid["test_avg_trades_per_day"].mean()),
         }])
 
     summary.to_csv(summary_out, index=False)

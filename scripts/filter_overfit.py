@@ -71,6 +71,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-dd", type=float, default=10.0)
     parser.add_argument("--min-ret-dd", type=float, default=1.8)
     parser.add_argument("--zero-dd-min-trades", type=int, default=80)
+    parser.add_argument("--max-eod-ratio", type=float, default=-1.0, help="Reject setups above this EOD exit ratio percentage when the metric is available; <=0 disables")
+    parser.add_argument("--max-avg-hold-minutes", type=float, default=-1.0, help="Reject setups above this average hold in minutes when the metric is available; <=0 disables")
+    parser.add_argument("--min-avg-trades-per-day", type=float, default=-1.0, help="Reject setups below this average trades-per-day when the metric is available; <=0 disables")
 
     # Layer 2 thresholds
     parser.add_argument("--min-neighbors", type=int, default=25)
@@ -168,7 +171,7 @@ def normalize_sweep_df(df: pd.DataFrame) -> pd.DataFrame:
         "ema_period", "max_trades_per_day", "fast_period", "slow_period", "orb_range_mins", "pdhl_prox_pct",
         "max_hold", "vwap_dist_stop", "time_stop_minutes", "time_stop_min_progress_pct",
         "adverse_exit_bars", "adverse_body_min_pct", "pos_size_pct", "trades", "wins", "losses", "eods",
-        "win_rate", "return_pct", "final_capital", "max_dd_pct", "max_consec_loss",
+        "eod_ratio_pct", "avg_hold_minutes", "avg_trades_per_day", "win_rate", "return_pct", "final_capital", "max_dd_pct", "max_consec_loss",
     ]:
         if col not in out.columns:
             out[col] = np.nan
@@ -177,7 +180,7 @@ def normalize_sweep_df(df: pd.DataFrame) -> pd.DataFrame:
         "tp_pct", "sl_pct", "rr_ratio", "vwap_prox", "vwap_window", "ema_period", "max_trades_per_day",
         "fast_period", "slow_period", "orb_range_mins", "pdhl_prox_pct", "vwap_dist_stop",
         "time_stop_min_progress_pct", "adverse_body_min_pct",
-        "pos_size_pct", "win_rate", "return_pct", "final_capital", "max_dd_pct",
+        "pos_size_pct", "eod_ratio_pct", "avg_hold_minutes", "avg_trades_per_day", "win_rate", "return_pct", "final_capital", "max_dd_pct",
     ]:
         out[col] = out[col].map(_to_float)
 
@@ -221,6 +224,12 @@ def run_layer1(df: pd.DataFrame, args: argparse.Namespace) -> pd.DataFrame:
         & (df["ret_dd"] >= args.min_ret_dd)
         & ~((df["max_dd_pct"] <= 1e-9) & (df["trades"] < args.zero_dd_min_trades))
     )
+    if args.max_eod_ratio > 0 and "eod_ratio_pct" in df.columns:
+        mask &= df["eod_ratio_pct"].fillna(0.0) <= args.max_eod_ratio
+    if args.max_avg_hold_minutes > 0 and "avg_hold_minutes" in df.columns:
+        mask &= df["avg_hold_minutes"].fillna(0.0) <= args.max_avg_hold_minutes
+    if args.min_avg_trades_per_day > 0 and "avg_trades_per_day" in df.columns:
+        mask &= df["avg_trades_per_day"].fillna(0.0) >= args.min_avg_trades_per_day
     return df.loc[mask].copy()
 
 
@@ -1264,6 +1273,26 @@ def compute_monthly_metrics(trades: list[dict[str, Any]]) -> tuple[int, float, f
     return len(arr), positive_ratio, worst_month
 
 
+def compute_trade_behavior_metrics(trades: list[dict[str, Any]], total_days: int) -> tuple[float, float, float]:
+    if not trades:
+        return 0.0, 0.0, 0.0
+
+    holds: list[float] = []
+    eod_count = 0
+    for t in trades:
+        entry_time = pd.Timestamp(t["entry_time"])
+        exit_time = pd.Timestamp(t["exit_time"])
+        hold_minutes = max((exit_time - entry_time).total_seconds() / 60.0, 0.0)
+        holds.append(float(hold_minutes))
+        if str(t.get("reason", "")).upper() == "EOD":
+            eod_count += 1
+
+    avg_hold_minutes = float(np.mean(holds)) if holds else 0.0
+    eod_ratio_pct = float(eod_count / len(trades) * 100.0) if trades else 0.0
+    avg_trades_per_day = float(len(trades) / max(total_days, 1))
+    return avg_hold_minutes, eod_ratio_pct, avg_trades_per_day
+
+
 def run_layer3(
     layer2_df: pd.DataFrame,
     symbol: str,
@@ -1297,6 +1326,9 @@ def run_layer3(
         base["layer3_trades"] = 0
         base["layer3_return_pct"] = -999.0
         base["layer3_max_dd_pct"] = 999.0
+        base["layer3_avg_hold_minutes"] = 0.0
+        base["layer3_eod_ratio_pct"] = 0.0
+        base["layer3_avg_trades_per_day"] = 0.0
         base["layer3_pass"] = False
 
         if not kline_path.exists():
@@ -1330,6 +1362,7 @@ def run_layer3(
         ret = (final_cap / INITIAL_CAPITAL - 1.0) * 100.0
 
         months_total, pos_ratio, worst_month = compute_monthly_metrics(trades)
+        avg_hold_minutes, eod_ratio_pct, avg_trades_per_day = compute_trade_behavior_metrics(trades, len(prep.day_slices))
 
         passed = (
             months_total >= args.min_months
@@ -1337,6 +1370,9 @@ def run_layer3(
             and worst_month >= -abs(args.max_worst_month_loss)
             and mls <= args.max_losing_streak
             and ret > 0.0
+            and (args.max_eod_ratio <= 0 or eod_ratio_pct <= args.max_eod_ratio)
+            and (args.max_avg_hold_minutes <= 0 or avg_hold_minutes <= args.max_avg_hold_minutes)
+            and (args.min_avg_trades_per_day <= 0 or avg_trades_per_day >= args.min_avg_trades_per_day)
         )
 
         base["months_total"] = months_total
@@ -1346,6 +1382,9 @@ def run_layer3(
         base["layer3_trades"] = len(trades)
         base["layer3_return_pct"] = ret
         base["layer3_max_dd_pct"] = max_dd
+        base["layer3_avg_hold_minutes"] = avg_hold_minutes
+        base["layer3_eod_ratio_pct"] = eod_ratio_pct
+        base["layer3_avg_trades_per_day"] = avg_trades_per_day
         base["layer3_pass"] = passed
         enriched.append(base)
 
@@ -1419,8 +1458,9 @@ def main() -> None:
         cols = [
             "strategy", "timeframe", "tp_pct", "sl_pct", "time_stop_minutes",
             "time_stop_min_progress_pct", "adverse_exit_bars", "adverse_body_min_pct", "trades", "win_rate",
-            "return_pct", "max_dd_pct", "ret_dd", "final_score",
+            "return_pct", "max_dd_pct", "eod_ratio_pct", "avg_hold_minutes", "avg_trades_per_day", "ret_dd", "final_score",
             "months_total", "positive_month_ratio", "worst_month_return_pct", "layer3_max_losing_streak",
+            "layer3_eod_ratio_pct", "layer3_avg_hold_minutes", "layer3_avg_trades_per_day",
         ]
         top = layer3[cols].head(10)
         print("")

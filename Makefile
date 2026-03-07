@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-ldo-pdhl bot-ldo-pdhl-dry bot-rlc-pdhl bot-rlc-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download filter-overfit walk-forward backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-ldo-pdhl bot-ldo-pdhl-dry bot-rlc-pdhl bot-rlc-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download filter-overfit filter-overfit-intraday walk-forward walk-forward-intraday backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth sweep-pullback-intraday analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -433,8 +433,19 @@ ifeq ($(filter command line environment,$(origin SYMBOL)),)
 else
 	@poetry run python scripts/filter_overfit.py --symbol $(SYMBOL) \
 		$(if $(SUFFIX),--sweep-suffix $(SUFFIX),) \
-		$(if $(OUT_TAG),--output-tag $(OUT_TAG),)
+		$(if $(OUT_TAG),--output-tag $(OUT_TAG),) \
+		$(if $(MIN_TRADES),--min-trades $(MIN_TRADES),) \
+		$(if $(MIN_RETURN),--min-return $(MIN_RETURN),) \
+		$(if $(MAX_DD),--max-dd $(MAX_DD),) \
+		$(if $(MIN_RET_DD),--min-ret-dd $(MIN_RET_DD),) \
+		$(if $(MIN_NEIGHBORS),--min-neighbors $(MIN_NEIGHBORS),) \
+		$(if $(MAX_EOD_RATIO),--max-eod-ratio $(MAX_EOD_RATIO),) \
+		$(if $(MAX_AVG_HOLD_MINUTES),--max-avg-hold-minutes $(MAX_AVG_HOLD_MINUTES),) \
+		$(if $(MIN_AVG_TRADES_PER_DAY),--min-avg-trades-per-day $(MIN_AVG_TRADES_PER_DAY),)
 endif
+
+filter-overfit-intraday: ## Run anti-overfit with intraday behavior filters (SYMBOL=dogeusdt SUFFIX=pullback_intraday_sweep)
+	@$(MAKE) filter-overfit SYMBOL=$(SYMBOL) SUFFIX=$(or $(SUFFIX),pullback_intraday_sweep) OUT_TAG=$(or $(OUT_TAG),pullback_intraday) MIN_TRADES=$(or $(MIN_TRADES),50) MIN_RETURN=$(or $(MIN_RETURN),5) MAX_DD=$(or $(MAX_DD),8) MIN_RET_DD=$(or $(MIN_RET_DD),1.5) MIN_NEIGHBORS=$(or $(MIN_NEIGHBORS),12) MAX_EOD_RATIO=$(or $(MAX_EOD_RATIO),50) MAX_AVG_HOLD_MINUTES=$(or $(MAX_AVG_HOLD_MINUTES),120) MIN_AVG_TRADES_PER_DAY=$(or $(MIN_AVG_TRADES_PER_DAY),1.0)
 
 walk-forward: ## Walk-forward validation (Rust optimize + OOS test). Args: SYMBOL=x TF=1m TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30 MAX_FOLDS=0
 ifeq ($(filter command line environment,$(origin SYMBOL)),)
@@ -449,8 +460,17 @@ else
 		--test-days $(or $(TEST_DAYS),30) \
 		--step-days $(or $(STEP_DAYS),30) \
 		--max-folds $(or $(MAX_FOLDS),0) \
-		$(if $(OUT_PREFIX),--out-prefix $(OUT_PREFIX),)
+		$(if $(OUT_PREFIX),--out-prefix $(OUT_PREFIX),) \
+		$(if $(MIN_TRAIN_TRADES),--min-train-trades $(MIN_TRAIN_TRADES),) \
+		$(if $(MAX_TRAIN_DD),--max-train-dd $(MAX_TRAIN_DD),) \
+		$(if $(MIN_TRAIN_RETURN),--min-train-return $(MIN_TRAIN_RETURN),) \
+		$(if $(MAX_TRAIN_EOD_RATIO),--max-train-eod-ratio $(MAX_TRAIN_EOD_RATIO),) \
+		$(if $(MAX_TRAIN_AVG_HOLD),--max-train-avg-hold $(MAX_TRAIN_AVG_HOLD),) \
+		$(if $(MIN_TRAIN_TRADES_PER_DAY),--min-train-trades-per-day $(MIN_TRAIN_TRADES_PER_DAY),)
 endif
+
+walk-forward-intraday: ## Walk-forward with intraday behavior filters (SYMBOL=dogeusdt TF=5m)
+	@$(MAKE) walk-forward SYMBOL=$(SYMBOL) TF=$(or $(TF),5m) BINARY=$(or $(BINARY),./backtest_sweep/target/release/pullback_intraday_sweep) OUT_PREFIX=$(or $(OUT_PREFIX),$(SYMBOL)_$(or $(TF),5m)_pullback_intraday) MIN_TRAIN_TRADES=$(or $(MIN_TRAIN_TRADES),30) MAX_TRAIN_DD=$(or $(MAX_TRAIN_DD),8) MIN_TRAIN_RETURN=$(or $(MIN_TRAIN_RETURN),2) MAX_TRAIN_EOD_RATIO=$(or $(MAX_TRAIN_EOD_RATIO),50) MAX_TRAIN_AVG_HOLD=$(or $(MAX_TRAIN_AVG_HOLD),120) MIN_TRAIN_TRADES_PER_DAY=$(or $(MIN_TRAIN_TRADES_PER_DAY),1.0) TRAIN_DAYS=$(or $(TRAIN_DAYS),180) TEST_DAYS=$(or $(TEST_DAYS),30) STEP_DAYS=$(or $(STEP_DAYS),30) MAX_FOLDS=$(or $(MAX_FOLDS),0)
 
 onboarding-db: ## DB-first onboarding: download → aggregate → sweep → apply champion (SYMBOL=x DAYS=365)
 ifeq ($(filter command line environment,$(origin SYMBOL)),)
@@ -589,6 +609,30 @@ else
 		$$BINARY $$CSV; \
 		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_pullback_guard_sweep.csv" 2>/dev/null || true; \
 		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_pullback_guard_sweep.csv"; \
+	done; \
+	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
+endif
+
+sweep-pullback-intraday: ## Run dedicated VWAPPullback intraday sweep across all available timeframes (SYMBOL=dogeusdt)
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make sweep-pullback-intraday SYMBOL=dogeusdt$(NC)"
+	@exit 1
+else
+	@mkdir -p data/sweeps; \
+	BINARY=./backtest_sweep/target/release/pullback_intraday_sweep; \
+	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep$(NC)"; exit 1; fi; \
+	FOUND=0; \
+	for TF in 1m 5m 15m 30m 1h; do \
+		CSV="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
+		if [ ! -f "$$CSV" ]; then echo "  ⏭  $$CSV not found, skipping"; continue; fi; \
+		FOUND=1; \
+		echo ""; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		echo "$(YELLOW)  Pullback Intraday Sweep: $$TF  →  $$CSV$(NC)"; \
+		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
+		$$BINARY $$CSV; \
+		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_pullback_intraday_sweep.csv" 2>/dev/null || true; \
+		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_pullback_intraday_sweep.csv"; \
 	done; \
 	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
 endif

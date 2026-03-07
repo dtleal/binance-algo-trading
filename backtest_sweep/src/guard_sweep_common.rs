@@ -402,7 +402,20 @@ pub fn find_entries_pdhl(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn evaluate_with_guards(
+#[derive(Clone, Copy)]
+pub struct GuardEvalStats {
+    pub wins: usize,
+    pub losses: usize,
+    pub eods: usize,
+    pub final_capital: f64,
+    pub max_dd: f64,
+    pub max_consec_loss: usize,
+    pub avg_hold_minutes: f64,
+    pub eod_ratio_pct: f64,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_with_guards_stats(
     entries: &[Entry],
     candles: &[Candle],
     tp_pct: f64,
@@ -417,13 +430,14 @@ pub fn evaluate_with_guards(
     adverse_exit_bars: usize,
     adverse_body_min_pct: f64,
     vwap_idx: usize,
-) -> (usize, usize, usize, f64, f64, usize) {
+) -> GuardEvalStats {
     let mut capital = INITIAL_CAPITAL;
     let mut peak = capital;
     let mut max_dd = 0.0f64;
     let (mut wins, mut losses, mut eods) = (0usize, 0usize, 0usize);
     let mut cl = 0usize;
     let mut mcl = 0usize;
+    let mut total_hold_minutes = 0u64;
 
     for e in entries {
         let short = if use_entry_direction { !e.is_long } else { default_short };
@@ -435,6 +449,7 @@ pub fn evaluate_with_guards(
 
         let mut exit_price = e.eod_close;
         let mut is_eod = true;
+        let mut exit_minute = END_OF_DAY;
         let mut adverse_count = 0usize;
 
         for j in e.rest_start..e.rest_end {
@@ -443,6 +458,7 @@ pub fn evaluate_with_guards(
             if max_hold > 0 && c.minute_of_day >= e.entry_minute.saturating_add(max_hold) {
                 exit_price = c.close;
                 is_eod = false;
+                exit_minute = c.minute_of_day;
                 break;
             }
 
@@ -454,6 +470,7 @@ pub fn evaluate_with_guards(
                     if too_far {
                         exit_price = c.close;
                         is_eod = false;
+                        exit_minute = c.minute_of_day;
                         break;
                     }
                 }
@@ -463,22 +480,26 @@ pub fn evaluate_with_guards(
                 if c.high >= sl_price {
                     exit_price = sl_price;
                     is_eod = false;
+                    exit_minute = c.minute_of_day;
                     break;
                 }
                 if c.low <= tp_price {
                     exit_price = tp_price;
                     is_eod = false;
+                    exit_minute = c.minute_of_day;
                     break;
                 }
             } else {
                 if c.low <= sl_price {
                     exit_price = sl_price;
                     is_eod = false;
+                    exit_minute = c.minute_of_day;
                     break;
                 }
                 if c.high >= tp_price {
                     exit_price = tp_price;
                     is_eod = false;
+                    exit_minute = c.minute_of_day;
                     break;
                 }
             }
@@ -495,6 +516,7 @@ pub fn evaluate_with_guards(
             {
                 exit_price = c.close;
                 is_eod = false;
+                exit_minute = c.minute_of_day;
                 break;
             }
 
@@ -512,6 +534,7 @@ pub fn evaluate_with_guards(
             if adverse_exit_bars > 0 && adverse_count >= adverse_exit_bars && pnl_pct < 0.0 {
                 exit_price = c.close;
                 is_eod = false;
+                exit_minute = c.minute_of_day;
                 break;
             }
         }
@@ -536,12 +559,69 @@ pub fn evaluate_with_guards(
         if is_eod {
             eods += 1;
         }
+        total_hold_minutes += u64::from(exit_minute.saturating_sub(e.entry_minute));
         peak = peak.max(capital);
         let dd = if peak > 0.0 { (peak - capital) / peak } else { 0.0 };
         max_dd = max_dd.max(dd);
     }
 
-    (wins, losses, eods, capital, max_dd, mcl)
+    let trades = entries.len() as f64;
+    let avg_hold_minutes = if trades > 0.0 { total_hold_minutes as f64 / trades } else { 0.0 };
+    let eod_ratio_pct = if trades > 0.0 { eods as f64 / trades * 100.0 } else { 0.0 };
+
+    GuardEvalStats {
+        wins,
+        losses,
+        eods,
+        final_capital: capital,
+        max_dd,
+        max_consec_loss: mcl,
+        avg_hold_minutes,
+        eod_ratio_pct,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_with_guards(
+    entries: &[Entry],
+    candles: &[Candle],
+    tp_pct: f64,
+    sl_pct: f64,
+    pos_size: f64,
+    use_entry_direction: bool,
+    default_short: bool,
+    max_hold: u16,
+    vwap_dist_stop: f64,
+    time_stop_minutes: u16,
+    time_stop_min_progress_pct: f64,
+    adverse_exit_bars: usize,
+    adverse_body_min_pct: f64,
+    vwap_idx: usize,
+) -> (usize, usize, usize, f64, f64, usize) {
+    let stats = evaluate_with_guards_stats(
+        entries,
+        candles,
+        tp_pct,
+        sl_pct,
+        pos_size,
+        use_entry_direction,
+        default_short,
+        max_hold,
+        vwap_dist_stop,
+        time_stop_minutes,
+        time_stop_min_progress_pct,
+        adverse_exit_bars,
+        adverse_body_min_pct,
+        vwap_idx,
+    );
+    (
+        stats.wins,
+        stats.losses,
+        stats.eods,
+        stats.final_capital,
+        stats.max_dd,
+        stats.max_consec_loss,
+    )
 }
 
 pub fn f2(v: f64) -> String {

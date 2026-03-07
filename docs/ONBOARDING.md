@@ -79,6 +79,25 @@ These dedicated sweeps:
 - add `time_stop_minutes`, `time_stop_min_progress_pct`, `adverse_exit_bars`, and `adverse_body_min_pct`,
 - use a focused parameter grid so they remain runnable on a normal workstation.
 
+If you want a true intraday pullback grid instead of EOD-drift setups, use:
+
+```bash
+make sweep-pullback-intraday SYMBOL=dogeusdt
+```
+
+This dedicated intraday sweep narrows the grid to:
+- `TP`: `0.5%, 1%, 1.5%, 2%, 3%`
+- `SL`: `0.4%, 0.6%, 0.8%, 1%, 1.5%, 2%`
+- `min_bars`: `2, 3, 5`
+- `confirm_bars`: `0, 1`
+- `vwap_prox`: `0.1%, 0.2%, 0.3%`
+- `ema_period`: `100, 200`
+- `max_hold`: `15m, 30m, 60m`
+- `time_stop_minutes`: `20, 40, 60`
+- `max_trades_per_day`: `2, 4`
+
+Use it when the research goal is faster intraday rotation and low `EOD` dependence.
+
 Or run manually per timeframe:
 
 ```bash
@@ -147,6 +166,22 @@ make filter-overfit SYMBOL=icxusdt SUFFIX=pdhl_guard_sweep OUT_TAG=pdhl_guard
 make filter-overfit SYMBOL=ethusdt SUFFIX=pullback_guard_sweep OUT_TAG=pullback_guard
 ```
 
+For the dedicated intraday pullback grid, use the wrapper:
+
+```bash
+make filter-overfit-intraday SYMBOL=dogeusdt
+```
+
+This wrapper applies intraday-specific gates on top of the normal 3-layer flow:
+- `min_trades = 50`
+- `min_return = 5%`
+- `max_dd = 8%`
+- `min_ret_dd = 1.5`
+- `min_neighbors = 12`
+- `min_avg_trades_per_day = 1.0`
+- reject setups with `EOD > 50%`
+- reject setups with `avg_hold_minutes > 120`
+
 Generated files:
 - `data/sweeps/dogeusdt_anti_overfit_layer1.csv`
 - `data/sweeps/dogeusdt_anti_overfit_layer2.csv`
@@ -188,6 +223,25 @@ make walk-forward SYMBOL=icxusdt TF=5m \
   OUT_PREFIX=icxusdt_5m_pdhl_guard \
   TRAIN_DAYS=180 TEST_DAYS=30 STEP_DAYS=30
 ```
+
+For the intraday pullback grid, use:
+
+```bash
+make walk-forward-intraday SYMBOL=dogeusdt TF=5m
+```
+
+This wrapper uses:
+- `BINARY=./backtest_sweep/target/release/pullback_intraday_sweep`
+- `min_train_trades = 30`
+- `max_train_dd = 8%`
+- `min_train_return = 2%`
+- `min_train_trades_per_day = 1.0`
+- `max_train_eod_ratio = 50%`
+- `max_train_avg_hold = 120`
+
+Important:
+- `scripts/walk_forward.py` cache keys must distinguish the sweep binary.
+- Otherwise a dedicated run can accidentally reuse train caches from another sweep family and invalidate the result.
 
 How it works:
 
