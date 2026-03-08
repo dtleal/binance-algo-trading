@@ -468,3 +468,43 @@ It supports:
   - This fixes the class of incidents where `LINKUSDT` / `LDOUSDT` / `GALAUSDT`
     could hit early-exit logic, receive maker close reject `-5022`, and be left
     open while the bot incorrectly moved to `COOLDOWN`.
+- Trade sync/dashboard parity hardening (2026-03-08):
+  - `trades` now persists Binance `trade_id` per fill and uses `(symbol, trade_id)` as
+    the dedupe key instead of `(symbol, order_id)`.
+  - Reason:
+    - futures orders can fill in multiple parts under the same `order_id`; the old schema
+      collapsed partial fills and undercounted realized PnL / fees in the dashboard.
+  - Files updated:
+    - `db/migrations/009_trades_use_trade_id.sql`
+    - `db/sync_trades.py`
+    - `db/backfill_trades.py`
+  - Repair workflow:
+    - after migrating, run `poetry run python -m db.backfill_trades --from YYYY-MM-DD`
+      to restore historical missing fills;
+    - then delete synthetic placeholder rows where `trade_id = order_id` but real fill rows
+      for the same `(symbol, order_id)` now exist, and rebuild `daily_performance` for the
+      affected `symbol + trade_date` pairs.
+  - `db/backfill_trades.py` now walks Binance `account_trade_list` in explicit 7-day windows
+    using `start_time` + `end_time`, which is required for older date ranges.
+  - Dashboard calendar behavior was aligned to the project reporting timezone:
+    - frontend `Today` now means the current `America/Sao_Paulo` calendar day,
+      not a rolling last-24-hours window;
+    - daily grouping in `Overview` / `History` also uses `America/Sao_Paulo`.
+  - Account/dashboard valuation now includes non-USDT futures wallet assets:
+    - `trader/api.py:get_account_summary()` converts balances such as `BNB` to USDT using
+      live Binance prices instead of looking only at the `USDT` row from
+      `futures_account_balance_v3`.
+    - This prevents large balance/equity mismatches versus Binance Balance Analysis when
+      fee-discount inventory is held in futures wallet.
+  - Dashboard trade/fee reporting now converts non-USDT commissions to USDT:
+    - `/api/trades` enriches each trade with `commission_usdt`;
+    - `Overview`, `History`, and `PerformanceMetrics` use `commission_usdt` for net/fee totals.
+  - `/api/commissions` now reads Binance `income_history` directly and converts fee assets
+    (for example `BNB`) into USDT-equivalent values, instead of summing raw DB `commission`
+    numbers as if they were already USDT.
+  - `/api/account_analysis` now exists for Binance-style account P&L:
+    - uses futures account snapshots + transfer history from Binance instead of trade rows;
+    - its date window follows the dashboard reporting timezone (`America/Sao_Paulo`) and
+      preset filters are calendar-day based (`Today`, `7d`, `30d`), not rolling `N x 24h`;
+    - `Overview` now shows this in a separate `Binance Account Analysis` section so users
+      do not compare trade-level `Gross/Net P&L` cards against Binance `Balance Analysis`.

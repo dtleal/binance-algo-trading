@@ -4,6 +4,7 @@ interface Trade {
   time: number;
   realized_pnl: number;
   commission: number;
+  commission_usdt?: number;
   symbol: string;
   side: string;
 }
@@ -60,7 +61,7 @@ export default function PerformanceMetrics({ trades, startCapital = 1000, totalE
     const grossProfit = winners.reduce((sum, t) => sum + t.realized_pnl, 0);
     const grossLoss = Math.abs(losers.reduce((sum, t) => sum + t.realized_pnl, 0));
     const netProfit = grossProfit - grossLoss;
-    const totalCommissions = trades.reduce((sum, t) => sum + t.commission, 0);
+    const totalCommissions = trades.reduce((sum, t) => sum + (t.commission_usdt ?? t.commission), 0);
 
     // Average metrics
     const avgWin = winningTrades > 0 ? grossProfit / winningTrades : 0;

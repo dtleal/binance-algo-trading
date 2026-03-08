@@ -1,5 +1,6 @@
 import { useFilter } from "../contexts/FilterContext";
 import { useBotStates, useStrategies } from "../hooks/useApi";
+import { todayInBrt } from "../lib/dates";
 
 export default function GlobalFilter() {
   const { filter, updateFilter, resetFilter } = useFilter();
@@ -10,7 +11,7 @@ export default function GlobalFilter() {
   const symbolOptions = ["RECOVERY", "ALL", ...symbols];
   const strategies = ["ALL", ...dbStrategies.map(s => s.name)];
   const dateRanges = [1, 7, 30, 90];
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInBrt();
 
   const hasCustomRange = filter.dateFrom !== null || filter.dateTo !== null;
   const isPresetActive = (d: number) => !hasCustomRange && filter.dateRange === d;

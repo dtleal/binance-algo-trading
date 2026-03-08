@@ -5,6 +5,7 @@ import {
 import { useTrades, useBotStates, usePositions } from "../hooks/useApi";
 import { Trade } from "../types";
 import { useFilter } from "../contexts/FilterContext";
+import { DASHBOARD_TIME_ZONE, formatDateInBrt } from "../lib/dates";
 
 function fmtUSD(n: number) {
   return (n >= 0 ? "+" : "") + n.toLocaleString("en-US", {
@@ -15,6 +16,7 @@ function fmtUSD(n: number) {
 function fmtTime(ms: number) {
   return new Date(ms).toLocaleString("en-US", {
     month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    timeZone: DASHBOARD_TIME_ZONE,
   });
 }
 
@@ -110,13 +112,13 @@ export default function History() {
   const winCount  = closingTrades.filter((t) => t.realized_pnl > 0).length;
   const winRate   = closingTrades.length ? ((winCount / closingTrades.length) * 100).toFixed(1) : "—";
   const avgPnl    = closingTrades.length ? totalPnl / closingTrades.length : 0;
-  const totalComm = filtered.reduce((s, t) => s + t.commission, 0);
+  const totalComm = filtered.reduce((s, t) => s + (t.commission_usdt ?? t.commission), 0);
 
   // Daily P&L bar chart
   const dailyPnl = useMemo(() => {
     const byDay: Record<string, number> = {};
     for (const t of closingTrades) {
-      const d = new Date(t.time).toISOString().slice(0, 10);
+      const d = formatDateInBrt(t.time);
       byDay[d] = (byDay[d] ?? 0) + t.realized_pnl;
     }
     return Object.entries(byDay)
@@ -206,7 +208,10 @@ export default function History() {
                       {t.realized_pnl === 0 ? "—" : fmtUSD(t.realized_pnl)}
                     </td>
                     <td className="px-4 py-2.5 text-amber-600 text-xs">
-                      -{t.commission.toFixed(5)} {t.commission_asset}
+                      <div>-{t.commission.toFixed(5)} {t.commission_asset}</div>
+                      {t.commission_asset !== "USDT" && t.commission_usdt != null && (
+                        <div className="text-[10px] text-amber-500/80">~${t.commission_usdt.toFixed(4)}</div>
+                      )}
                     </td>
                   </tr>
                 ))}

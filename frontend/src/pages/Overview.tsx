@@ -3,11 +3,12 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   AreaChart, Area, BarChart, Bar, Cell, LabelList,
 } from "recharts";
-import { useAccountSummary, useTrades, usePositions, useBotStates } from "../hooks/useApi";
+import { useAccountSummary, useAccountAnalysis, useTrades, usePositions, useBotStates } from "../hooks/useApi";
 import { useFilter } from "../contexts/FilterContext";
 import PerformanceMetrics from "../components/PerformanceMetrics";
 import PerformanceRankings from "../components/PerformanceRankings";
 import AlertSettings from "../components/AlertSettings";
+import { DASHBOARD_TIME_ZONE, formatDateInBrt } from "../lib/dates";
 
 function Card({
   label, value, sub, color = "text-white",
@@ -40,14 +41,18 @@ function fmtUSD(n: number) {
 }
 
 function fmtDate(ms: number) {
-  return new Date(ms).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(ms).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: DASHBOARD_TIME_ZONE,
+  });
 }
 
 function buildDailyPnl(trades: { time: number; realized_pnl: number }[]) {
   const byDay: Record<string, number> = {};
   for (const t of trades) {
     if (t.realized_pnl === 0) continue;
-    const d = new Date(t.time).toISOString().slice(0, 10);
+    const d = formatDateInBrt(t.time);
     byDay[d] = (byDay[d] ?? 0) + t.realized_pnl;
   }
   return Object.entries(byDay).sort().map(([date, pnl]) => ({
@@ -56,13 +61,14 @@ function buildDailyPnl(trades: { time: number; realized_pnl: number }[]) {
   }));
 }
 
-function buildPnlCurve(trades: { time: number; realized_pnl: number; commission: number }[]) {
+function buildPnlCurve(trades: { time: number; realized_pnl: number; commission_usdt?: number; commission: number }[]) {
   const byDay: Record<string, { pnl: number; net: number }> = {};
   for (const t of trades) {
-    const d = new Date(t.time).toISOString().slice(0, 10);
+    const d = formatDateInBrt(t.time);
     if (!byDay[d]) byDay[d] = { pnl: 0, net: 0 };
+    const commission = t.commission_usdt ?? t.commission;
     byDay[d].pnl += t.realized_pnl;
-    byDay[d].net += t.realized_pnl - t.commission;
+    byDay[d].net += t.realized_pnl - commission;
   }
   let runningPnl = 0;
   let runningNet = 0;
@@ -79,22 +85,29 @@ function buildPnlCurve(trades: { time: number; realized_pnl: number; commission:
   });
 }
 
-function buildPnlCurvePerTrade(trades: { time: number; realized_pnl: number; commission: number; symbol?: string }[]) {
+function buildPnlCurvePerTrade(trades: { time: number; realized_pnl: number; commission_usdt?: number; commission: number; symbol?: string }[]) {
   const sorted = [...trades].sort((a, b) => a.time - b.time);
   let runningPnl = 0;
   let runningNet = 0;
   let pendingCommission = 0;
   const points = [];
   for (const t of sorted) {
+    const commission = t.commission_usdt ?? t.commission;
     if (t.realized_pnl === 0) {
-      pendingCommission += t.commission;
+      pendingCommission += commission;
       continue;
     }
     runningPnl += t.realized_pnl;
-    runningNet += t.realized_pnl - t.commission - pendingCommission;
+    runningNet += t.realized_pnl - commission - pendingCommission;
     pendingCommission = 0;
-    const dt = new Date(t.time);
-    const date = `${(dt.getMonth() + 1).toString().padStart(2, "0")}/${dt.getDate().toString().padStart(2, "0")} ${dt.getHours().toString().padStart(2, "0")}:${dt.getMinutes().toString().padStart(2, "0")}`;
+    const date = new Date(t.time).toLocaleString("en-US", {
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone: DASHBOARD_TIME_ZONE,
+    }).replace(",", "");
     points.push({
       date,
       pnl: parseFloat(runningPnl.toFixed(2)),
@@ -114,6 +127,7 @@ function buildPnlCurvePerTrade(trades: { time: number; realized_pnl: number; com
 export default function Overview() {
   const { filter } = useFilter();
   const { summary }   = useAccountSummary();
+  const { accountAnalysis } = useAccountAnalysis(filter.dateRange, filter.dateFrom, filter.dateTo);
   const { trades }    = useTrades(filter.dateRange, filter.dateFrom, filter.dateTo, filter.strategy);
   const { positions } = usePositions();
   const { bots }      = useBotStates();
@@ -151,7 +165,10 @@ export default function Overview() {
   // Filtered period stats (responds to active filters)
   const closingTrades      = useMemo(() => filteredTrades.filter(t => t.realized_pnl !== 0), [filteredTrades]);
   const filteredPnl        = useMemo(() => closingTrades.reduce((s, t) => s + t.realized_pnl, 0), [closingTrades]);
-  const filteredCommission = useMemo(() => filteredTrades.reduce((s, t) => s + t.commission, 0), [filteredTrades]);
+  const filteredCommission = useMemo(
+    () => filteredTrades.reduce((s, t) => s + (t.commission_usdt ?? t.commission), 0),
+    [filteredTrades],
+  );
   const filteredNetPnl     = filteredPnl - filteredCommission;
   const filteredWins       = useMemo(() => closingTrades.filter(t => t.realized_pnl > 0).length, [closingTrades]);
   const filteredWinRate    = closingTrades.length
@@ -183,6 +200,11 @@ export default function Overview() {
   const pnlCurve  = pnlView === "trade" ? pnlCurvePerTrade : pnlCurveDaily;
   const dailyPnl  = useMemo(() => buildDailyPnl(filteredTrades), [filteredTrades]);
   const activeBots = Object.values(bots).length;
+  const accountWindowLabel = filter.dateFrom || filter.dateTo
+    ? `${filter.dateFrom ?? "…"} → ${filter.dateTo ?? "today"}`
+    : filter.dateRange === 1
+      ? "Today"
+      : `Last ${filter.dateRange}d`;
 
   return (
     <div className="space-y-4 md:space-y-6">
@@ -221,8 +243,49 @@ export default function Overview() {
         />
       </div>
 
-      {/* Filtered Analysis — responds to symbol / strategy / date filters */}
-      <SectionHeader title="Filtered Analysis" />
+      {/* Binance Account Analysis — account-level, mirrors balance analysis logic */}
+      <SectionHeader title="Binance Account Analysis" badge={`Account-level · ${accountWindowLabel}`} />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        <Card
+          label="Account P&L"
+          value={accountAnalysis ? fmtUSD(accountAnalysis.account_pnl_usdt) : "—"}
+          color={(accountAnalysis?.account_pnl_usdt ?? 0) >= 0 ? "text-emerald-400" : "text-red-400"}
+          sub={accountAnalysis ? `Start ${fmtUSD(accountAnalysis.start_assets_usdt)} · Transfers ${fmtUSD(accountAnalysis.transfer_usdt)}` : "Binance balance analysis mirror"}
+        />
+        <Card
+          label="Start Assets"
+          value={accountAnalysis ? fmtUSD(accountAnalysis.start_assets_usdt) : "—"}
+          color="text-white"
+          sub={accountAnalysis ? new Date(accountAnalysis.start_time).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: DASHBOARD_TIME_ZONE,
+          }) : undefined}
+        />
+        <Card
+          label="End Assets"
+          value={accountAnalysis ? fmtUSD(accountAnalysis.current_assets_usdt) : "—"}
+          color="text-white"
+          sub={accountAnalysis ? new Date(accountAnalysis.end_time).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+            timeZone: DASHBOARD_TIME_ZONE,
+          }) : undefined}
+        />
+        <Card
+          label="Net Transfers"
+          value={accountAnalysis ? fmtUSD(accountAnalysis.transfer_usdt) : "—"}
+          color="text-sky-400"
+          sub="Excluded from account P&L"
+        />
+      </div>
+
+      {/* Trade Analysis — responds to symbol / strategy / date filters */}
+      <SectionHeader title="Trade Analysis" badge="Realized fills · Filtered" />
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         <Card
           label="Gross P&L"

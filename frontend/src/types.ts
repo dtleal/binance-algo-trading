@@ -21,6 +21,7 @@ export interface Trade {
   qty: number;
   realized_pnl: number;
   commission: number;
+  commission_usdt?: number;
   commission_asset: string;
   time: number;
   order_id: string;
@@ -74,6 +75,22 @@ export interface EquitySnapshot {
   equity: number;
   unrealized_pnl: number;
   balance: number;
+}
+
+export interface AccountAnalysis {
+  days: number;
+  date_from?: string | null;
+  date_to?: string | null;
+  window_start: string;
+  window_end: string;
+  start_time: string;
+  end_time: string;
+  start_assets_usdt: number;
+  current_assets_usdt: number;
+  transfer_usdt: number;
+  account_pnl_usdt: number;
+  account_pnl_pct: number;
+  income_by_type_usdt: Record<string, number>;
 }
 
 export type WsEvent =

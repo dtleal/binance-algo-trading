@@ -13,14 +13,20 @@ Or via CLI (bots co-located):
 """
 
 import asyncio
+import hashlib
+import hmac
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
 
+import requests
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -32,6 +38,10 @@ from trader import events, bot_registry
 
 _EQUITY_STREAM = "equity:history"
 _EQUITY_MAXLEN = 2016   # 7 days × 24h × 12 snapshots/h (5 min interval)
+_REPORT_TZ = ZoneInfo("America/Sao_Paulo")
+_ASSET_PRICE_CACHE_TTL_SEC = 30
+_asset_price_cache: dict[str, tuple[float, float]] = {}
+_asset_historical_price_cache: dict[tuple[str, int], float] = {}
 
 
 
@@ -186,6 +196,301 @@ def _safe_float(v, default=0.0) -> float:
         return float(v)
     except (TypeError, ValueError):
         return default
+
+
+async def _fetch_json(url: str) -> dict:
+    raw = await asyncio.to_thread(
+        lambda: urllib.request.urlopen(url, timeout=10).read()
+    )
+    return json.loads(raw)
+
+
+async def _get_asset_usdt_price(asset: str) -> float:
+    asset = asset.upper()
+    if asset in {"USDT", "USD"}:
+        return 1.0
+
+    cached = _asset_price_cache.get(asset)
+    now = time.time()
+    if cached and now - cached[0] <= _ASSET_PRICE_CACHE_TTL_SEC:
+        return cached[1]
+
+    symbol = f"{asset}USDT"
+    urls = [
+        f"https://fapi.binance.com/fapi/v1/ticker/price?symbol={symbol}",
+        f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}",
+    ]
+    last_error: Exception | None = None
+    for url in urls:
+        try:
+            data = await _fetch_json(url)
+            price = float(data["price"])
+            _asset_price_cache[asset] = (now, price)
+            return price
+        except Exception as exc:
+            last_error = exc
+            continue
+    raise RuntimeError(f"Failed to fetch {symbol} price") from last_error
+
+
+async def _get_asset_usdt_prices(assets: set[str]) -> dict[str, float]:
+    normalized = {asset.upper() for asset in assets if asset}
+    if not normalized:
+        return {}
+    prices: dict[str, float] = {"USDT": 1.0, "USD": 1.0}
+    tasks = {
+        asset: asyncio.create_task(_get_asset_usdt_price(asset))
+        for asset in normalized
+        if asset not in prices
+    }
+    for asset, task in tasks.items():
+        prices[asset] = await task
+    return prices
+
+
+async def _get_asset_usdt_price_at(asset: str, ts_ms: int) -> float:
+    asset = asset.upper()
+    if asset in {"USDT", "USD"}:
+        return 1.0
+
+    bucket_ms = (ts_ms // 3_600_000) * 3_600_000
+    cache_key = (asset, bucket_ms)
+    cached = _asset_historical_price_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    symbol = f"{asset}USDT"
+    urls = [
+        f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1h&startTime={bucket_ms}&limit=1",
+        f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval=1h&startTime={bucket_ms}&limit=1",
+    ]
+    last_error: Exception | None = None
+    for url in urls:
+        try:
+            data = await _fetch_json(url)
+            if data:
+                price = float(data[0][4])
+                _asset_historical_price_cache[cache_key] = price
+                return price
+        except Exception as exc:
+            last_error = exc
+            continue
+
+    # Fallback to current price if historical query is unavailable.
+    price = await _get_asset_usdt_price(asset)
+    _asset_historical_price_cache[cache_key] = price
+    if last_error:
+        return price
+    return price
+
+
+async def _get_asset_usdt_prices_at(points: set[tuple[str, int]]) -> dict[tuple[str, int], float]:
+    if not points:
+        return {}
+    tasks = {
+        point: asyncio.create_task(_get_asset_usdt_price_at(point[0], point[1]))
+        for point in points
+    }
+    return {
+        point: await task
+        for point, task in tasks.items()
+    }
+
+
+async def _get_income_events(client, start_ms: int, end_ms: int) -> list:
+    items = []
+    page = 1
+    limit = 1000
+    while True:
+        resp = await asyncio.to_thread(
+            client.rest_api.get_income_history,
+            None,
+            None,
+            start_ms,
+            end_ms,
+            page,
+            limit,
+            None,
+        )
+        batch = resp.data()
+        if not batch:
+            break
+        items.extend(batch)
+        if len(batch) < limit:
+            break
+        page += 1
+    return items
+
+
+async def _summarize_income_usdt(client, start_ms: int, end_ms: int, *, historical: bool = False) -> dict:
+    items = await _get_income_events(client, start_ms, end_ms)
+    if historical:
+        prices_at = await _get_asset_usdt_prices_at({
+            (
+                (getattr(item, "asset", None) or "USDT").upper(),
+                int(getattr(item, "time", 0) or 0),
+            )
+            for item in items
+        })
+        prices = {}
+    else:
+        assets = {
+            (getattr(item, "asset", None) or "USDT").upper()
+            for item in items
+        }
+        prices = await _get_asset_usdt_prices(assets)
+        prices_at = {}
+
+    total_usdt = 0.0
+    by_type: dict[str, float] = {}
+    for item in items:
+        asset = (getattr(item, "asset", None) or "USDT").upper()
+        income_type = getattr(item, "income_type", None) or "OTHER"
+        income = float(getattr(item, "income", 0) or 0)
+        if historical:
+            usdt = income * prices_at.get((asset, int(getattr(item, "time", 0) or 0)), 0.0)
+        else:
+            usdt = income * prices.get(asset, 0.0)
+        total_usdt += usdt
+        by_type[income_type] = by_type.get(income_type, 0.0) + usdt
+
+    return {
+        "items": items,
+        "prices": prices,
+        "total_usdt": total_usdt,
+        "by_type": by_type,
+    }
+
+
+async def _enrich_trades_with_commission_usdt(trades: list[dict]) -> list[dict]:
+    if not trades:
+        return trades
+    prices = await _get_asset_usdt_prices_at({
+        (
+            (t.get("commission_asset") or "USDT").upper(),
+            int(t.get("time") or 0),
+        )
+        for t in trades
+    })
+    enriched = []
+    for trade in trades:
+        asset = (trade.get("commission_asset") or "USDT").upper()
+        enriched.append({
+            **trade,
+            "commission_usdt": round(
+                float(trade.get("commission", 0)) * prices.get((asset, int(trade.get("time") or 0)), 0.0),
+                8,
+            ),
+        })
+    return enriched
+
+
+async def _get_current_account_state(client) -> dict:
+    balance_resp = await asyncio.to_thread(client.rest_api.futures_account_balance_v3)
+    balances = [
+        b for b in balance_resp.data()
+        if abs(_safe_float(b.balance)) > 0 or abs(_safe_float(b.available_balance)) > 0
+    ]
+    prices = await _get_asset_usdt_prices({b.asset for b in balances})
+    total_balance = sum(_safe_float(b.balance) * prices.get(b.asset.upper(), 0.0) for b in balances)
+    available_balance = sum(_safe_float(b.available_balance) * prices.get(b.asset.upper(), 0.0) for b in balances)
+
+    pos_resp = await asyncio.to_thread(client.rest_api.position_information_v3)
+    total_unrealized_pnl = 0.0
+    total_position_margin = 0.0
+    open_positions = 0
+    for p in pos_resp.data():
+        pos_amt = abs(_safe_float(p.position_amt))
+        if pos_amt <= 0:
+            continue
+        open_positions += 1
+        total_unrealized_pnl += _safe_float(p.un_realized_profit)
+        entry_price = _safe_float(p.entry_price)
+        leverage = int(_safe_float(getattr(p, "leverage", 1)))
+        total_position_margin += (pos_amt * entry_price) / leverage if leverage else 0.0
+
+    total_equity = total_balance + total_unrealized_pnl
+    return {
+        "total_balance": total_balance,
+        "available_balance": available_balance,
+        "total_equity": total_equity,
+        "unrealized_pnl": total_unrealized_pnl,
+        "position_margin": total_position_margin,
+        "open_positions": open_positions,
+    }
+
+
+async def _fetch_futures_account_snapshots(start_ms: int, end_ms: int) -> list[dict]:
+    params = {
+        "type": "FUTURES",
+        "startTime": max(0, start_ms),
+        "endTime": end_ms,
+        "limit": 30,
+        "timestamp": int(time.time() * 1000),
+    }
+    query = urlencode(params)
+    signature = hmac.new(BINANCE_SECRET_KEY.encode(), query.encode(), hashlib.sha256).hexdigest()
+    url = f"https://api.binance.com/sapi/v1/accountSnapshot?{query}&signature={signature}"
+
+    def _request():
+        resp = requests.get(
+            url,
+            headers={"X-MBX-APIKEY": BINANCE_API_KEY},
+            timeout=20,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    data = await asyncio.to_thread(_request)
+    return data.get("snapshotVos", [])
+
+
+async def _snapshot_total_assets_usdt(snapshot: dict) -> float:
+    ts_ms = int(snapshot.get("updateTime", 0) or 0)
+    assets = snapshot.get("data", {}).get("assets", [])
+    prices = await _get_asset_usdt_prices_at({
+        ((asset.get("asset") or "USDT").upper(), ts_ms)
+        for asset in assets
+    })
+    total = 0.0
+    for asset in assets:
+        asset_name = (asset.get("asset") or "USDT").upper()
+        amount = float(asset.get("marginBalance") or asset.get("walletBalance") or 0)
+        total += amount * prices.get((asset_name, ts_ms), 0.0)
+    return total
+
+
+def _parse_report_date(value: str) -> datetime:
+    try:
+        parsed = datetime.strptime(value, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid date: {value}") from exc
+    return datetime(parsed.year, parsed.month, parsed.day, tzinfo=_REPORT_TZ)
+
+
+def _resolve_account_analysis_window(
+    days: int,
+    date_from: str | None,
+    date_to: str | None,
+) -> tuple[datetime, datetime]:
+    now_local = datetime.now(_REPORT_TZ)
+
+    if date_from or date_to:
+        start_local = _parse_report_date(date_from) if date_from else _parse_report_date(date_to)
+        if date_to:
+            end_local = min(now_local, _parse_report_date(date_to) + timedelta(days=1))
+        else:
+            end_local = now_local
+    else:
+        effective_days = max(int(days), 1)
+        start_date = now_local.date() - timedelta(days=effective_days - 1)
+        start_local = datetime(start_date.year, start_date.month, start_date.day, tzinfo=_REPORT_TZ)
+        end_local = now_local
+
+    if end_local <= start_local:
+        raise HTTPException(status_code=400, detail="Invalid date range")
+
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
 
 
 class ProtectionConfigUpdate(BaseModel):
@@ -501,6 +806,7 @@ async def get_trades(symbol: str | None = None, days: int = 7):
     from db.queries.trades import get_trades as db_get_trades
     pool = db.get_pool()
     all_trades = await db_get_trades(pool, symbol=symbol, days=days)
+    all_trades = await _enrich_trades_with_commission_usdt(all_trades)
     all_trades.sort(key=lambda x: x["time"], reverse=True)
     return {"trades": all_trades}
 
@@ -532,10 +838,46 @@ async def get_klines(symbol: str, interval: str = "1m", limit: int = 500):
 
 @app.get("/api/commissions")
 async def get_commissions(days: int = 30):
-    import db
-    from db.queries.trades import get_commissions as db_get_commissions
-    pool = db.get_pool()
-    return await db_get_commissions(pool, days=days)
+    client = await get_client()
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(days=days)
+    summary = await _summarize_income_usdt(
+        client,
+        int(start.timestamp() * 1000),
+        int(now.timestamp() * 1000),
+    )
+
+    by_asset: dict[str, float] = {}
+    by_symbol: dict[str, float] = {}
+    daily: dict[str, float] = {}
+    for item in summary["items"]:
+        income_type = getattr(item, "income_type", None)
+        if income_type != "COMMISSION":
+            continue
+        asset = (getattr(item, "asset", None) or "USDT").upper()
+        symbol = getattr(item, "symbol", None) or "UNKNOWN"
+        income = float(getattr(item, "income", 0) or 0)
+        usdt = abs(income * summary["prices"].get(asset, 0.0))
+        trade_date = datetime.fromtimestamp(
+            int(getattr(item, "time", 0) or 0) / 1000,
+            tz=timezone.utc,
+        ).astimezone(_REPORT_TZ).strftime("%Y-%m-%d")
+
+        by_asset[asset] = by_asset.get(asset, 0.0) + usdt
+        by_symbol[symbol] = by_symbol.get(symbol, 0.0) + usdt
+        daily[trade_date] = daily.get(trade_date, 0.0) + usdt
+
+    sorted_daily = [
+        {"date": d, "commission": round(v, 6)}
+        for d, v in sorted(daily.items())
+    ]
+    return {
+        "by_asset": {k: round(v, 6) for k, v in by_asset.items()},
+        "by_symbol": {k: round(v, 6) for k, v in by_symbol.items()},
+        "daily": sorted_daily,
+        "total_usdt": round(sum(by_asset.values()), 6),
+        "days": days,
+    }
 
 
 @app.get("/api/bot_states")
@@ -565,46 +907,23 @@ async def get_account_summary():
     """
     try:
         client = await get_client()
+        current = await _get_current_account_state(client)
+        total_balance = current["total_balance"]
+        available_balance = current["available_balance"]
+        total_equity = current["total_equity"]
+        total_unrealized_pnl = current["unrealized_pnl"]
+        total_position_margin = current["position_margin"]
+        open_positions = current["open_positions"]
 
-        # Get balance
-        balance_resp = await asyncio.to_thread(client.rest_api.futures_account_balance_v3)
-        usdt_balance = next(
-            (b for b in balance_resp.data() if b.asset == "USDT"), None
-        )
-        total_balance = _safe_float(usdt_balance.balance) if usdt_balance else 0
-        available_balance = _safe_float(usdt_balance.available_balance) if usdt_balance else 0
-
-        # Get positions
-        pos_resp = await asyncio.to_thread(client.rest_api.position_information_v3)
-        total_unrealized_pnl = 0
-        total_position_margin = 0
-        open_positions = 0
-
-        for p in pos_resp.data():
-            pos_amt = abs(_safe_float(p.position_amt))
-            if pos_amt > 0:
-                open_positions += 1
-                total_unrealized_pnl += _safe_float(p.un_realized_profit)
-                entry_price = _safe_float(p.entry_price)
-                leverage = int(_safe_float(getattr(p, "leverage", 1)))
-                total_position_margin += (pos_amt * entry_price) / leverage if leverage else 0
-
-        # Calculate total equity
-        total_equity = total_balance + total_unrealized_pnl
-
-        # Get 24h P&L from DB (closing fills only)
+        # Get 24h income directly from Binance (realized pnl + funding + commissions)
         try:
-            import db
-            pool = db.get_pool()
-            pnl_24h = await pool.fetchval(
-                """
-                SELECT COALESCE(SUM(realized_pnl), 0)
-                FROM trades
-                WHERE realized_pnl != 0
-                  AND trade_time >= NOW() - INTERVAL '24 hours'
-                """
+            income_summary = await _summarize_income_usdt(
+                client,
+                int((datetime.now(timezone.utc) - timedelta(hours=24)).timestamp() * 1000),
+                int(datetime.now(timezone.utc).timestamp() * 1000),
+                historical=True,
             )
-            pnl_24h = float(pnl_24h)
+            pnl_24h = float(income_summary["total_usdt"])
         except Exception:
             pnl_24h = 0
 
@@ -630,6 +949,83 @@ async def get_account_summary():
             "pnl_24h": 0,
             "equity_change_24h_pct": 0,
         }
+
+
+@app.get("/api/account_analysis")
+async def get_account_analysis(
+    days: int = 7,
+    date_from: str | None = None,
+    date_to: str | None = None,
+):
+    client = await get_client()
+    now = datetime.now(timezone.utc)
+    start, end = _resolve_account_analysis_window(days, date_from, date_to)
+    start_ms = int(start.timestamp() * 1000)
+    end_ms = int(end.timestamp() * 1000)
+
+    income_summary = await _summarize_income_usdt(client, start_ms, end_ms, historical=True)
+    transfer_usdt = float(income_summary["by_type"].get("TRANSFER", 0.0))
+
+    snapshots = await _fetch_futures_account_snapshots(
+        start_ms - 7 * 86_400_000,
+        end_ms,
+    )
+    snapshot_candidates = []
+    for snapshot in snapshots:
+        update_time = int(snapshot.get("updateTime", 0) or 0)
+        snapshot_candidates.append({
+            "update_time_ms": update_time,
+            "total_assets_usdt": await _snapshot_total_assets_usdt(snapshot),
+        })
+
+    baseline = None
+    for snapshot in sorted(snapshot_candidates, key=lambda item: item["update_time_ms"]):
+        if snapshot["update_time_ms"] <= start_ms:
+            baseline = snapshot
+        elif baseline is None:
+            baseline = snapshot
+            break
+
+    if baseline is None:
+        raise HTTPException(status_code=503, detail="No account snapshot available for requested period")
+
+    period_end = None
+    for snapshot in sorted(snapshot_candidates, key=lambda item: item["update_time_ms"]):
+        if snapshot["update_time_ms"] <= end_ms:
+            period_end = snapshot
+
+    start_assets = float(baseline["total_assets_usdt"])
+    if end >= now - timedelta(minutes=1):
+        current = await _get_current_account_state(client)
+        end_assets = float(current["total_balance"])
+        end_assets_time = now
+    else:
+        if period_end is None:
+            raise HTTPException(status_code=503, detail="No account snapshot available for period end")
+        end_assets = float(period_end["total_assets_usdt"])
+        end_assets_time = datetime.fromtimestamp(period_end["update_time_ms"] / 1000, tz=timezone.utc)
+
+    account_pnl = end_assets - start_assets - transfer_usdt
+    pnl_pct = (account_pnl / start_assets * 100) if start_assets else 0.0
+
+    return {
+        "days": days,
+        "date_from": date_from,
+        "date_to": date_to,
+        "window_start": start.isoformat(),
+        "window_end": end.isoformat(),
+        "start_time": datetime.fromtimestamp(baseline["update_time_ms"] / 1000, tz=timezone.utc).isoformat(),
+        "end_time": end_assets_time.isoformat(),
+        "start_assets_usdt": round(start_assets, 8),
+        "current_assets_usdt": round(end_assets, 8),
+        "transfer_usdt": round(transfer_usdt, 8),
+        "account_pnl_usdt": round(account_pnl, 8),
+        "account_pnl_pct": round(pnl_pct, 4),
+        "income_by_type_usdt": {
+            key: round(value, 8)
+            for key, value in income_summary["by_type"].items()
+        },
+    }
 
 
 @app.get("/api/equity_history")

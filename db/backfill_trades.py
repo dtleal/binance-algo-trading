@@ -30,48 +30,58 @@ async def backfill_symbol(
     Returns (inserted, already_existed).
     """
     all_trades: list[dict] = []
-    start_time = start_ms
+    window_ms = 7 * 86_400_000 - 1
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    window_start = start_ms
 
-    # Paginate using startTime + endTime windows if needed (Binance max 7d per window)
-    # For safety we paginate forward using the last trade's time + 1ms
-    while True:
-        try:
-            resp = await asyncio.to_thread(
-                lambda st=start_time: client.rest_api.account_trade_list(
-                    symbol=symbol,
-                    start_time=str(st),
-                    limit=1000,
+    # Binance account_trade_list only supports ~7-day ranges reliably.
+    # Walk forward window-by-window and paginate within each window when needed.
+    while window_start <= now_ms:
+        window_end = min(window_start + window_ms, now_ms)
+        page_start = window_start
+
+        while True:
+            try:
+                resp = await asyncio.to_thread(
+                    lambda st=page_start, et=window_end: client.rest_api.account_trade_list(
+                        symbol=symbol,
+                        start_time=str(st),
+                        end_time=str(et),
+                        limit=1000,
+                    )
                 )
-            )
-            batch = resp.data()
-        except Exception as e:
-            print(f"    ERROR fetching {symbol}: {e}")
-            break
+                batch = resp.data()
+            except Exception as e:
+                print(f"    ERROR fetching {symbol}: {e}")
+                batch = []
 
-        if not batch:
-            break
+            if not batch:
+                break
 
-        for t in batch:
-            all_trades.append({
-                "symbol":         t.symbol,
-                "orderId":        t.order_id,
-                "side":           t.side,
-                "price":          t.price,
-                "qty":            t.qty,
-                "realizedPnl":    t.realized_pnl,
-                "commission":     t.commission,
-                "commissionAsset": t.commission_asset,
-                "buyer":          t.buyer,
-                "time":           t.time,
-            })
+            for t in batch:
+                all_trades.append({
+                    "symbol":         t.symbol,
+                    "tradeId":        getattr(t, "id", None) or getattr(t, "trade_id", None) or t.order_id,
+                    "orderId":        t.order_id,
+                    "side":           t.side,
+                    "price":          t.price,
+                    "qty":            t.qty,
+                    "realizedPnl":    t.realized_pnl,
+                    "commission":     t.commission,
+                    "commissionAsset": t.commission_asset,
+                    "buyer":          t.buyer,
+                    "time":           t.time,
+                })
 
-        # If fewer than 1000 results, we've reached the end
-        if len(batch) < 1000:
-            break
+            if len(batch) < 1000:
+                break
 
-        # Advance startTime past the last trade returned
-        last_time = max(int(t.time) for t in batch)
-        start_time = last_time + 1
+            last_time = max(int(t.time) for t in batch)
+            if last_time >= window_end:
+                break
+            page_start = last_time + 1
+
+        window_start = window_end + 1
 
     if not all_trades:
         return 0, 0
@@ -80,6 +90,7 @@ async def backfill_symbol(
     rows = [
         (
             t["symbol"],
+            int(t["tradeId"]),
             int(t["orderId"]),
             t["side"],
             float(t["price"]),
@@ -101,10 +112,10 @@ async def backfill_symbol(
     await conn.executemany(
         """
         INSERT INTO trades
-            (symbol, order_id, side, price, qty, realized_pnl,
+            (symbol, trade_id, order_id, side, price, qty, realized_pnl,
              commission, commission_asset, buyer, trade_time)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-        ON CONFLICT (symbol, order_id) DO NOTHING
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (symbol, trade_id) DO NOTHING
         """,
         rows,
     )

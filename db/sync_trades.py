@@ -60,6 +60,7 @@ async def _insert_trades(
     rows = [
         (
             t["symbol"],
+            int(t["tradeId"]),
             int(t["orderId"]),
             t["side"],
             float(t["price"]),
@@ -79,10 +80,10 @@ async def _insert_trades(
         result = await conn.fetchval(
             """
             INSERT INTO trades
-                (symbol, order_id, side, price, qty, realized_pnl,
+                (symbol, trade_id, order_id, side, price, qty, realized_pnl,
                  commission, commission_asset, buyer, trade_time)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-            ON CONFLICT (symbol, order_id) DO NOTHING
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            ON CONFLICT (symbol, trade_id) DO NOTHING
             RETURNING 1
             """,
             *row,
@@ -151,6 +152,7 @@ async def handle_order_trade_update(pool: asyncpg.Pool, event) -> None:
 
     trade = {
         "symbol":          getattr(o, "s", None),
+        "tradeId":         getattr(o, "t", None) or getattr(o, "i", None),
         "orderId":         getattr(o, "i", None),
         "side":            getattr(o, "S", None),   # uppercase S = BUY/SELL
         "price":           getattr(o, "L", None) or getattr(o, "ap", "0"),  # last fill price
@@ -162,7 +164,7 @@ async def handle_order_trade_update(pool: asyncpg.Pool, event) -> None:
         "time":            trade_time_ms,
     }
 
-    if not trade["symbol"] or trade["orderId"] is None:
+    if not trade["symbol"] or trade["orderId"] is None or trade["tradeId"] is None:
         return
 
     affected_date = datetime.fromtimestamp(int(trade_time_ms) / 1000, tz=timezone.utc).date()
@@ -217,6 +219,7 @@ async def sync_symbol(pool: asyncpg.Pool, client, symbol: str) -> int:
     for t in batch:
         all_new_trades.append({
             "symbol":          t.symbol,
+            "tradeId":         getattr(t, "id", None) or getattr(t, "trade_id", None) or t.order_id,
             "orderId":         t.order_id,
             "side":            t.side,
             "price":           t.price,
