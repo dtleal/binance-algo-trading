@@ -508,3 +508,29 @@ It supports:
       preset filters are calendar-day based (`Today`, `7d`, `30d`), not rolling `N x 24h`;
     - `Overview` now shows this in a separate `Binance Account Analysis` section so users
       do not compare trade-level `Gross/Net P&L` cards against Binance `Balance Analysis`.
+- Temporary portfolio cut applied in DB on 2026-03-08:
+  - `symbol_configs.active` was recomputed with this rule:
+    - keep all `PDHL` configs active;
+    - keep any non-`PDHL` symbol whose cumulative `SUM(trades.realized_pnl)` is positive;
+    - disable all remaining configs.
+  - Resulting active roster:
+    - `PDHL`: `BCHUSDT`, `ICXUSDT`, `LDOUSDT`, `LINKUSDT`, `LTCUSDT`, `MAGICUSDT`, `MANAUSDT`, `MTLUSDT`, `RLCUSDT`
+    - positive non-PDHL: `1000PEPEUSDT`, `AAVEUSDT`, `APTUSDT`, `DOGEUSDT`, `XRPUSDT`
+  - Final counts after the cut:
+    - `active = 14`
+    - `inactive = 14`
+- Runtime protection rollback applied on 2026-03-09:
+  - live bot constructor defaults now disable the early-exit guards that were closing
+    positions before hard SL:
+    - `time_stop_minutes = 0`
+    - `adverse_exit_bars = 0`
+  - `hard SL` and `be_profit_usd` auto-breakeven remain enabled.
+  - Files updated:
+    - `trader/bot.py`
+    - `trader/bot_vwap_pullback.py`
+    - `trader/bot_pdhl.py`
+    - `trader/bot_orb.py`
+    - `trader/bot_ema_scalp.py`
+  - Scope:
+    - this changes live runtime defaults only;
+    - backtest/sweep scripts still support guard research separately.

@@ -101,9 +101,9 @@ class VWAPPullbackBot:
         price_decimals: int | None = None,
         qty_decimals: int | None = None,
         be_profit_usd: float = 0.50,
-        time_stop_minutes: int = 20,
+        time_stop_minutes: int = 0,
         time_stop_min_progress_pct: float = 0.0,
-        adverse_exit_bars: int = 3,
+        adverse_exit_bars: int = 0,
         adverse_body_min_pct: float = 0.20,
     ):
         self.symbol = symbol.upper()
