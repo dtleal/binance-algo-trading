@@ -29,6 +29,9 @@ make onboarding-download SYMBOL=dogeusdt DAYS=365
 This downloads up to 1 year of 1-minute candles from Binance's public REST API.
 Rate-limited at ~4 requests/sec, takes a few minutes for a full year (~525K candles).
 
+If the download is interrupted, re-running the same command with the same output path
+automatically resumes from the last saved candle and retries `HTTP 429` with backoff.
+
 **Check the output:**
 - If the pair is newer than 1 year, you'll get less data
 - Minimum recommended: **3 months** of data for any meaningful backtest

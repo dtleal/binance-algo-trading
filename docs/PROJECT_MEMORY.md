@@ -1,6 +1,6 @@
 # Project Memory: binance-algo-trading
 
-Last updated: 2026-03-06
+Last updated: 2026-03-09
 
 ## Purpose
 
@@ -534,3 +534,10 @@ It supports:
   - Scope:
     - this changes live runtime defaults only;
     - backtest/sweep scripts still support guard research separately.
+- Historical download workflow was hardened on 2026-03-09:
+  - `scripts/fetch_klines.py` now writes CSV batches incrementally instead of buffering the
+    whole download in memory until the end.
+  - Re-running the same command/output path resumes from the last saved candle already present
+    in the CSV.
+  - Binance public API `HTTP 429` now uses retry/backoff automatically during download.
+  - This is especially relevant for long histories such as multi-year `1m` downloads.
