@@ -208,6 +208,12 @@ class RangeBot:
         self._ws_stale_after_sec = self._compute_ws_stale_after_sec(interval)
         self._last_closed_candle_monotonic = time.monotonic()
 
+        # Maker order settings (mirrors bot_pdhl convention)
+        self._maker_price_offset_pct  = max(0.0, float(os.getenv("MAKER_PRICE_OFFSET_PCT",  "0.0002")))
+        self._maker_entry_timeout_sec = max(0.5, float(os.getenv("MAKER_ENTRY_TIMEOUT_SEC", "8")))
+        self._maker_exit_timeout_sec  = max(0.5, float(os.getenv("MAKER_EXIT_TIMEOUT_SEC",  "6")))
+        self._maker_poll_interval_sec = max(0.1, float(os.getenv("MAKER_POLL_INTERVAL_SEC", "0.4")))
+
         self._price_decimals = 4
         self._qty_decimals = 3
         self._qty_step = 0.001
@@ -434,6 +440,31 @@ class RangeBot:
         except Exception:
             return 0.0
 
+    def _get_position(self) -> dict | None:
+        resp = self._client.rest_api.position_information_v3(symbol=self.symbol)
+        for pos in resp.data():
+            amt = float(pos.position_amt)
+            if amt != 0:
+                return {"position_amt": amt, "entry_price": float(pos.entry_price)}
+        return None
+
+    async def _wait_for_position_open(self, timeout_sec: float, direction: str) -> dict | None:
+        """Poll until position appears on exchange or timeout."""
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            pos = self._get_position()
+            if pos:
+                amt = float(pos["position_amt"])
+                if (direction == "long" and amt > 0) or (direction == "short" and amt < 0):
+                    return pos
+            await asyncio.sleep(self._maker_poll_interval_sec)
+        pos = self._get_position()
+        if pos:
+            amt = float(pos["position_amt"])
+            if (direction == "long" and amt > 0) or (direction == "short" and amt < 0):
+                return pos
+        return None
+
     def _cancel_open_orders(self):
         """Cancel all open orders for this symbol (cleans up TP/SL orders)."""
         try:
@@ -562,8 +593,29 @@ class RangeBot:
         qty = notional / entry_price
         return self._round_qty(qty)
 
-    def _place_range_order(self, side: str, tp_price: float, sl_price: float) -> RangePosition | None:
-        """Open a MARKET entry + conditional TP + SL orders.
+    def _maker_limit_price(self, reference_price: float, side: str) -> float:
+        """Compute a limit price slightly inside the book to qualify as maker."""
+        if side == "BUY":
+            raw = reference_price * (1 - self._maker_price_offset_pct)
+        else:
+            raw = reference_price * (1 + self._maker_price_offset_pct)
+        return self._safe_price(raw)
+
+    @staticmethod
+    def _is_post_only_reject(error: Exception) -> bool:
+        msg = str(error)
+        return (
+            "-5022" in msg
+            or "Post Only order will be rejected" in msg
+            or "could not be executed as maker" in msg
+        )
+
+    async def _place_range_order(self, side: str, tp_price: float, sl_price: float) -> RangePosition | None:
+        """Open a maker LIMIT entry (GTX) + LIMIT TP (GTX) + STOP_MARKET SL (algo).
+
+        Entry: LIMIT GTX (post-only). Falls back to MARKET on post-only reject or timeout.
+        TP:    LIMIT GTX reduce_only — fills passively at the take-profit level.
+        SL:    STOP_MARKET via new_algo_order (conditional, mark-price trigger).
 
         Returns a RangePosition if successful, None on failure.
         """
@@ -582,83 +634,126 @@ class RangeBot:
             )
             return None
 
-        binance_side = side  # "BUY" or "SELL"
-        qty_str = self._fmt_qty(qty)
+        close_side = "SELL" if side == "BUY" else "BUY"
+        qty_str    = self._fmt_qty(qty)
+        tp_rounded = self._safe_price(tp_price) if tp_price > 0 else 0.0
+        sl_rounded = self._safe_price(sl_price) if sl_price > 0 else 0.0
 
         if self.dry_run:
-            entry_price = mark
-            tp_rounded  = self._safe_price(tp_price) if tp_price > 0 else 0.0
-            sl_rounded  = self._safe_price(sl_price) if sl_price > 0 else 0.0
             logger.info(
-                f"{GREEN}[DRY-RUN] {side} {qty_str} {self.symbol} @ ~{entry_price:.{self._price_decimals}f}"
+                f"{GREEN}[DRY-RUN] {side} {qty_str} {self.symbol} @ ~{mark:.{self._price_decimals}f}"
                 f"  TP={tp_rounded:.{self._price_decimals}f}"
                 f"  SL={sl_rounded:.{self._price_decimals}f}{RESET}"
             )
             return RangePosition(
-                side=side, entry_price=entry_price, tp_price=tp_rounded,
+                side=side, entry_price=mark, tp_price=tp_rounded,
                 sl_price=sl_rounded, qty=qty,
             )
 
         try:
-            # 1. Market entry
-            entry_resp = self._client.rest_api.new_order(
-                symbol=self.symbol,
-                side=binance_side,
-                type="MARKET",
-                quantity=qty_str,
-            )
-            entry_data = entry_resp.data()
-            avg_price = self._positive_float(getattr(entry_data, "avg_price", None))
-            if avg_price is None:
-                avg_price = mark
+            # ── 1. Entry: LIMIT GTX (maker / post-only) ─────────────────────
+            avg_price     = mark
+            executed_qty  = 0.0
+            execution_mode = "market"
+
+            maker_price = self._maker_limit_price(mark, side)
+            try:
+                maker_resp = self._client.rest_api.new_order(
+                    symbol=self.symbol,
+                    side=side,
+                    type="LIMIT",
+                    time_in_force="GTX",
+                    price=f"{maker_price:.{self._price_decimals}f}",
+                    quantity=qty_str,
+                    new_order_resp_type="RESULT",
+                )
+            except Exception as maker_err:
+                if self._is_post_only_reject(maker_err):
+                    logger.info(
+                        f"{YELLOW}Maker entry rejected (post-only) @ "
+                        f"{maker_price:.{self._price_decimals}f} — fallback MARKET{RESET}"
+                    )
+                else:
+                    raise
+            else:
+                logger.info(
+                    f"{CYAN}Maker entry posted @ {maker_price:.{self._price_decimals}f} "
+                    f"(timeout {self._maker_entry_timeout_sec:.1f}s){RESET}"
+                )
+                direction = "long" if side == "BUY" else "short"
+                pos = await self._wait_for_position_open(self._maker_entry_timeout_sec, direction)
+                if pos:
+                    execution_mode = "maker"
+                    avg_price    = float(pos["entry_price"])
+                    executed_qty = abs(float(pos["position_amt"]))
+                else:
+                    try:
+                        self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                    except Exception:
+                        pass
+                    logger.info(f"{YELLOW}Maker entry timeout — fallback MARKET{RESET}")
+
+            # Fallback to MARKET if maker didn't fill
+            if executed_qty <= 0:
+                order_resp = self._client.rest_api.new_order(
+                    symbol=self.symbol,
+                    side=side,
+                    type="MARKET",
+                    quantity=qty_str,
+                    new_order_resp_type="RESULT",
+                )
+                order_data = order_resp.data()
+                avg_price_raw = self._positive_float(getattr(order_data, "avg_price", None))
+                avg_price    = avg_price_raw if avg_price_raw else mark
+                executed_qty = self._positive_float(getattr(order_data, "executed_qty", None)) or qty
+
             entry_price = avg_price
-
             logger.info(
-                f"{GREEN}ENTERED {side} {qty_str} {self.symbol} @ {entry_price:.{self._price_decimals}f}{RESET}"
+                f"{GREEN}{side} {self._fmt_qty(executed_qty)} {self.symbol} "
+                f"@ {entry_price:.{self._price_decimals}f} [{execution_mode.upper()}]{RESET}"
             )
 
-            # 2. TP order (TAKE_PROFIT_MARKET, mark price)
-            tp_rounded = self._safe_price(tp_price)
-            close_side = "SELL" if side == "BUY" else "BUY"
+            # ── 2. TP: LIMIT GTX reduce_only (maker) ────────────────────────
             if tp_rounded > 0:
                 try:
-                    self._client.rest_api.new_order(
+                    tp_resp = self._client.rest_api.new_order(
                         symbol=self.symbol,
                         side=close_side,
-                        type="TAKE_PROFIT_MARKET",
-                        stopPrice=f"{tp_rounded:.{self._price_decimals}f}",
-                        closePosition="true",
-                        workingType="MARK_PRICE",
-                        timeInForce="GTE_GTC",
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=f"{tp_rounded:.{self._price_decimals}f}",
+                        quantity=self._fmt_qty(executed_qty),
+                        reduce_only="true",
+                        new_order_resp_type="RESULT",
                     )
                     logger.info(
-                        f"  TP order @ {tp_rounded:.{self._price_decimals}f} (TAKE_PROFIT_MARKET)"
+                        f"  TP LIMIT GTX @ {tp_rounded:.{self._price_decimals}f} "
+                        f"(order_id={getattr(tp_resp.data(), 'order_id', '?')})"
                     )
                 except Exception as e:
                     logger.info(f"{YELLOW}  Could not place TP order: {e}{RESET}")
 
-            # 3. SL order (STOP_MARKET, mark price)
-            sl_rounded = self._safe_price(sl_price) if sl_price > 0 else 0.0
+            # ── 3. SL: STOP_MARKET via algo order (conditional, mark price) ─
             if sl_rounded > 0:
                 try:
-                    self._client.rest_api.new_order(
+                    sl_resp = self._client.rest_api.new_algo_order(
+                        algo_type="CONDITIONAL",
                         symbol=self.symbol,
                         side=close_side,
                         type="STOP_MARKET",
-                        stopPrice=f"{sl_rounded:.{self._price_decimals}f}",
-                        closePosition="true",
-                        workingType="MARK_PRICE",
-                        timeInForce="GTE_GTC",
+                        trigger_price=sl_rounded,
+                        close_position="true",
                     )
                     logger.info(
-                        f"  SL order @ {sl_rounded:.{self._price_decimals}f} (STOP_MARKET)"
+                        f"  SL STOP_MARKET @ {sl_rounded:.{self._price_decimals}f} "
+                        f"(algo_id={getattr(sl_resp.data(), 'algo_id', '?')})"
                     )
                 except Exception as e:
                     logger.info(f"{YELLOW}  Could not place SL order: {e}{RESET}")
 
             return RangePosition(
                 side=side, entry_price=entry_price, tp_price=tp_rounded,
-                sl_price=sl_rounded, qty=qty,
+                sl_price=sl_rounded, qty=executed_qty,
             )
 
         except Exception as e:
@@ -666,27 +761,67 @@ class RangeBot:
             notify_error(self.symbol, f"Range order failed: {e}")
             return None
 
-    def _close_position_market(self, pos: RangePosition, reason: str):
-        """Close a specific position at market price."""
+    async def _close_position_maker(self, pos: RangePosition, reason: str):
+        """Close a position using LIMIT GTX (maker). Falls back to MARKET on reject/timeout."""
         if self.dry_run:
-            logger.info(f"{CYAN}[DRY-RUN] Close {pos.side} @ market — {reason}{RESET}")
+            logger.info(f"{CYAN}[DRY-RUN] Close {pos.side} @ maker — {reason}{RESET}")
             self._signal.notify_position_closed(pos)
             return
 
         close_side = "SELL" if pos.side == "BUY" else "BUY"
+        mark = self._get_mark_price()
+
         try:
-            # Cancel pending TP/SL orders first
+            # Cancel existing TP/SL orders first so they don't conflict
             self._cancel_open_orders()
-            self._client.rest_api.new_order(
-                symbol=self.symbol,
-                side=close_side,
-                type="MARKET",
-                quantity=self._fmt_qty(pos.qty),
-                reduceOnly="true",
-            )
-            logger.info(
-                f"{CYAN}Closed {pos.side} {self._fmt_qty(pos.qty)} — {reason}{RESET}"
-            )
+
+            closed = False
+            if mark > 0:
+                limit_price = self._maker_limit_price(mark, close_side)
+                try:
+                    self._client.rest_api.new_order(
+                        symbol=self.symbol,
+                        side=close_side,
+                        type="LIMIT",
+                        time_in_force="GTX",
+                        price=f"{limit_price:.{self._price_decimals}f}",
+                        quantity=self._fmt_qty(pos.qty),
+                        reduce_only="true",
+                        new_order_resp_type="RESULT",
+                    )
+                    logger.info(
+                        f"{CYAN}Maker close posted @ {limit_price:.{self._price_decimals}f} "
+                        f"(timeout {self._maker_exit_timeout_sec:.1f}s) — {reason}{RESET}"
+                    )
+                    deadline = time.monotonic() + self._maker_exit_timeout_sec
+                    while time.monotonic() < deadline:
+                        pos_check = self._get_position()
+                        if pos_check is None or pos_check["position_amt"] == 0:
+                            closed = True
+                            break
+                        await asyncio.sleep(self._maker_poll_interval_sec)
+                    if not closed:
+                        try:
+                            self._client.rest_api.cancel_all_open_orders(symbol=self.symbol)
+                        except Exception:
+                            pass
+                        logger.info(f"{YELLOW}Maker close timeout — fallback MARKET{RESET}")
+                except Exception as mk_err:
+                    if self._is_post_only_reject(mk_err):
+                        logger.info(f"{YELLOW}Maker close rejected (post-only) — fallback MARKET{RESET}")
+                    else:
+                        raise
+
+            if not closed:
+                self._client.rest_api.new_order(
+                    symbol=self.symbol,
+                    side=close_side,
+                    type="MARKET",
+                    quantity=self._fmt_qty(pos.qty),
+                    reduceOnly="true",
+                )
+
+            logger.info(f"{CYAN}Closed {pos.side} {self._fmt_qty(pos.qty)} — {reason}{RESET}")
             self._signal.notify_position_closed(pos)
         except Exception as e:
             logger.info(f"{RED}Could not close position: {e}{RESET}")
@@ -719,10 +854,14 @@ class RangeBot:
                             order = data.get("o", {})
                             o_status = order.get("X", "")  # status
                             o_type   = order.get("ot", "") # order type
-                            if o_status == "FILLED" and o_type in ("TAKE_PROFIT_MARKET", "STOP_MARKET"):
+                            # TP = LIMIT GTX (maker) or TAKE_PROFIT_MARKET (legacy)
+                            # SL = STOP_MARKET (algo conditional)
+                            is_tp = o_status == "FILLED" and o_type in ("LIMIT", "TAKE_PROFIT_MARKET")
+                            is_sl = o_status == "FILLED" and o_type == "STOP_MARKET"
+                            if is_tp or is_sl:
                                 side_closed = "BUY" if order.get("S") == "SELL" else "SELL"
                                 fill_price  = float(order.get("ap", 0) or order.get("sp", 0))
-                                label = "TP" if o_type == "TAKE_PROFIT_MARKET" else "SL"
+                                label = "TP" if is_tp else "SL"
                                 logger.info(
                                     f"{GREEN if label == 'TP' else RED}"
                                     f"{label} hit — closed {side_closed} @ {fill_price:.{self._price_decimals}f}"
@@ -780,7 +919,7 @@ class RangeBot:
     # Main candle handler
     # ------------------------------------------------------------------
 
-    def _on_candle_closed(self, kline: dict):
+    async def _on_candle_closed(self, kline: dict):
         """Process a closed kline event (called from WebSocket handler)."""
         try:
             high  = float(kline["h"])
@@ -854,7 +993,7 @@ class RangeBot:
                     f"TP={tp_price:.{self._price_decimals}f}  "
                     f"SL={sl_price:.{self._price_decimals}f}{RESET}"
                 )
-                pos = self._place_range_order(side, tp_price, sl_price)
+                pos = await self._place_range_order(side, tp_price, sl_price)
                 if pos:
                     self._signal.notify_position_opened(pos)
                     notify_position_opened(
@@ -873,7 +1012,7 @@ class RangeBot:
                     f"{len(positions_to_close)} BUY(s) at top{RESET}"
                 )
                 for pos in positions_to_close:
-                    self._close_position_market(pos, "CloseAtOppositeExtreme (top)")
+                    await self._close_position_maker(pos, "CloseAtOppositeExtreme (top)")
                     notify_position_closed(self.symbol, "BUY", pos.qty, 0.0)
 
             elif sig_type == "CLOSE_SELL_AT_EXTREME":
@@ -883,7 +1022,7 @@ class RangeBot:
                     f"{len(positions_to_close)} SELL(s) at bottom{RESET}"
                 )
                 for pos in positions_to_close:
-                    self._close_position_market(pos, "CloseAtOppositeExtreme (bottom)")
+                    await self._close_position_maker(pos, "CloseAtOppositeExtreme (bottom)")
                     notify_position_closed(self.symbol, "SELL", pos.qty, 0.0)
 
     # ------------------------------------------------------------------
@@ -908,7 +1047,7 @@ class RangeBot:
                         k = data.get("k") or data.get("data", {}).get("k")
                         if k and k.get("x"):  # x=True means candle closed
                             self._last_closed_candle_monotonic = time.monotonic()
-                            self._on_candle_closed(k)
+                            await self._on_candle_closed(k)
                     except Exception as e:
                         logger.info(f"{YELLOW}WS message error: {e}{RESET}")
 
