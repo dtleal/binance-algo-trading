@@ -109,8 +109,14 @@ impl super::Strategy for EmaScalp {
                         ctx.candles, ctx.days, &fasts[fi], &slows[si], mt,
                     );
                     let label = format!("fast_period={fp} slow_period={sp} max_trades_per_day={mt}");
+                    let params = serde_json::json!({
+                        "fast_period": fp,
+                        "slow_period": sp,
+                        "max_trades_per_day": mt,
+                    });
                     sets.push(EntrySet {
                         strategy_label: label,
+                        strategy_params: params,
                         entries: Arc::new(entries),
                     });
                 }

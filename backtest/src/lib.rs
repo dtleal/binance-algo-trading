@@ -12,6 +12,7 @@ pub mod exit;
 pub mod sweep;
 pub mod detail;
 pub mod chart;
+pub mod release;
 
 mod types;
 

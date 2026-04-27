@@ -94,8 +94,14 @@ impl super::Exit for FixedTpSl {
                         "tp={tp:.4} sl={sl:.4} max_hold={mh}",
                         tp = tp, sl = sl, mh = mh
                     );
+                    let params = serde_json::json!({
+                        "tp_pct": tp,
+                        "sl_pct": sl,
+                        "max_hold_min": mh,
+                    });
                     out.push(ExitVariant {
                         label,
+                        params,
                         eval: ExitFn::FixedTpSl { tp_pct: tp, sl_pct: sl, max_hold_min: mh },
                     });
                 }

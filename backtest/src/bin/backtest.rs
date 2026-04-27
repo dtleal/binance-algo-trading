@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use uuid::Uuid;
 
 use backtest::{
-    db, sweep, detail, chart,
+    db, sweep, detail, chart, release,
     Symbol, Timeframe, Ctx,
     detail::DetailParams,
     exit::{Exit, build_exit},
@@ -26,6 +26,18 @@ enum Command {
     Sweep(SweepArgs),
     /// Detail: 1 strategy + 1 exit + params únicos. Output trade-a-trade + HTML chart.
     Detail(DetailArgs),
+    /// Release: promove 1 sweep_result pra preset ativo (aposenta o anterior).
+    Release(ReleaseArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct ReleaseArgs {
+    /// ID da row em sweep_results pra promover.
+    #[arg(long)] sweep_result_id: i64,
+    /// Quem fez o release (user/CI/script).
+    #[arg(long)] released_by: Option<String>,
+    /// Notas livres (motivo, contexto).
+    #[arg(long)] notes: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -116,9 +128,28 @@ fn main() -> Result<()> {
     init_tracing();
     let cli = Cli::parse();
     match cli.command {
-        Command::Sweep(a)  => run_sweep(a),
-        Command::Detail(a) => run_detail(a),
+        Command::Sweep(a)   => run_sweep(a),
+        Command::Detail(a)  => run_detail(a),
+        Command::Release(a) => run_release(a),
     }
+}
+
+fn run_release(args: ReleaseArgs) -> Result<()> {
+    let mut client = db::connect_from_env()?;
+    let out = release::release(&mut client, release::ReleaseInput {
+        sweep_result_id: args.sweep_result_id,
+        released_by:     args.released_by,
+        notes:           args.notes,
+    })?;
+    println!();
+    println!("✅ Released preset id={} for {} {} × {}",
+        out.preset_id, out.symbol, out.strategy, out.exit_name);
+    if let Some(rid) = out.retired_id {
+        println!("   Retired previous active preset id={rid}");
+    } else {
+        println!("   No previous active preset to retire");
+    }
+    Ok(())
 }
 
 fn run_sweep(args: SweepArgs) -> Result<()> {

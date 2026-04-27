@@ -247,11 +247,23 @@ impl super::Strategy for RangeStrategy {
                                             let label = format!(
                                                 "adx={adx_t:.1} atr={atr_t:.2} lb={lb} zone={zp:.1} tp={tp:.1} sl={sl:.1} recent={rt:.1} max_orders={mo} pos={ps:.2}"
                                             );
+                                            let params = serde_json::json!({
+                                                "adx_thresh": adx_t,
+                                                "atr_pct_thresh": atr_t,
+                                                "range_lookback": lb,
+                                                "zone_pct": zp,
+                                                "tp_range_pct": tp,
+                                                "sl_range_pct": sl,
+                                                "recent_thresh_pct": rt,
+                                                "max_orders": mo,
+                                                "pos_size": ps,
+                                            });
                                             // Fecha sobre os params; cada run executa independente.
                                             let adx_clone = adx.clone();
                                             let atr_pct_clone = atr_pct.clone();
                                             runs.push(MonolithicRun {
                                                 label,
+                                                strategy_params: params,
                                                 execute: Box::new(move |candles| {
                                                     run_range_backtest(
                                                         candles, &adx_clone, &atr_pct_clone,

@@ -95,10 +95,11 @@ pub fn write_sweep_results(
     let stmt = tx.prepare(
         "INSERT INTO sweep_results (
             symbol, timeframe, strategy, exit_name,
+            strategy_params, exit_params,
             trades, wins, losses, eods,
             win_rate, return_pct, final_capital, max_dd_pct, max_consec_loss,
             period_start, period_end, source, sweep_id, params_hash
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
          ON CONFLICT DO NOTHING"
     )?;
 
@@ -114,6 +115,8 @@ pub fn write_sweep_results(
             &r.timeframe.as_str(),
             &r.strategy,
             &r.exit_name,
+            &r.strategy_params,
+            &r.exit_params,
             &(r.metrics.trades as i32),
             &(r.metrics.wins as i32),
             &(r.metrics.losses as i32),

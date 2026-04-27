@@ -143,7 +143,15 @@ impl super::Strategy for Pdhl {
             for &cb in &self.grid.confirm_bars {
                 let entries = find_entries_pdhl(ctx.candles, ctx.days, prox, cb);
                 let label = format!("prox_pct={prox:.4} confirm_bars={cb}");
-                sets.push(EntrySet { strategy_label: label, entries: Arc::new(entries) });
+                let params = serde_json::json!({
+                    "prox_pct": prox,
+                    "confirm_bars": cb,
+                });
+                sets.push(EntrySet {
+                    strategy_label: label,
+                    strategy_params: params,
+                    entries: Arc::new(entries),
+                });
             }
         }
         StrategyOutput::EntrySets(sets)

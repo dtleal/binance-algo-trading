@@ -123,6 +123,7 @@ dependencies = [
  "rayon",
  "rust_decimal",
  "serde",
+ "serde_json",
  "thiserror",
  "toml",
  "tracing",
@@ -899,6 +900,8 @@ dependencies = [
  "fallible-iterator",
  "postgres-derive",
  "postgres-protocol",
+ "serde_core",
+ "serde_json",
  "uuid",
 ]
 

@@ -141,8 +141,10 @@ pub struct RunResult {
     pub timeframe: Timeframe,
     pub strategy: String,
     pub strategy_params_label: String,
+    pub strategy_params: serde_json::Value,    // JSONB em sweep_results
     pub exit_name: Option<String>,
     pub exit_params_label: Option<String>,
+    pub exit_params: Option<serde_json::Value>,  // JSONB em sweep_results
     pub period_start: Option<chrono::NaiveDate>,
     pub period_end: Option<chrono::NaiveDate>,
     pub sweep_id: uuid::Uuid,
@@ -158,6 +160,7 @@ pub struct RunResult {
 #[derive(Clone)]
 pub struct EntrySet {
     pub strategy_label: String,
+    pub strategy_params: serde_json::Value,    // serializado em sweep_results.strategy_params
     pub entries: Arc<Vec<Entry>>,
 }
 
@@ -165,6 +168,7 @@ pub struct EntrySet {
 #[derive(Clone)]
 pub struct ExitVariant {
     pub label: String,
+    pub params: serde_json::Value,             // serializado em sweep_results.exit_params
     pub eval: ExitFn,
 }
 
@@ -187,6 +191,7 @@ pub const END_OF_DAY: u16           = 1430;  // 23:50 UTC
 /// exits externos (Range é o caso — TP/SL acoplados ao entry).
 pub struct MonolithicRun {
     pub label: String,
+    pub strategy_params: serde_json::Value,
     pub execute: Box<dyn Fn(&[Candle]) -> RunMetrics + Send + Sync>,
 }
 

@@ -206,12 +206,24 @@ impl super::Strategy for Momentum {
                                             ctx.candles, ctx.days, &vwaps[vw_idx],
                                             kind, mb, vf, cb, tf, es, ec, vp,
                                         );
+                                        let kind_name = kind.name();
                                         let label = format!(
-                                            "kind={kind_name} min_bars={mb} vol_filter={vf} confirm_bars={cb} trend_filter={tf} window={es}-{ec} vwap_prox={vp:.4} vwap_window={vw}d",
-                                            kind_name = kind.name()
+                                            "kind={kind_name} min_bars={mb} vol_filter={vf} confirm_bars={cb} trend_filter={tf} window={es}-{ec} vwap_prox={vp:.4} vwap_window={vw}d"
                                         );
+                                        let params = serde_json::json!({
+                                            "kind": kind_name,
+                                            "min_bars": mb,
+                                            "vol_filter": vf,
+                                            "confirm_bars": cb,
+                                            "trend_filter": tf,
+                                            "entry_start_min": es,
+                                            "entry_cutoff_min": ec,
+                                            "vwap_prox": vp,
+                                            "vwap_window_days": vw,
+                                        });
                                         sets.push(EntrySet {
                                             strategy_label: label,
+                                            strategy_params: params,
                                             entries: Arc::new(entries),
                                         });
                                     }

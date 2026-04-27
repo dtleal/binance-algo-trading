@@ -199,8 +199,17 @@ impl super::Strategy for VwapPullback {
                                 let label = format!(
                                     "min_bars={mb} confirm_bars={cb} vwap_prox={vp:.4} vwap_window={vw}d ema_period={ep} max_trades_per_day={mt}"
                                 );
+                                let params = serde_json::json!({
+                                    "min_bars": mb,
+                                    "confirm_bars": cb,
+                                    "vwap_prox": vp,
+                                    "vwap_window_days": vw,
+                                    "ema_period": ep,
+                                    "max_trades_per_day": mt,
+                                });
                                 sets.push(EntrySet {
                                     strategy_label: label,
+                                    strategy_params: params,
                                     entries: Arc::new(entries),
                                 });
                             }

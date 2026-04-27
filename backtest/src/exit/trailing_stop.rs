@@ -127,8 +127,16 @@ impl super::Exit for TrailingStop {
                             let label = format!(
                                 "sl={sl:.4} be_r={be:.2} trail_step={ts:.2} tp_r={tp:.2} max_hold={mh}"
                             );
+                            let params = serde_json::json!({
+                                "sl_pct": sl,
+                                "be_r": be,
+                                "trail_step": ts,
+                                "tp_r": tp,
+                                "max_hold_min": mh,
+                            });
                             out.push(ExitVariant {
                                 label,
+                                params,
                                 eval: ExitFn::Trailing {
                                     sl_pct: sl, be_r: be, trail_step: ts, tp_r: tp, max_hold_min: mh,
                                 },
