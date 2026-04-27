@@ -8,7 +8,6 @@ use chrono::{DateTime, NaiveDate, Utc};
 use postgres::{Client, NoTls};
 use std::collections::BTreeMap;
 
-/// Constrói client a partir das env vars POSTGRES_*.
 pub fn connect_from_env() -> Result<Client> {
     let user = std::env::var("POSTGRES_USER").context("POSTGRES_USER not set")?;
     let pass = std::env::var("POSTGRES_PASSWORD").context("POSTGRES_PASSWORD not set")?;
@@ -19,9 +18,6 @@ pub fn connect_from_env() -> Result<Client> {
     Client::connect(&dsn, NoTls).context("connecting to Postgres")
 }
 
-/// Carrega candles para (symbol, timeframe) num intervalo opcional.
-///
-/// Range é inclusivo nos dois lados; None significa "sem limite naquele lado".
 pub fn load_candles(
     client: &mut Client,
     symbol: &Symbol,
@@ -32,30 +28,25 @@ pub fn load_candles(
     let rows = match (from, until) {
         (Some(f), Some(u)) => client.query(
             "SELECT open_time, close_time, open, high, low, close, volume
-             FROM klines
-             WHERE symbol = $1 AND timeframe = $2
-               AND open_time >= $3 AND open_time <= $4
-             ORDER BY open_time ASC",
+             FROM klines WHERE symbol = $1 AND timeframe = $2
+             AND open_time >= $3 AND open_time <= $4 ORDER BY open_time ASC",
             &[&symbol.as_str(), &tf.as_str(), &f, &u],
         )?,
         (Some(f), None) => client.query(
             "SELECT open_time, close_time, open, high, low, close, volume
-             FROM klines
-             WHERE symbol = $1 AND timeframe = $2 AND open_time >= $3
+             FROM klines WHERE symbol = $1 AND timeframe = $2 AND open_time >= $3
              ORDER BY open_time ASC",
             &[&symbol.as_str(), &tf.as_str(), &f],
         )?,
         (None, Some(u)) => client.query(
             "SELECT open_time, close_time, open, high, low, close, volume
-             FROM klines
-             WHERE symbol = $1 AND timeframe = $2 AND open_time <= $3
+             FROM klines WHERE symbol = $1 AND timeframe = $2 AND open_time <= $3
              ORDER BY open_time ASC",
             &[&symbol.as_str(), &tf.as_str(), &u],
         )?,
         (None, None) => client.query(
             "SELECT open_time, close_time, open, high, low, close, volume
-             FROM klines
-             WHERE symbol = $1 AND timeframe = $2
+             FROM klines WHERE symbol = $1 AND timeframe = $2
              ORDER BY open_time ASC",
             &[&symbol.as_str(), &tf.as_str()],
         )?,
@@ -67,13 +58,9 @@ pub fn load_candles(
         let close_time: DateTime<Utc> = r.get(1);
         let secs = open_time.timestamp();
         out.push(Candle {
-            open_time,
-            close_time,
-            open:   r.get::<_, f64>(2),
-            high:   r.get::<_, f64>(3),
-            low:    r.get::<_, f64>(4),
-            close:  r.get::<_, f64>(5),
-            volume: r.get::<_, f64>(6),
+            open_time, close_time,
+            open: r.get(2), high: r.get(3), low: r.get(4),
+            close: r.get(5), volume: r.get(6),
             day: (secs / 86_400) as u32,
             minute_of_day: ((secs % 86_400) / 60) as u16,
         });
@@ -81,7 +68,6 @@ pub fn load_candles(
     Ok(out)
 }
 
-/// Agrupa índices por dia (mesmo formato usado pelos find_entries_*).
 pub fn group_by_day(candles: &[Candle]) -> DayIndex {
     let mut m: BTreeMap<u32, Vec<usize>> = BTreeMap::new();
     for (i, c) in candles.iter().enumerate() {
@@ -90,9 +76,12 @@ pub fn group_by_day(candles: &[Candle]) -> DayIndex {
     m
 }
 
-/// Escreve resultados em sweep_results via staging table + ON CONFLICT DO NOTHING.
+/// Escreve resultados em sweep_results via INSERT batch + ON CONFLICT DO NOTHING.
 ///
-/// Idempotente: re-rodar com mesmos params (mesmo `params_hash`) não duplica.
+/// Idempotente: re-rodar com mesmo `params_hash` (e mesmo período) não duplica.
+/// Schema mínimo preenchido: symbol, timeframe, strategy, exit_name, params_hash,
+/// sweep_id, source, period_*, métricas, win_rate, return_pct, final_capital.
+/// Param-specific columns (tp_pct/sl_pct/be_r/...) NULL — labels carregam o detalhe.
 pub fn write_sweep_results(
     client: &mut Client,
     sweep_id: uuid::Uuid,
@@ -100,8 +89,51 @@ pub fn write_sweep_results(
     period_end: Option<NaiveDate>,
     rows: &[RunResult],
 ) -> Result<usize> {
-    // TODO[milestone]: implementar com COPY binário pra staging UNLOGGED + INSERT ON CONFLICT.
-    // Stub para o scaffold compilar; preenchido quando o sweep estiver gerando rows.
-    let _ = (client, sweep_id, period_start, period_end, rows);
-    anyhow::bail!("write_sweep_results: not implemented yet (scaffold)")
+    if rows.is_empty() { return Ok(0); }
+
+    let mut tx = client.transaction()?;
+    let stmt = tx.prepare(
+        "INSERT INTO sweep_results (
+            symbol, timeframe, strategy, exit_name,
+            trades, wins, losses, eods,
+            win_rate, return_pct, final_capital, max_dd_pct, max_consec_loss,
+            period_start, period_end, source, sweep_id, params_hash
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+         ON CONFLICT DO NOTHING"
+    )?;
+
+    let mut inserted = 0_usize;
+    for r in rows {
+        let win_rate   = to_dec(r.metrics.win_rate());
+        let return_pct = to_dec(r.metrics.return_pct(INITIAL_CAPITAL));
+        let final_cap  = to_dec(r.metrics.final_capital);
+        let max_dd     = to_dec(r.metrics.max_dd_pct);
+
+        let n = tx.execute(&stmt, &[
+            &r.symbol.as_str(),
+            &r.timeframe.as_str(),
+            &r.strategy,
+            &r.exit_name,
+            &(r.metrics.trades as i32),
+            &(r.metrics.wins as i32),
+            &(r.metrics.losses as i32),
+            &(r.metrics.eods as i32),
+            &win_rate, &return_pct, &final_cap, &max_dd,
+            &(r.metrics.max_consec_loss as i32),
+            &period_start, &period_end,
+            &r.source, &sweep_id, &r.params_hash,
+        ])?;
+        inserted += n as usize;
+    }
+    tx.commit()?;
+    Ok(inserted)
+}
+
+/// f64 → Decimal com 4 casas. NaN/Inf viram zero.
+#[inline]
+fn to_dec(v: f64) -> rust_decimal::Decimal {
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+    let safe = if v.is_finite() { v } else { 0.0 };
+    Decimal::from_str(&format!("{:.4}", safe)).unwrap_or_default()
 }

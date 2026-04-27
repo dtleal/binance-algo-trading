@@ -13,25 +13,25 @@ pub trait Exit: Send + Sync {
     fn build_variants(&self, ctx: &Ctx<'_>) -> Vec<ExitVariant>;
 }
 
-/// Aplica `ExitFn` num entry sobre o slice de candles. Hot path do sweep.
-///
-/// Retorna `(exit_price, is_eod)`. Caller calcula PnL líquido.
+/// Hot path: dispatch monomórfico do enum `ExitFn` para o impl correto.
 #[inline]
 pub fn evaluate(entry: &Entry, candles: &[Candle], f: &ExitFn) -> ExitResult {
     match *f {
-        ExitFn::FixedTpSl { tp_pct, sl_pct } => {
-            fixed_tp_sl::evaluate(entry, candles, tp_pct, sl_pct)
+        ExitFn::FixedTpSl { tp_pct, sl_pct, max_hold_min } => {
+            fixed_tp_sl::evaluate(entry, candles, tp_pct, sl_pct, max_hold_min)
         }
-        ExitFn::Trailing { sl_pct, be_r, trail_step, tp_r } => {
-            trailing_stop::evaluate(entry, candles, sl_pct, be_r, trail_step, tp_r)
+        ExitFn::Trailing { sl_pct, be_r, trail_step, tp_r, max_hold_min } => {
+            trailing_stop::evaluate(entry, candles, sl_pct, be_r, trail_step, tp_r, max_hold_min)
         }
     }
 }
 
+/// Factory: nome string → Box<dyn Exit> com grid padrão.
+/// (TOML grid spec a implementar quando necessário.)
 pub fn build_exit(name: &str, _grid_spec: &str) -> Result<Box<dyn Exit>> {
     match name {
-        "fixed_tp_sl"   => bail!("fixed_tp_sl: not implemented yet (scaffold)"),
-        "trailing_stop" => bail!("trailing_stop: not implemented yet (scaffold)"),
+        "fixed_tp_sl"   => Ok(Box::new(fixed_tp_sl::FixedTpSl::with_default())),
+        "trailing_stop" => Ok(Box::new(trailing_stop::TrailingStop::with_default())),
         other           => bail!("unknown exit: {other}"),
     }
 }

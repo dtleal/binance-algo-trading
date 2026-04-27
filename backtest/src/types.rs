@@ -172,9 +172,16 @@ pub struct ExitVariant {
 /// Adicionar exit = nova variant + nova match arm.
 #[derive(Clone, Copy, Debug)]
 pub enum ExitFn {
-    FixedTpSl { tp_pct: f64, sl_pct: f64 },
-    Trailing  { sl_pct: f64, be_r: f64, trail_step: f64, tp_r: f64 },
+    FixedTpSl { tp_pct: f64, sl_pct: f64, max_hold_min: u16 },
+    Trailing  { sl_pct: f64, be_r: f64, trail_step: f64, tp_r: f64, max_hold_min: u16 },
 }
+
+// Constantes globais usadas por múltiplas strategies (matchando o sweep antigo).
+pub const FEE_PCT: f64 = 0.0004;
+pub const INITIAL_CAPITAL: f64 = 1000.0;
+pub const ENTRY_START_DEFAULT: u16  = 60;    // 01:00 UTC
+pub const ENTRY_CUTOFF_DEFAULT: u16 = 1320;  // 22:00 UTC
+pub const END_OF_DAY: u16           = 1430;  // 23:50 UTC
 
 /// Run "monolítico": estratégia que produz resultado completo sem parear com
 /// exits externos (Range é o caso — TP/SL acoplados ao entry).
