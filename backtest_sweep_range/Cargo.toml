@@ -1,0 +1,12 @@
+[package]
+name = "backtest_sweep_range"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "backtest_sweep_range"
+path = "src/main.rs"
+
+[dependencies]
+csv = "1"
+rayon = "1"

@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell build-sweep-range sweep-range sweep-range-btc bot-btc-range bot-btc-range-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -531,6 +531,40 @@ sweep-rust-btc: ## Run Rust sweep for BTCUSDT (all 5 strategies)
 
 sweep-rust-eth: ## Run Rust sweep for ETHUSDT (all 5 strategies)
 	@$(MAKE) sweep-rust SYMBOL=ethusdt
+
+# Range Mode sweep
+build-sweep-range: ## Build Range Mode Rust sweep (release mode)
+	cd backtest_sweep_range && cargo build --release
+
+sweep-range: ## Run Range Mode sweep for SYMBOL (5m klines, last 3 months)
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
+	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make sweep-range SYMBOL=btcusdt$(NC)"
+	@exit 1
+else
+	@mkdir -p data/sweeps; \
+	BINARY=./backtest_sweep_range/target/release/backtest_sweep_range; \
+	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep-range$(NC)"; exit 1; fi; \
+	CSV="data/klines/$(SYMBOL)_5m_klines.csv"; \
+	if [ ! -f "$$CSV" ]; then echo "$(RED)❌ $$CSV not found. Run: make fetch-data + aggregate first$(NC)"; exit 1; fi; \
+	echo "$(YELLOW)Range Mode sweep: $(SYMBOL) 5m$(NC)"; \
+	$$BINARY $$CSV; \
+	mv range_sweep.csv "data/sweeps/$(SYMBOL)_5m_range_sweep.csv" 2>/dev/null || true; \
+	echo "$(GREEN)✅ Results saved → data/sweeps/$(SYMBOL)_5m_range_sweep.csv$(NC)"
+endif
+
+sweep-range-btc: ## Run Range Mode sweep for BTCUSDT
+	@$(MAKE) sweep-range SYMBOL=btcusdt
+
+# Range Mode bot — champion config from sweep (BTC 5m, last 3 months)
+# Champion: ADX<=30, ATR%<=0.3, Lookback=80, Zone=33%, TP=70%, SL=40%
+# Return: +21.41%, MaxDD: 12.37%, WinRate: 38.9%, 1299 trades
+RANGE_BTC_PARAMS = --interval 5m --range-lookback 80 --range-zone-pct 33.0 --range-tp-pct 70.0 --range-sl-pct 40.0 --max-adx 30.0 --max-atr-pct 0.3 --max-orders 6 --pos-size 0.20
+
+bot-btc-range: ## Run Range Mode bot for BTCUSDT (champion params from sweep)
+	poetry run python -m trader range --symbol btcusdt --leverage $(LEVERAGE) $(RANGE_BTC_PARAMS)
+
+bot-btc-range-dry: ## Run Range Mode bot for BTCUSDT in DRY-RUN mode
+	poetry run python -m trader range --symbol btcusdt --dry-run --leverage $(LEVERAGE) $(RANGE_BTC_PARAMS)
 
 # Analyze sweep results
 analyze-sweep: ## Show top 5 VWAPPullback configs from Rust sweep

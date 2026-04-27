@@ -288,6 +288,42 @@ def main():
     pdhl_parser.add_argument("--tp", type=float, default=None,
         help="Fixed take-profit %% (default: None = trailing stop mode)")
 
+    # --- range ---
+    range_parser = subparsers.add_parser(
+        "range", help="Run Range Mode bot (mean-reversion in horizontal ranges)"
+    )
+    range_parser.add_argument("--symbol", required=True, help="Futures trading pair (e.g. btcusdt)")
+    range_parser.add_argument("--leverage", type=int, default=None,
+        help="Leverage multiplier (default: from DB/config)")
+    range_parser.add_argument("--capital", type=float, default=None,
+        help="Trading capital in USDT (default: auto-detect from account)")
+    range_parser.add_argument("--dry-run", action="store_true",
+        help="Run without placing orders (log signals only)")
+    range_parser.add_argument("--interval", type=str, default="5m",
+        help="Kline interval for base timeframe (default: 5m)")
+    range_parser.add_argument("--range-lookback", type=int, default=80,
+        help="Candles to compute range H/L (default: 80, champion from sweep)")
+    range_parser.add_argument("--range-zone-pct", type=float, default=33.0,
+        help="Zone size as %% of range (default: 33.0)")
+    range_parser.add_argument("--range-tp-pct", type=float, default=70.0,
+        help="TP distance as %% of range size (default: 70.0)")
+    range_parser.add_argument("--range-sl-pct", type=float, default=40.0,
+        help="SL distance as %% of range size (0 = disabled; default: 40.0)")
+    range_parser.add_argument("--close-at-extreme", action="store_true", default=True,
+        help="Close positions when price reaches opposite extreme (default: True)")
+    range_parser.add_argument("--no-mtf", action="store_true",
+        help="Disable MTF ADX confirmation (default: enabled)")
+    range_parser.add_argument("--close-on-break", action="store_true",
+        help="Close all positions when range breaks (default: False)")
+    range_parser.add_argument("--max-adx", type=float, default=30.0,
+        help="Max ADX for range to be valid (default: 30.0)")
+    range_parser.add_argument("--max-atr-pct", type=float, default=0.3,
+        help="Max ATR%% for range to be valid (default: 0.3)")
+    range_parser.add_argument("--max-orders", type=int, default=6,
+        help="Max concurrent positions (default: 6)")
+    range_parser.add_argument("--pos-size", type=float, default=0.20,
+        help="Position size as fraction of capital (default: 0.20)")
+
     # --- plot ---
     plot_parser = subparsers.add_parser("plot", help="Show daily P&L and cumulative charts")
     plot_parser.add_argument(
@@ -517,6 +553,28 @@ def main():
             interval=cfg.interval,
             price_decimals=cfg.price_decimals if _db else None,
             qty_decimals=cfg.qty_decimals if _db else None,
+        )
+        _run_async(bot.run())
+
+    elif args.command == "range":
+        from trader.bot_range import RangeBot
+        bot = RangeBot(
+            symbol=args.symbol,
+            leverage=args.leverage or DEFAULT_LEVERAGE,
+            capital=args.capital,
+            dry_run=args.dry_run,
+            range_lookback=args.range_lookback,
+            range_zone_pct=args.range_zone_pct,
+            range_tp_pct=args.range_tp_pct,
+            range_sl_pct=args.range_sl_pct,
+            close_at_opposite_extreme=not False,  # always True via default
+            enable_mtf_range=not args.no_mtf,
+            close_on_range_break=args.close_on_break,
+            max_adx_strength=args.max_adx,
+            max_atr_pct=args.max_atr_pct,
+            max_orders=args.max_orders,
+            pos_size_pct=args.pos_size,
+            interval=args.interval,
         )
         _run_async(bot.run())
 
