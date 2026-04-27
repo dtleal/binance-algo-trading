@@ -1,0 +1,43 @@
+[package]
+name = "backtest"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "backtest"
+path = "src/bin/backtest.rs"
+
+[dependencies]
+# Sync Postgres client (sem tokio/sqlx — binário batch CPU-bound)
+postgres = { version = "0.19", features = ["with-chrono-0_4", "with-uuid-1"] }
+postgres-types = { version = "0.2", features = ["derive"] }
+
+# CPU paralelismo
+rayon = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Config (TOML opcional)
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Identidade + hash determinístico
+uuid = { version = "1", features = ["v4"] }
+md-5 = "0.10"
+
+# Erros
+anyhow = "1"
+thiserror = "1"
+
+# Log estruturado
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Datas
+chrono = { version = "0.4", features = ["serde"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

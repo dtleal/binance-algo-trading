@@ -22,6 +22,8 @@ infra/ansible/*.retry
 target/
 backtest_sweep/target/
 backtest_sweep_v2/target/
+backtest_sweep_range/target/
+backtest/target/
 
 # Redis
 dump.rdb
