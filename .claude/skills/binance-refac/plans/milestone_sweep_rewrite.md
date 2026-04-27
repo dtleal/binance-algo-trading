@@ -1,6 +1,16 @@
 # Milestone — Reescrita do sweep Rust
 
-Status: **planejado**. Engloba os planos 009 (klines bulk-ready) e 010 (sweep_results exit-aware) e adiciona o crate Rust unificado.
+Status: **executado** (planning → done). Engloba os planos 009 (klines bulk-ready) e 010 (sweep_results exit-aware), adiciona o crate Rust unificado e remove os 3 crates legados.
+
+## Estado final (após PR project-refactor)
+
+- ✅ Migrations 009 + 010 escritas e aplicadas em Postgres local (porta 5434).
+- ✅ Crate `backtest/` com 7 strategies + 2 exits + db I/O + sweep runner.
+- ✅ End-to-end validado: BTCUSDT 5m, 30d, 26.640 results em sweep_results, dedup via `params_hash` funciona.
+- ✅ Crates antigos deletados: `backtest_sweep/`, `backtest_sweep_v2/`, `backtest_sweep_range/`.
+- ✅ Makefile reescrito: `make build-sweep` + `make sweep SYMBOL=x TIMEFRAME=y [STRATEGY=...] [EXIT=...]`.
+- ⚠️ Pendência conhecida: `apply_champion` lê das colunas params antigas (tp_pct/sl_pct/...) que o binário novo deixa NULL — labels carregam o detalhe. `make onboarding-db` flagga warning explícito.
+- ⚠️ Decisão: gate de equivalência **não foi rodado** (decisão do user — "antigo podia ter bug também"). Substituição direta.
 
 ## Objetivo
 

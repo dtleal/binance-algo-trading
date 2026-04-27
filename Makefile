@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep-rust sweep-rust-axs sweep-rust-sand sweep-rust-gala sweep-rust-mana sweep-rust-btc sweep-rust-eth analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry build-sweep-v2 sweep-v2 bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell build-sweep-range sweep-range sweep-range-btc bot-btc-range bot-btc-range-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep sweep-range sweep-trailing sweep-v2 analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell bot-btc-range bot-btc-range-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -389,24 +389,24 @@ else
 	echo "$(YELLOW)── Step 2: Aggregate to 5m / 15m / 30m / 1h ──$(NC)"; \
 	poetry run python scripts/aggregate_klines.py data/klines/$(SYMBOL)_1m_klines.csv; \
 	echo ""; \
-	echo "$(YELLOW)── Step 3: Parameter sweep — all timeframes ──$(NC)"; \
-	BINARY=./backtest_sweep/target/release/backtest_sweep; \
+	echo "$(YELLOW)── Step 3: Parameter sweep (binário unificado) — all timeframes ──$(NC)"; \
+	BINARY=./backtest/target/release/backtest; \
 	if [ ! -f "$$BINARY" ]; then \
 		echo "$(RED)❌ Sweep binary not found. Run: make build-sweep$(NC)"; exit 1; \
 	fi; \
+	echo "$(YELLOW)⚠️  Onboarding via CSV deprecated — use 'make onboarding-db' (lê do Postgres).$(NC)"; \
 	for TF in 1m 5m 15m 30m 1h; do \
-		CSV="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
-		if [ ! -f "$$CSV" ]; then echo "  ⏭  $$CSV not found, skipping"; continue; fi; \
 		echo ""; \
-		echo "$(YELLOW)━━━━ Sweep: $$TF  →  $$CSV ━━━━$(NC)"; \
-		$$BINARY $$CSV; \
-		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep.csv" 2>/dev/null || true; \
-		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
+		echo "$(YELLOW)━━━━ Sweep: $$TF (lendo do Postgres) ━━━━$(NC)"; \
+		$$BINARY --symbol $$SYMBOL_UPPER --timeframe $$TF \
+			--strategy vwap_pullback,orb,ema_scalp,pdhl,momentum,range \
+			--exit fixed_tp_sl,trailing_stop \
+			|| echo "  ⏭  $$TF skipped"; \
 	done; \
 	echo ""; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
-	echo "$(GREEN)  ✅ Onboarding complete — $(SYMBOL)$(NC)"; \
-	echo "$(GREEN)  Review sweep CSVs: data/sweeps/$(SYMBOL)_*_sweep.csv$(NC)"; \
+	echo "$(GREEN)  ✅ Sweep done — $(SYMBOL)$(NC)"; \
+	echo "$(GREEN)  Resultados em sweep_results (Postgres)$(NC)"; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"
 endif
 
@@ -427,7 +427,7 @@ ifeq ($(filter command line environment,$(origin SYMBOL)),)
 else
 	@SYMBOL_UPPER=$$(echo "$(SYMBOL)" | tr '[:lower:]' '[:upper:]'); \
 	FETCH_DAYS=$$([ "$(DAYS)" = "7" ] && echo "365" || echo "$(or $(DAYS),365)"); \
-	BINARY=./backtest_sweep/target/release/backtest_sweep; \
+	BINARY=./backtest/target/release/backtest; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
 	echo "$(GREEN)  DB-First Onboarding: $$SYMBOL_UPPER  ($$FETCH_DAYS days)$(NC)"; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
@@ -441,28 +441,23 @@ else
 	if [ ! -f "$$BINARY" ]; then \
 		echo "$(RED)❌ Sweep binary not found. Run: make build-sweep$(NC)"; exit 1; \
 	fi; \
-	mkdir -p data/sweeps; \
 	echo "$(YELLOW)── Step 3: Parameter sweep — all timeframes ──$(NC)"; \
 	for TF in 1m 5m 15m 30m 1h; do \
-		TMP_CSV=/tmp/$(SYMBOL)_$${TF}_klines.csv; \
-		poetry run python -m db.export_sweep_csv --symbol $$SYMBOL_UPPER --timeframe $$TF --output $$TMP_CSV 2>/dev/null || \
-			{ echo "  ⏭  No $$TF data in DB, skipping"; continue; }; \
 		echo "$(YELLOW)━━━━ Sweep: $$TF ━━━━$(NC)"; \
-		$$BINARY $$TMP_CSV; \
-		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep.csv" 2>/dev/null || true; \
-		rm -f $$TMP_CSV; \
-		echo "  📄 Results → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
+		$$BINARY --symbol $$SYMBOL_UPPER --timeframe $$TF \
+			--strategy vwap_pullback,orb,ema_scalp,pdhl,momentum,range \
+			--exit fixed_tp_sl,trailing_stop \
+			|| echo "  ⏭  $$TF skipped (no data ou erro)"; \
 	done; \
 	echo ""; \
-	echo "$(YELLOW)── Step 4: Import sweep results → DB ──$(NC)"; \
-	poetry run python -m db.import_sweeps --symbol $$SYMBOL_UPPER; \
-	echo ""; \
-	echo "$(YELLOW)── Step 5: Apply champion → symbol_configs ──$(NC)"; \
-	poetry run python -m db.apply_champion --symbol $$SYMBOL_UPPER; \
+	echo "$(YELLOW)── Step 4: Apply champion → symbol_configs ──$(NC)"; \
+	echo "$(RED)⚠️  apply_champion ainda lê das colunas antigas (tp_pct/sl_pct/...).$(NC)"; \
+	echo "$(RED)   Resultados do binário novo guardam params no label, não nas colunas.$(NC)"; \
+	echo "$(RED)   Pendência: atualizar apply_champion pra ler RunResult.strategy_params_label.$(NC)"; \
 	echo ""; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"; \
-	echo "$(GREEN)  ✅ Onboarding complete — $$SYMBOL_UPPER$(NC)"; \
-	echo "$(GREEN)  Config written to symbol_configs table$(NC)"; \
+	echo "$(GREEN)  ✅ Sweep done — $$SYMBOL_UPPER$(NC)"; \
+	echo "$(GREEN)  Resultados em sweep_results table (sweep_id por execução)$(NC)"; \
 	echo "$(GREEN)════════════════════════════════════════════════════$(NC)"
 endif
 
@@ -486,74 +481,38 @@ backtest-eth-5m: ## Run ETH 5min VWAPPullback backtest with optimized params (+3
 	@echo "📊 Running ETH 5min VWAPPullback backtest..."
 	@poetry run python scripts/backtest_eth_5m_FINAL.py
 
-# Rust sweep (240x faster!)
-build-sweep: ## Build Rust sweep (release mode)
-	cd backtest_sweep && cargo build --release
+# ── Unified Rust sweep (lê klines do Postgres, escreve em sweep_results) ──────
+# Substitui backtest_sweep / backtest_sweep_v2 / backtest_sweep_range.
+# Binary unico: backtest/. Strategies + exits combináveis num run só.
 
-sweep-rust: ## Run standard sweep across all available timeframes (SYMBOL=axsusdt)
+build-sweep: ## Build the unified backtest binary (release mode)
+	cd backtest && cargo build --release
+
+sweep: ## Run sweep (SYMBOL=btcusdt TIMEFRAME=5m [STRATEGY=...] [EXIT=...] [FROM=YYYY-MM-DD] [UNTIL=YYYY-MM-DD])
 ifeq ($(filter command line environment,$(origin SYMBOL)),)
-	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make sweep-rust SYMBOL=dogeusdt$(NC)"
+	@echo "$(RED)❌ Usage:$(NC)"
+	@echo "  make sweep SYMBOL=btcusdt TIMEFRAME=5m"
+	@echo "  make sweep SYMBOL=btcusdt TIMEFRAME=5m STRATEGY=vwap_pullback,orb EXIT=fixed_tp_sl,trailing_stop"
+	@echo "  make sweep SYMBOL=btcusdt TIMEFRAME=5m FROM=2024-01-01 UNTIL=2024-06-30"
 	@exit 1
 else
-	@mkdir -p data/sweeps; \
-	BINARY=./backtest_sweep/target/release/backtest_sweep; \
+	@SYMBOL_UPPER=$$(echo "$(SYMBOL)" | tr '[:lower:]' '[:upper:]'); \
+	BINARY=./backtest/target/release/backtest; \
 	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep$(NC)"; exit 1; fi; \
-	FOUND=0; \
-	for TF in 1m 5m 15m 30m 1h; do \
-		CSV="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
-		if [ ! -f "$$CSV" ]; then echo "  ⏭  $$CSV not found, skipping"; continue; fi; \
-		FOUND=1; \
-		echo ""; \
-		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
-		echo "$(YELLOW)  Timeframe: $$TF  →  $$CSV$(NC)"; \
-		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
-		$$BINARY $$CSV; \
-		mv backtest_sweep.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep.csv" 2>/dev/null || true; \
-		echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep.csv"; \
-	done; \
-	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
+	STRATS="$(or $(STRATEGY),vwap_pullback,orb,ema_scalp,pdhl,momentum)"; \
+	EXITS="$(or $(EXIT),fixed_tp_sl,trailing_stop)"; \
+	TF="$(or $(TIMEFRAME),5m)"; \
+	FROM_ARG=""; if [ -n "$(FROM)" ]; then FROM_ARG="--from $(FROM)"; fi; \
+	UNTIL_ARG=""; if [ -n "$(UNTIL)" ]; then UNTIL_ARG="--until $(UNTIL)"; fi; \
+	echo "$(YELLOW)━━━━ Sweep: $$SYMBOL_UPPER $$TF | strategies=$$STRATS | exits=$$EXITS ━━━━$(NC)"; \
+	$$BINARY --symbol $$SYMBOL_UPPER --timeframe $$TF --strategy $$STRATS --exit $$EXITS $$FROM_ARG $$UNTIL_ARG
 endif
 
-sweep-rust-axs: ## Run Rust sweep for AXSUSDT (all 5 strategies)
-	@$(MAKE) sweep-rust SYMBOL=axsusdt
+sweep-range: ## Run Range strategy sweep only (SYMBOL=btcusdt TIMEFRAME=5m)
+	@$(MAKE) sweep SYMBOL=$(SYMBOL) TIMEFRAME=$(or $(TIMEFRAME),5m) STRATEGY=range EXIT=fixed_tp_sl
 
-sweep-rust-sand: ## Run Rust sweep for SANDUSDT (all 5 strategies)
-	@$(MAKE) sweep-rust SYMBOL=sandusdt
-
-sweep-rust-gala: ## Run Rust sweep for GALAUSDT (all 5 strategies)
-	@$(MAKE) sweep-rust SYMBOL=galausdt
-
-sweep-rust-mana: ## Run Rust sweep for MANAUSDT (all 5 strategies)
-	@$(MAKE) sweep-rust SYMBOL=manausdt
-
-sweep-rust-btc: ## Run Rust sweep for BTCUSDT (all 5 strategies)
-	@$(MAKE) sweep-rust SYMBOL=btcusdt
-
-sweep-rust-eth: ## Run Rust sweep for ETHUSDT (all 5 strategies)
-	@$(MAKE) sweep-rust SYMBOL=ethusdt
-
-# Range Mode sweep
-build-sweep-range: ## Build Range Mode Rust sweep (release mode)
-	cd backtest_sweep_range && cargo build --release
-
-sweep-range: ## Run Range Mode sweep for SYMBOL (5m klines, last 3 months)
-ifeq ($(filter command line environment,$(origin SYMBOL)),)
-	@echo "$(RED)❌ Error: SYMBOL not specified. Usage: make sweep-range SYMBOL=btcusdt$(NC)"
-	@exit 1
-else
-	@mkdir -p data/sweeps; \
-	BINARY=./backtest_sweep_range/target/release/backtest_sweep_range; \
-	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep-range$(NC)"; exit 1; fi; \
-	CSV="data/klines/$(SYMBOL)_5m_klines.csv"; \
-	if [ ! -f "$$CSV" ]; then echo "$(RED)❌ $$CSV not found. Run: make fetch-data + aggregate first$(NC)"; exit 1; fi; \
-	echo "$(YELLOW)Range Mode sweep: $(SYMBOL) 5m$(NC)"; \
-	$$BINARY $$CSV; \
-	mv range_sweep.csv "data/sweeps/$(SYMBOL)_5m_range_sweep.csv" 2>/dev/null || true; \
-	echo "$(GREEN)✅ Results saved → data/sweeps/$(SYMBOL)_5m_range_sweep.csv$(NC)"
-endif
-
-sweep-range-btc: ## Run Range Mode sweep for BTCUSDT
-	@$(MAKE) sweep-range SYMBOL=btcusdt
+sweep-trailing: ## Run sweep with trailing-stop only (SYMBOL=btcusdt TIMEFRAME=5m)
+	@$(MAKE) sweep SYMBOL=$(SYMBOL) TIMEFRAME=$(or $(TIMEFRAME),5m) EXIT=trailing_stop
 
 # Range Mode bot — champion config from sweep (BTC 5m, last 3 months)
 # Champion: ADX<=30, ATR%<=0.3, Lookback=80, Zone=33%, TP=70%, SL=40%
@@ -625,43 +584,14 @@ pullback-eth-dry: ## Run VWAPPullback bot for ETHUSDT in DRY-RUN mode (5min opti
 	poetry run python -m trader pullback --symbol ethusdt --dry-run --leverage $(LEVERAGE) $(PULLBACK_ETH_5M_PARAMS)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 🔄 V2 — R-multiple trailing stop (no fixed TP)
+# 🔄 Trailing-stop sweep (atalho — usa o binário unificado)
 # ══════════════════════════════════════════════════════════════════════════════
+# `make sweep-v2 SYMBOL=ethusdt` agora delega pro binário novo com EXIT=trailing_stop.
+# Build target legacy `build-sweep-v2` removido — `make build-sweep` é o único.
 
-build-sweep-v2: ## Build Rust V2 sweep binary (trailing stop, no TP)
-	cd backtest_sweep_v2 && cargo build --release
-
-sweep-v2: ## Run V2 sweep across all available timeframes for SYMBOL (e.g. make sweep-v2 SYMBOL=ethusdt)
-ifeq ($(filter command line environment,$(origin SYMBOL)),)
-	@echo "$(RED)❌ Error: SYMBOL not specified$(NC)"
-	@echo "$(YELLOW)Usage: make sweep-v2 SYMBOL=ethusdt$(NC)"
-	@exit 1
-else
-	@echo "$(GREEN)═══════════════════════════════════════════════════$(NC)"
-	@echo "$(GREEN)  V2 Sweep — $(SYMBOL) — all timeframes$(NC)"
-	@echo "$(GREEN)═══════════════════════════════════════════════════$(NC)"
-	@mkdir -p data/sweeps; \
-	BINARY=./backtest_sweep_v2/target/release/backtest_sweep_v2; \
-	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep-v2$(NC)"; exit 1; fi; \
-	FOUND=0; \
-	for TF in 1m 5m 15m 30m 1h; do \
-		CSV_FILE="data/klines/$(SYMBOL)_$${TF}_klines.csv"; \
-		ALT_FILE="data/klines/$(SYMBOL)_$${TF}_klines_official.csv"; \
-		if [ -f "$$ALT_FILE" ]; then CSV_FILE="$$ALT_FILE"; fi; \
-		if [ ! -f "$$CSV_FILE" ]; then echo "  ⏭  $$CSV_FILE not found, skipping"; continue; fi; \
-		FOUND=1; \
-		echo ""; \
-		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
-		echo "$(YELLOW)  Timeframe: $$TF  →  $$CSV_FILE$(NC)"; \
-		echo "$(YELLOW)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"; \
-		$$BINARY $$CSV_FILE; \
-		if [ -f "backtest_sweep_v2.csv" ]; then \
-			mv backtest_sweep_v2.csv "data/sweeps/$(SYMBOL)_$${TF}_sweep_v2.csv"; \
-			echo "  📄 Results saved → data/sweeps/$(SYMBOL)_$${TF}_sweep_v2.csv"; \
-		fi; \
-	done; \
-	if [ "$$FOUND" -eq 0 ]; then echo "$(RED)❌ No kline CSVs found for $(SYMBOL) in data/klines/$(NC)"; exit 1; fi
-endif
+sweep-v2: ## (deprecated) Atalho pra sweep com trailing-stop apenas
+	@echo "$(YELLOW)⚠️  sweep-v2 deprecated — use: make sweep-trailing SYMBOL=$(SYMBOL) TIMEFRAME=...$(NC)"
+	@$(MAKE) sweep-trailing SYMBOL=$(SYMBOL) TIMEFRAME=$(or $(TIMEFRAME),5m)
 
 # V2 bots — VWAPPullback with R-multiple trailing stop (same SL params as V1, no TP)
 bot-gala-v2: ## Run VWAPPullback V2 bot for GALAUSDT

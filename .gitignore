@@ -20,9 +20,6 @@ infra/ansible/*.retry
 
 # Rust build artifacts
 target/
-backtest_sweep/target/
-backtest_sweep_v2/target/
-backtest_sweep_range/target/
 backtest/target/
 
 # Redis
