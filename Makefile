@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep sweep-range sweep-trailing sweep-v2 analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell bot-btc-range bot-btc-range-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep sweep-range sweep-trailing sweep-v2 detail analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell bot-btc-range bot-btc-range-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -398,7 +398,7 @@ else
 	for TF in 1m 5m 15m 30m 1h; do \
 		echo ""; \
 		echo "$(YELLOW)━━━━ Sweep: $$TF (lendo do Postgres) ━━━━$(NC)"; \
-		$$BINARY --symbol $$SYMBOL_UPPER --timeframe $$TF \
+		$$BINARY sweep --symbol $$SYMBOL_UPPER --timeframe $$TF \
 			--strategy vwap_pullback,orb,ema_scalp,pdhl,momentum,range \
 			--exit fixed_tp_sl,trailing_stop \
 			|| echo "  ⏭  $$TF skipped"; \
@@ -444,7 +444,7 @@ else
 	echo "$(YELLOW)── Step 3: Parameter sweep — all timeframes ──$(NC)"; \
 	for TF in 1m 5m 15m 30m 1h; do \
 		echo "$(YELLOW)━━━━ Sweep: $$TF ━━━━$(NC)"; \
-		$$BINARY --symbol $$SYMBOL_UPPER --timeframe $$TF \
+		$$BINARY sweep --symbol $$SYMBOL_UPPER --timeframe $$TF \
 			--strategy vwap_pullback,orb,ema_scalp,pdhl,momentum,range \
 			--exit fixed_tp_sl,trailing_stop \
 			|| echo "  ⏭  $$TF skipped (no data ou erro)"; \
@@ -505,7 +505,7 @@ else
 	FROM_ARG=""; if [ -n "$(FROM)" ]; then FROM_ARG="--from $(FROM)"; fi; \
 	UNTIL_ARG=""; if [ -n "$(UNTIL)" ]; then UNTIL_ARG="--until $(UNTIL)"; fi; \
 	echo "$(YELLOW)━━━━ Sweep: $$SYMBOL_UPPER $$TF | strategies=$$STRATS | exits=$$EXITS ━━━━$(NC)"; \
-	$$BINARY --symbol $$SYMBOL_UPPER --timeframe $$TF --strategy $$STRATS --exit $$EXITS $$FROM_ARG $$UNTIL_ARG
+	$$BINARY sweep --symbol $$SYMBOL_UPPER --timeframe $$TF --strategy $$STRATS --exit $$EXITS $$FROM_ARG $$UNTIL_ARG
 endif
 
 sweep-range: ## Run Range strategy sweep only (SYMBOL=btcusdt TIMEFRAME=5m)
@@ -513,6 +513,49 @@ sweep-range: ## Run Range strategy sweep only (SYMBOL=btcusdt TIMEFRAME=5m)
 
 sweep-trailing: ## Run sweep with trailing-stop only (SYMBOL=btcusdt TIMEFRAME=5m)
 	@$(MAKE) sweep SYMBOL=$(SYMBOL) TIMEFRAME=$(or $(TIMEFRAME),5m) EXIT=trailing_stop
+
+# ── Detail mode: 1 strategy + 1 exit + params únicos + chart HTML ─────────────
+
+detail: ## Run detail backtest (SYMBOL=x TIMEFRAME=y STRATEGY=z [TP=... SL=... etc])
+ifeq ($(filter command line environment,$(origin SYMBOL)),)
+	@echo "$(RED)❌ Usage:$(NC)"
+	@echo "  make detail SYMBOL=btcusdt TIMEFRAME=5m STRATEGY=vwap_pullback \\"
+	@echo "    TP=0.005 SL=0.01 EMA=200 VWAP_PROX=0.005 CONFIRM_BARS=1 \\"
+	@echo "    [OUTPUT=./detail.html] [EXIT=fixed_tp_sl|trailing_stop]"
+	@exit 1
+else
+	@SYMBOL_UPPER=$$(echo "$(SYMBOL)" | tr '[:lower:]' '[:upper:]'); \
+	BINARY=./backtest/target/release/backtest; \
+	if [ ! -f "$$BINARY" ]; then echo "$(RED)❌ Binary not found. Run: make build-sweep$(NC)"; exit 1; fi; \
+	TF="$(or $(TIMEFRAME),5m)"; \
+	STRAT="$(or $(STRATEGY),vwap_pullback)"; \
+	EXIT="$(or $(EXIT),fixed_tp_sl)"; \
+	OUT="$(or $(OUTPUT),/tmp/$$SYMBOL_UPPER\_$$TF\_$$STRAT\_detail.html)"; \
+	ARGS=""; \
+	[ -n "$(FROM)" ]               && ARGS="$$ARGS --from $(FROM)"; \
+	[ -n "$(UNTIL)" ]              && ARGS="$$ARGS --until $(UNTIL)"; \
+	[ -n "$(TP)" ]                 && ARGS="$$ARGS --tp $(TP)"; \
+	[ -n "$(SL)" ]                 && ARGS="$$ARGS --sl $(SL)"; \
+	[ -n "$(MAX_HOLD)" ]           && ARGS="$$ARGS --max-hold $(MAX_HOLD)"; \
+	[ -n "$(BE_R)" ]               && ARGS="$$ARGS --be-r $(BE_R)"; \
+	[ -n "$(TRAIL_STEP)" ]         && ARGS="$$ARGS --trail-step $(TRAIL_STEP)"; \
+	[ -n "$(TP_R)" ]               && ARGS="$$ARGS --tp-r $(TP_R)"; \
+	[ -n "$(MIN_BARS)" ]           && ARGS="$$ARGS --min-bars $(MIN_BARS)"; \
+	[ -n "$(CONFIRM_BARS)" ]       && ARGS="$$ARGS --confirm-bars $(CONFIRM_BARS)"; \
+	[ -n "$(VWAP_PROX)" ]          && ARGS="$$ARGS --vwap-prox $(VWAP_PROX)"; \
+	[ -n "$(VWAP_WINDOW)" ]        && ARGS="$$ARGS --vwap-window $(VWAP_WINDOW)"; \
+	[ -n "$(MAX_TRADES_PER_DAY)" ] && ARGS="$$ARGS --max-trades-per-day $(MAX_TRADES_PER_DAY)"; \
+	[ -n "$(EMA)" ]                && ARGS="$$ARGS --ema-period $(EMA)"; \
+	[ -n "$(FAST)" ]               && ARGS="$$ARGS --fast-period $(FAST)"; \
+	[ -n "$(SLOW)" ]               && ARGS="$$ARGS --slow-period $(SLOW)"; \
+	[ -n "$(RANGE_MINS)" ]         && ARGS="$$ARGS --range-mins $(RANGE_MINS)"; \
+	[ -n "$(BUFFER_PCT)" ]         && ARGS="$$ARGS --buffer-pct $(BUFFER_PCT)"; \
+	[ -n "$(PROX_PCT)" ]           && ARGS="$$ARGS --prox-pct $(PROX_PCT)"; \
+	[ -n "$(KIND)" ]               && ARGS="$$ARGS --kind $(KIND)"; \
+	[ -n "$(POS_SIZE)" ]           && ARGS="$$ARGS --pos-size $(POS_SIZE)"; \
+	echo "$(YELLOW)━━━━ Detail: $$SYMBOL_UPPER $$TF | $$STRAT × $$EXIT ━━━━$(NC)"; \
+	$$BINARY detail --symbol $$SYMBOL_UPPER --timeframe $$TF --strategy $$STRAT --exit $$EXIT --output $$OUT $$ARGS
+endif
 
 # Range Mode bot — champion config from sweep (BTC 5m, last 3 months)
 # Champion: ADX<=30, ATR%<=0.3, Lookback=80, Zone=33%, TP=70%, SL=40%

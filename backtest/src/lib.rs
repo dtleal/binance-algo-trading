@@ -10,6 +10,8 @@ pub mod indicator;
 pub mod strategy;
 pub mod exit;
 pub mod sweep;
+pub mod detail;
+pub mod chart;
 
 mod types;
 
