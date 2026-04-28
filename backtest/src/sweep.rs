@@ -1,8 +1,11 @@
 //! Orchestrator do sweep: cartesiano EntrySets × ExitVariants + par_iter.
 
+use std::sync::atomic::Ordering;
+
 use crate::types::*;
 use crate::strategy::Strategy;
 use crate::exit::{Exit, evaluate};
+use crate::progress::Progress;
 use rayon::prelude::*;
 
 const FEE_PCT: f64 = 0.0004;          // taker (entrada + saída)
@@ -43,10 +46,19 @@ pub fn run_sweep(
     let symbol = ctx.symbol;
     let timeframe = ctx.timeframe;
 
+    // Progress: counter atômico + thread display em stderr (com \r). Hot loop
+    // só faz fetch_add (~1ns). Em não-TTY (pipe/CI) fica silent.
+    let total = pairings.len() * exit_variants.len() + monolithic.len();
+    let progress = Progress::start("sweep", total);
+    let counter_std = progress.counter.clone();
+    let counter_mono = progress.counter.clone();
+
     let standard: Vec<RunResult> = pairings.par_iter()
         .flat_map_iter(|(s_name, es)| {
+            let counter = counter_std.clone();
             exit_variants.iter().map(move |(e_name, ev)| {
                 let metrics = run_pairing(&es.entries, candles, &ev.eval, pos_size);
+                counter.fetch_add(1, Ordering::Relaxed);
                 RunResult {
                     symbol: symbol.clone(),
                     timeframe,
@@ -70,6 +82,7 @@ pub fn run_sweep(
     let mono: Vec<RunResult> = monolithic.par_iter()
         .map(|(s_name, run)| {
             let metrics = (run.execute)(candles);
+            counter_mono.fetch_add(1, Ordering::Relaxed);
             // Strategies monolíticas (range): exit é baked-in. Usamos sentinel
             // 'range_tp_sl' (permitido pelo CHECK em sweep_results) e
             // exit_params={} pra que o pipeline downstream (param_sensitivity,
@@ -93,6 +106,7 @@ pub fn run_sweep(
         })
         .collect();
 
+    drop(progress);   // sinaliza thread de display + imprime linha final
     [standard, mono].concat()
 }
 

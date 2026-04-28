@@ -91,6 +91,9 @@ pub fn write_sweep_results(
 ) -> Result<usize> {
     if rows.is_empty() { return Ok(0); }
 
+    let progress = crate::progress::Progress::start("persist", rows.len());
+    let counter = progress.counter.clone();
+
     let mut tx = client.transaction()?;
     let stmt = tx.prepare(
         "INSERT INTO sweep_results (
@@ -127,8 +130,10 @@ pub fn write_sweep_results(
             &r.source, &sweep_id, &r.params_hash,
         ])?;
         inserted += n as usize;
+        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
     tx.commit()?;
+    drop(progress);
     Ok(inserted)
 }
 
