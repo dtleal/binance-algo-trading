@@ -7,26 +7,47 @@ Status: **planejado**. Tabelas (`overfit_tests`, `walkforward_runs`) já existem
 ### Anti-overfit
 Dado um candidato (strategy + params + exit + params), responder: **"esse resultado é robusto ou foi sorte de overfitting na janela?"**
 
-Dois checks independentes nessa fase:
+Dois checks independentes — **respondem perguntas diferentes, ambos importantes**:
 
-1. **Param sensitivity (vizinhança)**
-   - Perturba cada param numérico (±10%, ±20%) e reroda backtest no mesmo dataset.
-   - Se vizinhos têm `return_pct` muito pior → champion está num pico estreito = overfit.
+1. **Param sensitivity (vizinhança)** — *"o champion é um pico isolado ou está num platô?"*
+   - **Não re-roda backtest.** Consulta `sweep_results` direto pra achar combos vizinhos
+     (mesma strategy/exit, params parecidos) e compara `return_pct`.
+   - Vizinho = combo que difere em 1 param do champion (próximo valor da grade).
+   - Se vizinhos têm retorno muito pior → champion está num pico estreito = overfit.
    - **Pass criteria**: mediana dos vizinhos ≥ 70% do retorno do champion (configurável).
+   - 100x mais rápido que re-rodar; usa exatamente a grade que o user definiu.
 
-2. **IS/OOS split**
-   - Divide o range em dois: train (primeiros 70%) e test (últimos 30%).
-   - Roda backtest com mesmos params nos dois.
+2. **IS/OOS split** — *"o sweep generalizou pra dados que ele não viu?"*
+   - Esse teste **só faz sentido se o sweep do champion cobriu o range inteiro** —
+     o que é nosso caso atual.
+   - Divide range em **train (primeiros 70%) + test (últimos 30%)**.
+   - Roda backtest com os params do champion nos **dois pedaços separados**.
+   - Se `is_return` foi alto e `oos_return` é muito menor → sweep aprendeu padrões
+     do passado que não se repetem.
    - **Pass criteria**: `oos_return / is_return ≥ 0.5` E `oos_trades ≥ min_trades`.
+   - É o único teste que pega "champion ficou ótimo porque o sweep enxergou o futuro".
+   - Walkforward sozinho **não substitui isso** — ele mostra consistência em
+     subperíodos do dado em que foi otimizado, não generalização pra dado novo.
+
+Split fixo 70/30 (não configurável nessa fase) — simplifica e evita gaming.
 
 ### Walkforward (modo validação)
-Janelas deslizantes train/test. Para cada janela, **mesmos params** (não re-otimiza), só mede consistência no OOS.
+Pergunta diferente: *"performance é estável ao longo do tempo ou foi sorte de uma janela?"*
 
-- `train_days = 90`, `test_days = 30`, `step_days = 30` por default.
-- Para cada janela `(train_start, train_end, test_start, test_end)`: backtest completo em ambos.
-- **Pass criteria**: ≥ 70% das janelas test têm `return_pct > 0` E nenhuma janela tem `max_dd > 30%`.
+- **Modo validação**: params já estão fixos (vêm do champion). Não há "train" porque não treinamos nada — só medimos performance do mesmo combo em vários subperíodos.
+- **CLI**: `--window-days 30 --step-days 30` (só janelas test deslizantes).
+- Para cada janela `[start, start + window_days)`: `evaluate_combo` → métricas. Insere row em `walkforward_runs` (campos `train_*` deixados NULL ou == test_*).
+- **Pass criteria**: ≥ 70% das janelas com `return_pct > 0` E nenhuma com `max_dd > 30%`.
 
-Modo "re-otimização" (clássico walkforward, sweep dentro de cada janela) **fica fora dessa fase**. Mais complexo, vem depois se necessário.
+Modo "re-otimização" (sweep dentro de cada janela, clássico walkforward) **fica fora dessa fase**. Mais complexo, custo computacional alto, vem depois se necessário.
+
+### Diferença entre os 3 testes
+
+| Teste | Pergunta | Sinal de overfit |
+|---|---|---|
+| Param sensitivity | "vizinhos da grade têm retorno parecido?" | Pico isolado, vizinhos ruins |
+| IS/OOS split | "params escolhidos sobre todo o histórico generalizam pra um pedaço que o sweep não viu?" | OOS muito pior que IS |
+| Walkforward | "performance é estável em subperíodos?" | Maioria das janelas negativa ou DD alto |
 
 ## Arquitetura
 
@@ -63,12 +84,12 @@ pub struct OverfitInput {
 }
 
 pub struct ParamSensitivityConfig {
-    pub perturbation_pcts: Vec<f64>,        // [-0.20, -0.10, +0.10, +0.20]
-    pub min_relative_return: f64,           // 0.70 = vizinhos têm que ter ≥70%
+    pub min_relative_return: f64,           // 0.70 = mediana dos vizinhos ≥ 70%
+    pub min_neighbors: usize,               // 4 — se acharmos menos, retorna inconclusive
 }
 
 pub struct IsOosConfig {
-    pub split_ratio: f64,                   // 0.70 = 70% train / 30% test
+    pub split_ratio: f64,                   // 0.70 (fixo nessa fase)
     pub min_oos_relative_return: f64,       // 0.50
     pub min_oos_trades: usize,              // 30
 }
@@ -76,11 +97,16 @@ pub struct IsOosConfig {
 pub fn check_param_sensitivity(
     client: &mut Client,
     input: &OverfitInput,
+    sweep_id_or_recent: Option<Uuid>,       // opcional: limita escopo dos vizinhos
     config: &ParamSensitivityConfig,
-    candles_full: &[Candle], days_full: &DayIndex,
 ) -> Result<TestResult>;
 
-pub fn check_is_oos(...) -> Result<TestResult>;
+pub fn check_is_oos(
+    client: &mut Client,
+    input: &OverfitInput,
+    candles_full: &[Candle], days_full: &DayIndex,
+    config: &IsOosConfig,
+) -> Result<TestResult>;
 
 pub struct TestResult {
     pub test_uuid: Uuid,
@@ -91,7 +117,15 @@ pub struct TestResult {
 
 Cada check insere row em `overfit_tests` com `test_type` apropriado.
 
-**Como perturbar params JSONB?** Iterar campos numéricos e gerar variantes com `value * (1 + pct)`. Bools/strings não perturbam.
+**Como achar vizinhos no `sweep_results`?**
+- Para cada param numérico do champion, busca rows com mesmo strategy + exit_name +
+  todos os outros params iguais, mas esse param 1 step mais alto OU mais baixo na
+  grade (descobre os steps disponíveis via `SELECT DISTINCT strategy_params->'param'
+  FROM sweep_results WHERE strategy=...`).
+- Se o sweep não cobriu vizinhança suficiente (`min_neighbors=4`), retorna
+  `inconclusive` em vez de pass/fail (rodar sweep com grade mais densa antes).
+- Bools/strings (`vol_filter`, `kind`, etc.) não geram vizinhos numéricos —
+  ignorados na análise.
 
 ### Walkforward: `src/walkforward.rs`
 
@@ -106,14 +140,23 @@ pub struct WalkforwardInput {
     pub pos_size: f64,
     pub from: NaiveDate,
     pub until: NaiveDate,
-    pub train_days: u32,
-    pub test_days: u32,
-    pub step_days: u32,
+    pub window_days: u32,                   // tamanho de cada janela
+    pub step_days: u32,                     // quanto desliza entre janelas
 }
 
 pub struct WalkforwardConfig {
-    pub min_test_pct_positive: f64,         // 0.70 = ≥70% janelas com retorno positivo
-    pub max_test_dd_pct: f64,               // 30.0
+    pub min_pct_positive: f64,              // 0.70 = ≥70% janelas com retorno positivo
+    pub max_window_dd_pct: f64,             // 30.0
+}
+
+pub struct WindowResult {
+    pub window_idx: usize,
+    pub start: NaiveDate,
+    pub end: NaiveDate,
+    pub return_pct: f64,
+    pub win_rate: f64,
+    pub trades: usize,
+    pub max_dd_pct: f64,
 }
 
 pub struct WalkforwardOutput {
@@ -130,6 +173,12 @@ pub fn run_walkforward(
 ) -> Result<WalkforwardOutput>;
 ```
 
+Sem train/test split: params são fixos, só medimos performance em cada janela.
+
+**Schema da tabela `walkforward_runs`** já tem `train_*` e `test_*` (criada em 011).
+Como não há train no modo validação, populamos `train_*` com NULL e `test_*` com
+os valores da janela. Migration 012 (futura) pode tornar `train_*` nullable.
+
 Cada janela vira 1 row em `walkforward_runs` com `walkforward_id` agrupando.
 
 ### Subcomandos novos
@@ -137,15 +186,15 @@ Cada janela vira 1 row em `walkforward_runs` com `walkforward_id` agrupando.
 ```bash
 backtest overfit-check \
    --sweep-result-id 4157 \
-   [--check param-sensitivity|is-oos-split|all] \
-   [--neighborhood-pct 0.10,0.20] \
-   [--oos-split 0.7] \
+   [--check param-sensitivity|is-oos|all] \
+   [--min-relative-return 0.70] \      # param-sensitivity: mediana vizinhos
+   [--min-oos-relative 0.50] \         # is-oos: oos/is ratio
    [--min-trades 30]
 
 backtest walkforward \
    --sweep-result-id 4157 \
    [--from 2024-01-01 --until 2025-04-01] \
-   [--train-days 90 --test-days 30 --step-days 30] \
+   [--window-days 30 --step-days 30] \
    [--min-pct-positive 0.70 --max-dd 30]
 ```
 
@@ -176,7 +225,9 @@ Nenhuma — tabelas `overfit_tests` e `walkforward_runs` já existem desde 011.
 
 ## Fora de escopo
 
-- ❌ Walkforward em **modo re-otimização** (sweep dentro de cada janela). Complexo, custo computacional alto, vem se necessário.
+- ❌ Walkforward em **modo re-otimização** (sweep dentro de cada janela). Custo computacional alto, vem se necessário.
+- ❌ IS/OOS com split configurável. Fixo 70/30 nessa fase.
+- ❌ Param sensitivity com **perturbação artificial** (±10%). Usamos só vizinhos da grade real do sweep.
 - ❌ Sharpe ratio, Sortino, etc. — só retorno/winrate/max_dd nessa fase.
 - ❌ Auto-execução: nada do tipo `backtest validate-and-release` que roda os 3 em sequência. Manual primeiro, automatizar depois quando o fluxo estiver maduro.
 - ❌ Param sensitivity para Range strategy — params interagem demais (zone_pct depende de range_lookback etc.). Excluído por enquanto.
