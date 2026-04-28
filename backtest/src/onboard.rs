@@ -179,8 +179,15 @@ fn ensure_klines_available(
     let needed_from = Utc::now() - Duration::days(days as i64);
     let (min_t, max_t, count) = db::query_klines_coverage(client, symbol, tf)?;
 
+    // Tolerância: aceita até 1 candle de gap no início. Klines começam em
+    // boundaries do timeframe (5m, 15m, etc.) — se needed_from cair no meio
+    // de um candle, o primeiro candle disponível é o boundary seguinte.
+    let tf_min = tf.minutes() as i64;
     let coverage_ok = match (min_t, max_t) {
-        (Some(mn), Some(mx)) => mn <= needed_from && mx + Duration::days(1) >= Utc::now(),
+        (Some(mn), Some(mx)) => {
+            mn <= needed_from + Duration::minutes(tf_min)
+                && mx + Duration::days(1) >= Utc::now()
+        }
         _ => false,
     };
     if coverage_ok {
