@@ -3,15 +3,16 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, NaiveDate, NaiveDateTime, Utc};
 use clap::{Parser, Subcommand};
-use uuid::Uuid;
 
 use backtest::{
     db, sweep, detail, chart, release,
+    overfit, walkforward,
     Symbol, Timeframe, Ctx,
     detail::DetailParams,
     exit::{Exit, build_exit},
     strategy::{Strategy, build_strategy},
 };
+use uuid::Uuid;
 
 #[derive(Parser, Debug)]
 #[command(version, about = "Binance algo trading sweep + detail engine")]
@@ -28,16 +29,49 @@ enum Command {
     Detail(DetailArgs),
     /// Release: promove 1 sweep_result pra preset ativo (aposenta o anterior).
     Release(ReleaseArgs),
+    /// Anti-overfit checks (param sensitivity + IS/OOS).
+    OverfitCheck(OverfitCheckArgs),
+    /// Walkforward (validação): janelas deslizantes com params fixos.
+    Walkforward(WalkforwardArgs),
 }
 
 #[derive(clap::Args, Debug)]
 struct ReleaseArgs {
-    /// ID da row em sweep_results pra promover.
     #[arg(long)] sweep_result_id: i64,
-    /// Quem fez o release (user/CI/script).
     #[arg(long)] released_by: Option<String>,
-    /// Notas livres (motivo, contexto).
     #[arg(long)] notes: Option<String>,
+    /// UUID de overfit_tests.test_uuid — bloqueia release se algum check falhou.
+    #[arg(long)] require_overfit_test: Option<String>,
+    /// UUID de walkforward_runs.walkforward_id — exige que tenha sido rodado.
+    #[arg(long)] require_walkforward: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct OverfitCheckArgs {
+    #[arg(long)] sweep_result_id: i64,
+    /// param-sensitivity | is-oos | all
+    #[arg(long, default_value = "all")] check: String,
+    #[arg(long, default_value_t = 0.10)] pos_size: f64,
+    #[arg(long, default_value_t = 0.70)] min_relative_return: f64,
+    #[arg(long, default_value_t = 4)]    min_neighbors: usize,
+    #[arg(long, default_value_t = 0.50)] min_oos_relative: f64,
+    #[arg(long, default_value_t = 30)]   min_oos_trades: usize,
+    /// Override range (se quiser IS/OOS num range diferente do period_*).
+    #[arg(long)] from:  Option<String>,
+    #[arg(long)] until: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct WalkforwardArgs {
+    #[arg(long)] sweep_result_id: i64,
+    #[arg(long)] from:  Option<String>,
+    #[arg(long)] until: Option<String>,
+    #[arg(long, default_value_t = 30)] window_days: u32,
+    #[arg(long, default_value_t = 30)] step_days:   u32,
+    #[arg(long, default_value_t = 0.10)] pos_size: f64,
+    #[arg(long, default_value_t = 0.70)] min_pct_positive: f64,
+    #[arg(long, default_value_t = 30.0)] max_window_dd_pct: f64,
+    #[arg(long, default_value_t = 5)]    min_non_empty: usize,
 }
 
 #[derive(clap::Args, Debug)]
@@ -128,18 +162,27 @@ fn main() -> Result<()> {
     init_tracing();
     let cli = Cli::parse();
     match cli.command {
-        Command::Sweep(a)   => run_sweep(a),
-        Command::Detail(a)  => run_detail(a),
-        Command::Release(a) => run_release(a),
+        Command::Sweep(a)        => run_sweep(a),
+        Command::Detail(a)       => run_detail(a),
+        Command::Release(a)      => run_release(a),
+        Command::OverfitCheck(a) => run_overfit_check(a),
+        Command::Walkforward(a)  => run_walkforward(a),
     }
 }
 
 fn run_release(args: ReleaseArgs) -> Result<()> {
     let mut client = db::connect_from_env()?;
+    let overfit_uuid = args.require_overfit_test.as_deref().map(Uuid::parse_str).transpose()
+        .context("invalid --require-overfit-test UUID")?;
+    let wf_uuid = args.require_walkforward.as_deref().map(Uuid::parse_str).transpose()
+        .context("invalid --require-walkforward UUID")?;
+
     let out = release::release(&mut client, release::ReleaseInput {
         sweep_result_id: args.sweep_result_id,
         released_by:     args.released_by,
         notes:           args.notes,
+        require_overfit_test_uuid: overfit_uuid,
+        require_walkforward_id:    wf_uuid,
     })?;
     println!();
     println!("✅ Released preset id={} for {} {} × {}",
@@ -150,6 +193,120 @@ fn run_release(args: ReleaseArgs) -> Result<()> {
         println!("   No previous active preset to retire");
     }
     Ok(())
+}
+
+fn run_overfit_check(args: OverfitCheckArgs) -> Result<()> {
+    let mut client = db::connect_from_env()?;
+    let (input, period_from, period_until) =
+        overfit::load_input_from_sweep_result(&mut client, args.sweep_result_id, args.pos_size)?;
+
+    // Range pra IS/OOS: override CLI > period do sweep_result > sem range
+    let from  = args.from.as_deref().map(parse_date).transpose()?.or(period_from);
+    let until = args.until.as_deref().map(parse_date).transpose()?.or(period_until);
+
+    let test_uuid = Uuid::new_v4();
+    let want = args.check.as_str();
+    let do_sens = want == "param-sensitivity" || want == "all";
+    let do_isoos = want == "is-oos" || want == "all";
+
+    if !do_sens && !do_isoos {
+        anyhow::bail!("--check must be 'param-sensitivity', 'is-oos' or 'all'");
+    }
+
+    let mut overall_pass = true;
+    let mut all_inconclusive = true;
+
+    if do_sens {
+        let cfg = overfit::ParamSensitivityConfig {
+            min_relative_return: args.min_relative_return,
+            min_neighbors:       args.min_neighbors,
+        };
+        let r = overfit::check_param_sensitivity(&mut client, &input, &cfg, test_uuid)?;
+        print_check_result(&r);
+        match r.outcome {
+            overfit::Outcome::Fail => overall_pass = false,
+            overfit::Outcome::Pass => all_inconclusive = false,
+            _ => {}
+        }
+    }
+
+    if do_isoos {
+        let cfg = overfit::IsOosConfig {
+            min_oos_relative_return: args.min_oos_relative,
+            min_oos_trades:          args.min_oos_trades,
+        };
+        let candles = db::load_candles(&mut client, &input.symbol, input.timeframe, from, until)?;
+        let r = overfit::check_is_oos(&mut client, &input, &candles, &cfg, test_uuid)?;
+        print_check_result(&r);
+        match r.outcome {
+            overfit::Outcome::Fail => overall_pass = false,
+            overfit::Outcome::Pass => all_inconclusive = false,
+            _ => {}
+        }
+    }
+
+    println!();
+    println!("test_uuid: {test_uuid}");
+    let final_outcome = if !overall_pass { "FAIL" }
+        else if all_inconclusive { "INCONCLUSIVE" } else { "PASS" };
+    println!("Overall: {final_outcome}");
+    if !overall_pass { std::process::exit(2); }
+    if all_inconclusive { std::process::exit(3); }
+    Ok(())
+}
+
+fn print_check_result(r: &overfit::CheckResult) {
+    println!();
+    println!("── {} ──", r.test_type);
+    println!("outcome: {}", r.outcome.as_str().to_uppercase());
+    println!("metrics: {}", serde_json::to_string_pretty(&r.metrics).unwrap_or_default());
+}
+
+fn run_walkforward(args: WalkforwardArgs) -> Result<()> {
+    let mut client = db::connect_from_env()?;
+    let (input, period_from, period_until) =
+        overfit::load_input_from_sweep_result(&mut client, args.sweep_result_id, args.pos_size)?;
+
+    let from  = args.from.as_deref().map(parse_date).transpose()?.or(period_from);
+    let until = args.until.as_deref().map(parse_date).transpose()?.or(period_until);
+
+    let from_d  = from .map(|d| d.date_naive())
+        .ok_or_else(|| anyhow::anyhow!("walkforward requires --from (or period_start no sweep_result)"))?;
+    let until_d = until.map(|d| d.date_naive())
+        .ok_or_else(|| anyhow::anyhow!("walkforward requires --until (or period_end no sweep_result)"))?;
+
+    let cfg = walkforward::WalkforwardConfig {
+        min_pct_positive:  args.min_pct_positive,
+        max_window_dd_pct: args.max_window_dd_pct,
+        min_non_empty:     args.min_non_empty,
+    };
+
+    let out = walkforward::run_walkforward(&mut client, &walkforward::WalkforwardInput {
+        input, from: from_d, until: until_d,
+        window_days: args.window_days, step_days: args.step_days,
+    }, &cfg)?;
+
+    println!();
+    println!("── walkforward ──");
+    println!("walkforward_id: {}", out.walkforward_id);
+    println!("Windows: {}", out.windows.len());
+    if !out.windows.is_empty() {
+        println!("{:>3}  {:<10} {:<10} {:>8} {:>7} {:>10} {:>8}",
+            "#", "start", "end", "trades", "ret%", "winrate%", "dd%");
+        for w in &out.windows {
+            println!("{:>3}  {:<10} {:<10} {:>8} {:>+7.2} {:>+9.1}% {:>+7.2}",
+                w.idx, w.start, w.end, w.trades, w.return_pct, w.win_rate, w.max_dd_pct);
+        }
+    }
+    println!();
+    println!("summary: {}", serde_json::to_string_pretty(&out.summary).unwrap_or_default());
+    println!("outcome: {}", out.outcome.as_str().to_uppercase());
+
+    match out.outcome {
+        overfit::Outcome::Fail => std::process::exit(2),
+        overfit::Outcome::Inconclusive => std::process::exit(3),
+        overfit::Outcome::Pass => Ok(()),
+    }
 }
 
 fn run_sweep(args: SweepArgs) -> Result<()> {

@@ -13,6 +13,9 @@ pub mod sweep;
 pub mod detail;
 pub mod chart;
 pub mod release;
+pub mod evaluate;
+pub mod overfit;
+pub mod walkforward;
 
 mod types;
 
