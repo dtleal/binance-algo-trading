@@ -345,7 +345,7 @@ impl super::Strategy for RangeStrategy {
                                                 "mtf_enabled": mtf_enabled,
                                                 "mtf_timeframe": "15m",
                                                 "close_at_opposite": true,
-                                                "close_on_range_break": true,
+                                                "close_on_range_break": false,    // match MQL5 default
                                             });
                                             // Arc::clone só bumpa refcount, não duplica os dados.
                                             let adx_arc      = Arc::clone(&adx);
@@ -361,8 +361,8 @@ impl super::Strategy for RangeStrategy {
                                                         mtf_adx_run.as_deref().map(Vec::as_slice),
                                                         mtf_map_run.as_deref().map(Vec::as_slice),
                                                         adx_t, atr_t, lb, zp, tp, sl, rt, mo, ps,
-                                                        true,   // close_at_opposite default ON
-                                                        true,   // close_on_break default ON
+                                                        true,    // close_at_opposite default ON
+                                                        false,   // close_on_break default OFF (match MQL5)
                                                     )
                                                 }),
                                             });

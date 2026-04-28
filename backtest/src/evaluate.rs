@@ -86,7 +86,7 @@ fn evaluate_range(
     // MQL5 alignment params (default ON se ausentes)
     let mtf_enabled       = p.get("mtf_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
     let close_at_opposite = p.get("close_at_opposite").and_then(|v| v.as_bool()).unwrap_or(true);
-    let close_on_break    = p.get("close_on_range_break").and_then(|v| v.as_bool()).unwrap_or(true);
+    let close_on_break    = p.get("close_on_range_break").and_then(|v| v.as_bool()).unwrap_or(false);
 
     // MTF: pré-computa se enabled E há candles
     let (mtf_adx_vec, mtf_idx_map_vec) = if mtf_enabled {

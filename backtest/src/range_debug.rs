@@ -148,7 +148,7 @@ fn instrumented_range_run(
     let max_orders        = g("max_orders")?.as_u64().ok_or_else(|| anyhow!("max_orders"))? as usize;
     // Defaults MQL5 alignment
     let close_at_opposite = p.get("close_at_opposite").and_then(|v| v.as_bool()).unwrap_or(true);
-    let close_on_break    = p.get("close_on_range_break").and_then(|v| v.as_bool()).unwrap_or(true);
+    let close_on_break    = p.get("close_on_range_break").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let n = candles.len();
     let atr = atr_wilder(candles, ATR_PERIOD);
