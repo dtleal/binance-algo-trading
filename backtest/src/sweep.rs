@@ -70,19 +70,23 @@ pub fn run_sweep(
     let mono: Vec<RunResult> = monolithic.par_iter()
         .map(|(s_name, run)| {
             let metrics = (run.execute)(candles);
+            // Strategies monolíticas (range): exit é baked-in. Usamos sentinel
+            // 'range_tp_sl' (permitido pelo CHECK em sweep_results) e
+            // exit_params={} pra que o pipeline downstream (param_sensitivity,
+            // is_oos, release) trate como qualquer outra row sem branches None.
             RunResult {
                 symbol: symbol.clone(),
                 timeframe,
                 strategy: s_name.to_string(),
                 strategy_params_label: run.label.clone(),
                 strategy_params: run.strategy_params.clone(),
-                exit_name: None,
-                exit_params_label: None,
-                exit_params: None,
+                exit_name: Some("range_tp_sl".to_string()),
+                exit_params_label: Some("baked-in".to_string()),
+                exit_params: Some(serde_json::json!({})),
                 period_start: None,
                 period_end: None,
                 sweep_id,
-                params_hash: hash_params(s_name, &run.label, "", ""),
+                params_hash: hash_params(s_name, &run.label, "range_tp_sl", "baked-in"),
                 source: "backtest",
                 metrics,
             }
