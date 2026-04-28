@@ -60,6 +60,18 @@ impl Timeframe {
             Self::D1 => 1440,
         }
     }
+    /// Próximo TF maior — usado pra MTF Range confirmation.
+    /// Match MQL5: TF base 5m → MTF 15m; 15m → 1h; 1h → 4h; etc.
+    pub fn next_mtf(self) -> Option<Timeframe> {
+        use Timeframe::*;
+        match self {
+            M1 | M2 | M3 | M5  => Some(M15),
+            M15 | M30          => Some(H1),
+            H1 | H2            => Some(H4),
+            H4 | H6 | H8 | H12 => Some(D1),
+            D1                 => None,
+        }
+    }
 }
 
 impl fmt::Display for Timeframe {

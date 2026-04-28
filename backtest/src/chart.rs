@@ -166,15 +166,34 @@ pub fn write_range_debug_html(path: &str, day: &crate::range_debug::DayDebug) ->
         }
     }
 
-    // Markers (mesmo de antes, mas separando close por win/loss pra cor)
+    // Markers (separados por evento/lado/cor) + carryover (opens de dias anteriores)
+    let day_start = day.snapshots.first().map(|s| s.time);
     let mut open_long_x  = Vec::new(); let mut open_long_y  = Vec::new();
     let mut open_short_x = Vec::new(); let mut open_short_y = Vec::new();
+    let mut carry_long_x  = Vec::new(); let mut carry_long_y  = Vec::new();  let mut carry_long_text  = Vec::new();
+    let mut carry_short_x = Vec::new(); let mut carry_short_y = Vec::new();  let mut carry_short_text = Vec::new();
     let mut close_win_x  = Vec::new(); let mut close_win_y  = Vec::new();  let mut close_win_text  = Vec::new();
     let mut close_loss_x = Vec::new(); let mut close_loss_y = Vec::new();  let mut close_loss_text = Vec::new();
     for t in &day.trades {
+        let is_carryover = matches!(t.event, TradeEvent::Open)
+            && day_start.map(|s| t.time < s).unwrap_or(false);
+        // Opens carryover são clampados pro start do dia (pra ficar no eixo X visível)
+        let x_str = if is_carryover {
+            day_start.unwrap().to_rfc3339()
+        } else {
+            t.time.to_rfc3339()
+        };
         match (t.event, t.side) {
-            (TradeEvent::Open, crate::Direction::Long)  => { open_long_x.push(t.time.to_rfc3339()); open_long_y.push(t.price); }
-            (TradeEvent::Open, crate::Direction::Short) => { open_short_x.push(t.time.to_rfc3339()); open_short_y.push(t.price); }
+            (TradeEvent::Open, crate::Direction::Long) if is_carryover => {
+                carry_long_x.push(x_str); carry_long_y.push(t.price);
+                carry_long_text.push(format!("#{} carryover from {}", t.trade_id, t.time.format("%m-%d %H:%M")));
+            }
+            (TradeEvent::Open, crate::Direction::Short) if is_carryover => {
+                carry_short_x.push(x_str); carry_short_y.push(t.price);
+                carry_short_text.push(format!("#{} carryover from {}", t.trade_id, t.time.format("%m-%d %H:%M")));
+            }
+            (TradeEvent::Open, crate::Direction::Long)  => { open_long_x.push(x_str); open_long_y.push(t.price); }
+            (TradeEvent::Open, crate::Direction::Short) => { open_short_x.push(x_str); open_short_y.push(t.price); }
             (TradeEvent::Close, _) => {
                 let pnl = t.pnl_pct.unwrap_or(0.0);
                 if pnl > 0.0 {
@@ -189,18 +208,22 @@ pub fn write_range_debug_html(path: &str, day: &crate::range_debug::DayDebug) ->
     }
 
     // Linhas open→close (1 trace por trade, cor verde win / vermelho loss)
+    // Carryover: clampa x do open pro day_start (mantém preço original).
     let mut trade_lines = String::new();
     let mut ids: Vec<u32> = opens_by_id.keys().copied().collect();
     ids.sort();
     for id in ids {
         let (Some(o), Some(cl)) = (opens_by_id.get(&id), closes_by_id.get(&id)) else { continue };
         let pnl = cl.pnl_pct.unwrap_or(0.0);
+        let is_carryover = day_start.map(|s| o.time < s).unwrap_or(false);
         let color = if pnl > 0.0 { "#26a69a" } else { "#ef5350" };
+        let dash  = if is_carryover { "dash" } else { "dot" };
+        let x0 = if is_carryover { day_start.unwrap().to_rfc3339() } else { o.time.to_rfc3339() };
         trade_lines.push_str(&format!(
-            r#",{{"type":"scatter","mode":"lines","showlegend":false,"hoverinfo":"text","text":"trade #{id} {pnl:+.3}%","x":["{x0}","{x1}"],"y":[{y0},{y1}],"line":{{"color":"{color}","width":1.5,"dash":"dot"}},"xaxis":"x","yaxis":"y"}}"#,
+            r#",{{"type":"scatter","mode":"lines","showlegend":false,"hoverinfo":"text","text":"trade #{id} {pnl:+.3}%","x":["{x0}","{x1}"],"y":[{y0},{y1}],"line":{{"color":"{color}","width":1.5,"dash":"{dash}"}},"xaxis":"x","yaxis":"y"}}"#,
             id = id, pnl = pnl,
-            x0 = o.time.to_rfc3339(), x1 = cl.time.to_rfc3339(),
-            y0 = o.price, y1 = cl.price, color = color
+            x0 = x0, x1 = cl.time.to_rfc3339(),
+            y0 = o.price, y1 = cl.price, color = color, dash = dash
         ));
     }
 
@@ -241,6 +264,20 @@ Plotly.newPlot('chart', [
     type: 'scatter', mode: 'markers', name: 'Open SHORT',
     x: {open_short_x}, y: {open_short_y},
     marker: {{symbol: 'triangle-down', size: 14, color: '#ff5252', line:{{width:1,color:'#fff'}}}},
+    xaxis: 'x', yaxis: 'y'
+  }},
+  {{
+    type: 'scatter', mode: 'markers+text', name: 'Carryover LONG',
+    x: {carry_long_x}, y: {carry_long_y}, text: {carry_long_text}, hoverinfo: 'text+y',
+    marker: {{symbol: 'triangle-up', size: 12, color: '#888', line:{{width:1,color:'#bbb'}}}},
+    showlegend: true, textposition: 'top right', textfont: {{size: 9, color: '#aaa'}},
+    xaxis: 'x', yaxis: 'y'
+  }},
+  {{
+    type: 'scatter', mode: 'markers+text', name: 'Carryover SHORT',
+    x: {carry_short_x}, y: {carry_short_y}, text: {carry_short_text}, hoverinfo: 'text+y',
+    marker: {{symbol: 'triangle-down', size: 12, color: '#888', line:{{width:1,color:'#bbb'}}}},
+    showlegend: true, textposition: 'bottom right', textfont: {{size: 9, color: '#aaa'}},
     xaxis: 'x', yaxis: 'y'
   }},
   {{
@@ -301,6 +338,12 @@ Plotly.newPlot('chart', [
         open_long_y  = json_floats(&open_long_y),
         open_short_x = json_strings(&open_short_x),
         open_short_y = json_floats(&open_short_y),
+        carry_long_x  = json_strings(&carry_long_x),
+        carry_long_y  = json_floats(&carry_long_y),
+        carry_long_text = json_strings(&carry_long_text),
+        carry_short_x = json_strings(&carry_short_x),
+        carry_short_y = json_floats(&carry_short_y),
+        carry_short_text = json_strings(&carry_short_text),
         close_win_x  = json_strings(&close_win_x),
         close_win_y  = json_floats(&close_win_y),
         close_win_text = json_strings(&close_win_text),

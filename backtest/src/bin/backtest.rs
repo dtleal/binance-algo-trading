@@ -481,15 +481,20 @@ fn run_sweep(args: SweepArgs) -> Result<()> {
         .collect::<Result<_>>()?;
 
     let sweep_id = Uuid::new_v4();
-    // Carrega candles MTF (15m) pra Range strategy se "range" estiver no list.
-    let mtf_candles_opt = if args.strategy.iter().any(|s| s == "range") && timeframe.minutes() < 15 {
-        let mtf = db::load_candles(&mut client, &symbol, Timeframe::M15, from, until)?;
-        if mtf.is_empty() {
-            anyhow::bail!(
-                "MTF range enabled but no 15m candles for {symbol} — run:\n  poetry run python -m db.fetch_klines --symbol {symbol} --days N --timeframe 15m"
-            );
+    // Carrega candles MTF (próximo TF maior) pra Range strategy
+    let mtf_candles_opt = if args.strategy.iter().any(|s| s == "range") {
+        match timeframe.next_mtf() {
+            Some(mtf_tf) => {
+                let mtf = db::load_candles(&mut client, &symbol, mtf_tf, from, until)?;
+                if mtf.is_empty() {
+                    anyhow::bail!(
+                        "MTF range enabled but no {mtf_tf} candles for {symbol} — run:\n  poetry run python -m db.fetch_klines --symbol {symbol} --days N --timeframe {mtf_tf}"
+                    );
+                }
+                Some(mtf)
+            }
+            None => None,   // base TF é D1 — sem MTF possível
         }
-        Some(mtf)
     } else { None };
     let ctx = Ctx {
         symbol: &symbol, timeframe,

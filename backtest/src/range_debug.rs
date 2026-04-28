@@ -81,17 +81,20 @@ pub fn run_range_debug(
     let candles = crate::db::load_candles(client, symbol, tf, Some(load_from), Some(load_until))?;
     if candles.is_empty() { return Err(anyhow!("no candles in range")); }
 
-    // MTF: carrega 15m se param mtf_enabled (default true) e base TF < 15m
+    // MTF: carrega próximo TF maior
     let mtf_enabled = params.get("mtf_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-    let mtf_candles = if mtf_enabled && tf.minutes() < 15 {
-        let mtf = crate::db::load_candles(client, symbol, Timeframe::M15, Some(load_from), Some(load_until))?;
-        if mtf.is_empty() {
-            return Err(anyhow!(
-                "MTF range enabled but no 15m candles for {symbol} — run:\n  poetry run python -m db.fetch_klines --symbol {symbol} --days N --timeframe 15m"
-            ));
+    let mtf_candles = match (mtf_enabled, tf.next_mtf()) {
+        (true, Some(mtf_tf)) => {
+            let mtf = crate::db::load_candles(client, symbol, mtf_tf, Some(load_from), Some(load_until))?;
+            if mtf.is_empty() {
+                return Err(anyhow!(
+                    "MTF range enabled but no {mtf_tf} candles for {symbol} — run:\n  poetry run python -m db.fetch_klines --symbol {symbol} --days N --timeframe {mtf_tf}"
+                ));
+            }
+            Some(mtf)
         }
-        Some(mtf)
-    } else { None };
+        _ => None,
+    };
 
     // Instrumenta range_backtest
     let snapshots = instrumented_range_run(&candles, mtf_candles.as_deref(), params, pos_size_pct)?;
@@ -111,8 +114,20 @@ pub fn run_range_debug(
         return Err(anyhow!("no candles for {chosen_date}"));
     }
 
+    // Inclui opens "carryover" (de dias anteriores) cujos closes caem no dia escolhido.
+    use std::collections::HashSet;
+    let day_close_ids: HashSet<u32> = snapshots.1.iter()
+        .filter(|t| matches!(t.event, TradeEvent::Close) && t.time.date_naive() == chosen_date)
+        .map(|t| t.trade_id)
+        .collect();
     let day_trades: Vec<_> = snapshots.1.iter()
-        .filter(|t| t.time.date_naive() == chosen_date)
+        .filter(|t| {
+            let on_day = t.time.date_naive() == chosen_date;
+            let carryover_open = matches!(t.event, TradeEvent::Open)
+                && t.time.date_naive() < chosen_date
+                && day_close_ids.contains(&t.trade_id);
+            on_day || carryover_open
+        })
         .cloned().collect();
 
     let regions = group_regions(&day_snapshots);

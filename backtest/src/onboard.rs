@@ -55,9 +55,11 @@ pub fn run_onboard(input: OnboardInput) -> Result<OnboardOutput> {
     // 1. Verifica klines no DB; baixa via subprocess Python se faltar
     ensure_klines_available(&mut client, &input.symbol, input.timeframe, input.days)?;
 
-    // 1b. Se Range strategy estiver no list, garante 15m disponível pra MTF check
-    if input.strategies.iter().any(|s| s == "range") && input.timeframe.minutes() < 15 {
-        ensure_klines_available(&mut client, &input.symbol, Timeframe::M15, input.days)?;
+    // 1b. Se Range strategy estiver no list, garante MTF (próximo TF maior) disponível
+    if input.strategies.iter().any(|s| s == "range") {
+        if let Some(mtf_tf) = input.timeframe.next_mtf() {
+            ensure_klines_available(&mut client, &input.symbol, mtf_tf, input.days)?;
+        }
     }
 
     // 2. Define IS/OOS dates (70/30)
@@ -260,15 +262,20 @@ fn run_sweep_in_range(
         .map(|n| build_exit(n, ""))
         .collect::<Result<_>>()?;
 
-    // MTF candles (15m) — só carrega se 'range' está nos strategies E base TF é < 15m
-    let mtf_candles = if input.strategies.iter().any(|s| s == "range") && input.timeframe.minutes() < 15 {
-        let from_dt  = is_candles.first().map(|c| c.open_time);
-        let until_dt = is_candles.last().map(|c| c.open_time);
-        let mtf = db::load_candles(client, &input.symbol, Timeframe::M15, from_dt, until_dt)?;
-        if mtf.is_empty() {
-            anyhow::bail!("range MTF enabled but no 15m candles for {} — fetch failed?", input.symbol);
+    // MTF candles (próximo TF maior) — só se 'range' está nos strategies
+    let mtf_candles = if input.strategies.iter().any(|s| s == "range") {
+        match input.timeframe.next_mtf() {
+            Some(mtf_tf) => {
+                let from_dt  = is_candles.first().map(|c| c.open_time);
+                let until_dt = is_candles.last().map(|c| c.open_time);
+                let mtf = db::load_candles(client, &input.symbol, mtf_tf, from_dt, until_dt)?;
+                if mtf.is_empty() {
+                    anyhow::bail!("range MTF enabled but no {} candles for {} — fetch failed?", mtf_tf, input.symbol);
+                }
+                Some(mtf)
+            }
+            None => None,
         }
-        Some(mtf)
     } else { None };
 
     let days_idx = db::group_by_day(is_candles);
