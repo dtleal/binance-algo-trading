@@ -140,3 +140,37 @@ fn to_dec(v: f64) -> rust_decimal::Decimal {
     let safe = if v.is_finite() { v } else { 0.0 };
     Decimal::from_str(&format!("{:.4}", safe)).unwrap_or_default()
 }
+
+/// Cobertura de klines no DB para (symbol, timeframe).
+pub fn query_klines_coverage(
+    client: &mut Client,
+    symbol: &Symbol,
+    tf: Timeframe,
+) -> Result<(Option<DateTime<Utc>>, Option<DateTime<Utc>>, i64)> {
+    let row = client.query_one(
+        "SELECT MIN(open_time), MAX(open_time), COUNT(*)::bigint
+         FROM klines WHERE symbol=$1 AND timeframe=$2",
+        &[&symbol.as_str(), &tf.as_str()],
+    )?;
+    Ok((row.get(0), row.get(1), row.get(2)))
+}
+
+/// Top N candidatos por Calmar (return_pct / max_dd_pct), filtrando ruído estatístico.
+/// Restringe pra um sweep_id específico (vizinhos contemporâneos).
+pub fn top_by_calmar(
+    client: &mut Client,
+    sweep_id: uuid::Uuid,
+    limit: i64,
+) -> Result<Vec<i64>> {
+    let rows = client.query(
+        "SELECT id FROM sweep_results
+         WHERE sweep_id = $1
+           AND return_pct > 0
+           AND trades >= 10
+           AND max_dd_pct >= 0.01
+         ORDER BY (return_pct / max_dd_pct) DESC
+         LIMIT $2",
+        &[&sweep_id, &limit],
+    )?;
+    Ok(rows.iter().map(|r| r.get(0)).collect())
+}

@@ -199,11 +199,26 @@ pub fn check_is_oos(
         let metrics = json!({"reason": "insufficient candles for IS/OOS split"});
         return persist(client, test_uuid, "is_oos_split", input, Outcome::Inconclusive, &metrics);
     }
-
     let split = (candles_full.len() as f64 * 0.70) as usize;
     let is_slice  = &candles_full[..split];
     let oos_slice = &candles_full[split..];
+    check_is_oos_with_split(client, input, is_slice, oos_slice, cfg, test_uuid)
+}
 
+/// Versão explícita: caller já passa os slices de IS e OOS pré-calculados.
+/// Usado pelo `onboard` que faz sweep só no IS.
+pub fn check_is_oos_with_split(
+    client: &mut Client,
+    input: &OverfitInput,
+    is_slice: &[Candle],
+    oos_slice: &[Candle],
+    cfg: &IsOosConfig,
+    test_uuid: Uuid,
+) -> Result<CheckResult> {
+    if is_slice.is_empty() || oos_slice.is_empty() {
+        let metrics = json!({"reason": "IS or OOS slice is empty"});
+        return persist(client, test_uuid, "is_oos_split", input, Outcome::Inconclusive, &metrics);
+    }
     let is_days  = db::group_by_day(is_slice);
     let oos_days = db::group_by_day(oos_slice);
 

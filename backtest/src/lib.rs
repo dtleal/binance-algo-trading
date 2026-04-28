@@ -16,6 +16,7 @@ pub mod release;
 pub mod evaluate;
 pub mod overfit;
 pub mod walkforward;
+pub mod onboard;
 
 mod types;
 

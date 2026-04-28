@@ -1,4 +1,4 @@
-.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep sweep-range sweep-trailing sweep-v2 detail release overfit-check walkforward analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell bot-btc-range bot-btc-range-dry
+.PHONY: install start stop redis dashboard bots status-all build-frontend help monitor monitor-trades monitor-kline monitor-ticker monitor-depth short status close history bot bot-dry bot-sand bot-sand-dry bot-mana bot-mana-dry bot-gala bot-gala-dry bot-doge bot-doge-dry bot-shib bot-shib-dry bot-xau bot-xau-dry bot-zec bot-zec-dry bot-ksm-orb bot-ksm-orb-dry bot-magic-pdhl bot-magic-pdhl-dry bot-aave bot-aave-dry logs clean fetch-data fetch-btc fetch-eth fetch-eth-5m onboarding onboarding-download backtest-sweep backtest-detail backtest-detail-pullback backtest-detail-pdhl backtest-eth-5m build-sweep sweep sweep-range sweep-trailing sweep-v2 detail release overfit-check walkforward onboard analyze-sweep analyze-best pullback-best pullback-best-dry pullback-best-axs pullback-best-sand pullback-best-gala pullback-best-mana pullback-btc pullback-btc-dry pullback-eth pullback-eth-dry bots-v2 bot-gala-v2 bot-gala-v2-dry bot-avax-v2 bot-avax-v2-dry bot-doge-v2 bot-doge-v2-dry bot-shib-v2 bot-shib-v2-dry bot-xrp-v2 bot-xrp-v2-dry bot-eth-v2 bot-eth-v2-dry bot-xau-v2 bot-xau-v2-dry bot-btc-ema bot-btc-ema-dry bot-btc-orb bot-btc-orb-dry bot-btc-pdhl bot-btc-pdhl-dry bot-ltc-pdhl bot-ltc-pdhl-dry bot-link-pdhl bot-link-pdhl-dry bot-bch-pdhl bot-bch-pdhl-dry bot-icx-pdhl bot-icx-pdhl-dry db-migrate db-sync db-import-klines db-import-sweeps db-seed db-shell bot-btc-range bot-btc-range-dry
 
 SYMBOL ?= axsusdt
 QTY ?= 1
@@ -528,6 +528,16 @@ sweep-range: ## Run Range strategy sweep only (SYMBOL=btcusdt TIMEFRAME=5m)
 
 sweep-trailing: ## Run sweep with trailing-stop only (SYMBOL=btcusdt TIMEFRAME=5m)
 	@$(MAKE) sweep SYMBOL=$(SYMBOL) TIMEFRAME=$(or $(TIMEFRAME),5m) EXIT=trailing_stop
+
+onboard: ## Pipeline completo (SYMBOL=btcusdt DAYS=365 [TIMEFRAME=5m] [BY=diego])
+ifndef SYMBOL
+	@echo "$(RED)❌ Usage: make onboard SYMBOL=btcusdt DAYS=365 [TIMEFRAME=5m] [BY=diego]$(NC)"
+	@exit 1
+else
+	@./backtest/target/release/backtest onboard \
+		--symbol $(SYMBOL) --timeframe $(or $(TIMEFRAME),5m) --days $(or $(DAYS),365) \
+		$(if $(BY),--released-by $(BY),)
+endif
 
 overfit-check: ## Anti-overfit check (ID=12345 [CHECK=param-sensitivity|is-oos|all])
 ifndef ID

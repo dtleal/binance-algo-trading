@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 
 use backtest::{
     db, sweep, detail, chart, release,
-    overfit, walkforward,
+    overfit, walkforward, onboard,
     Symbol, Timeframe, Ctx,
     detail::DetailParams,
     exit::{Exit, build_exit},
@@ -33,6 +33,21 @@ enum Command {
     OverfitCheck(OverfitCheckArgs),
     /// Walkforward (validação): janelas deslizantes com params fixos.
     Walkforward(WalkforwardArgs),
+    /// Onboard: pipeline completo (fetch → sweep IS → gates → release).
+    Onboard(OnboardArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct OnboardArgs {
+    #[arg(long)] symbol: String,
+    #[arg(long)] timeframe: String,
+    #[arg(long, default_value_t = 365)] days: u32,
+    #[arg(long, value_delimiter = ',', default_value = "vwap_pullback,orb,ema_scalp,pdhl,momentum")]
+    strategy: Vec<String>,
+    #[arg(long, value_delimiter = ',', default_value = "fixed_tp_sl,trailing_stop")]
+    exit: Vec<String>,
+    #[arg(long, default_value_t = 0.10)] pos_size: f64,
+    #[arg(long)] released_by: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -167,7 +182,33 @@ fn main() -> Result<()> {
         Command::Release(a)      => run_release(a),
         Command::OverfitCheck(a) => run_overfit_check(a),
         Command::Walkforward(a)  => run_walkforward(a),
+        Command::Onboard(a)      => run_onboard(a),
     }
+}
+
+fn run_onboard(args: OnboardArgs) -> Result<()> {
+    let symbol = Symbol::new(&args.symbol);
+    let timeframe = Timeframe::parse(&args.timeframe)
+        .with_context(|| format!("invalid timeframe '{}'", args.timeframe))?;
+
+    let out = onboard::run_onboard(onboard::OnboardInput {
+        symbol, timeframe, days: args.days,
+        strategies: args.strategy, exits: args.exit,
+        pos_size: args.pos_size,
+        released_by: args.released_by,
+    })?;
+
+    println!();
+    println!("════════════════════════════════════════════════════════════════════");
+    println!("  ✅ ONBOARD COMPLETE");
+    println!("════════════════════════════════════════════════════════════════════");
+    println!("  preset_id:        {}", out.preset_id);
+    println!("  sweep_result_id:  {}", out.sweep_result_id);
+    println!("  sweep_id:         {}", out.sweep_id);
+    println!("  overfit_test:     {}", out.overfit_test);
+    println!("  walkforward_id:   {}", out.walkforward_id);
+    println!("════════════════════════════════════════════════════════════════════");
+    Ok(())
 }
 
 fn run_release(args: ReleaseArgs) -> Result<()> {
