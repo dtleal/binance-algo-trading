@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
+.DS_Store
+**/.DS_Store
 .venv/
 logs/
 .env
@@ -20,8 +22,7 @@ infra/ansible/*.retry
 
 # Rust build artifacts
 target/
-backtest_sweep/target/
-backtest_sweep_v2/target/
+backtest/target/
 
 # Redis
 dump.rdb
