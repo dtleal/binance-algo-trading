@@ -55,6 +55,11 @@ pub fn run_onboard(input: OnboardInput) -> Result<OnboardOutput> {
     // 1. Verifica klines no DB; baixa via subprocess Python se faltar
     ensure_klines_available(&mut client, &input.symbol, input.timeframe, input.days)?;
 
+    // 1b. Se Range strategy estiver no list, garante 15m disponível pra MTF check
+    if input.strategies.iter().any(|s| s == "range") && input.timeframe.minutes() < 15 {
+        ensure_klines_available(&mut client, &input.symbol, Timeframe::M15, input.days)?;
+    }
+
     // 2. Define IS/OOS dates (70/30)
     let now = Utc::now();
     let total_from = now - Duration::days(input.days as i64);
@@ -255,12 +260,24 @@ fn run_sweep_in_range(
         .map(|n| build_exit(n, ""))
         .collect::<Result<_>>()?;
 
+    // MTF candles (15m) — só carrega se 'range' está nos strategies E base TF é < 15m
+    let mtf_candles = if input.strategies.iter().any(|s| s == "range") && input.timeframe.minutes() < 15 {
+        let from_dt  = is_candles.first().map(|c| c.open_time);
+        let until_dt = is_candles.last().map(|c| c.open_time);
+        let mtf = db::load_candles(client, &input.symbol, Timeframe::M15, from_dt, until_dt)?;
+        if mtf.is_empty() {
+            anyhow::bail!("range MTF enabled but no 15m candles for {} — fetch failed?", input.symbol);
+        }
+        Some(mtf)
+    } else { None };
+
     let days_idx = db::group_by_day(is_candles);
     let ctx = Ctx {
         symbol: &input.symbol,
         timeframe: input.timeframe,
         candles: is_candles,
         days: &days_idx,
+        mtf_candles: mtf_candles.as_deref(),
     };
     let sweep_id = Uuid::new_v4();
     let results = sweep::run_sweep(&strategies, &exits, &ctx, input.pos_size, sweep_id);

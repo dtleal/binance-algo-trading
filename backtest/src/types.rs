@@ -207,4 +207,6 @@ pub struct Ctx<'a> {
     pub timeframe: Timeframe,
     pub candles: &'a [Candle],
     pub days: &'a DayIndex,
+    /// Candles do timeframe maior pra MTF confirmation (default 15m). None = MTF off.
+    pub mtf_candles: Option<&'a [Candle]>,
 }

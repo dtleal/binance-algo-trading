@@ -11,10 +11,11 @@ use serde_json::Value;
 use crate::indicator::{adx_wilder, atr_wilder};
 use crate::types::*;
 
-const RANGE_THROTTLE: usize = 12;
+const RANGE_THROTTLE: usize = 1;     // alinhado com MQL5
 const ADX_PERIOD: usize = 14;
 const ATR_PERIOD: usize = 14;
-const WARMUP_DAYS: i64 = 7;     // dias de buffer pré-data pra warmup ATR/ADX/lookback
+const WARMUP_DAYS: i64 = 7;
+const OPPOSITE_EXTREME_MARGIN_PCT: f64 = 5.0;
 
 #[derive(Debug, Clone)]
 pub struct CandleSnapshot {
@@ -64,8 +65,6 @@ pub fn run_range_debug(
     params: &Value,
     pos_size_pct: f64,
 ) -> Result<DayDebug> {
-    // Decide o range de carga: target_date + 7d warmup antes; se sem data, carrega 30d
-    // pra escolher o dia com mais atividade in_range.
     let now = Utc::now();
     let (load_from, load_until, fixed_date) = match target_date {
         Some(d) => {
@@ -74,7 +73,6 @@ pub fn run_range_debug(
             (f, u, Some(d))
         }
         None => {
-            // Carrega últimos 30 dias, escolhe o dia com maior atividade
             let f = now - Duration::days(30 + WARMUP_DAYS);
             (f, now, None)
         }
@@ -83,8 +81,20 @@ pub fn run_range_debug(
     let candles = crate::db::load_candles(client, symbol, tf, Some(load_from), Some(load_until))?;
     if candles.is_empty() { return Err(anyhow!("no candles in range")); }
 
+    // MTF: carrega 15m se param mtf_enabled (default true) e base TF < 15m
+    let mtf_enabled = params.get("mtf_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+    let mtf_candles = if mtf_enabled && tf.minutes() < 15 {
+        let mtf = crate::db::load_candles(client, symbol, Timeframe::M15, Some(load_from), Some(load_until))?;
+        if mtf.is_empty() {
+            return Err(anyhow!(
+                "MTF range enabled but no 15m candles for {symbol} — run:\n  poetry run python -m db.fetch_klines --symbol {symbol} --days N --timeframe 15m"
+            ));
+        }
+        Some(mtf)
+    } else { None };
+
     // Instrumenta range_backtest
-    let snapshots = instrumented_range_run(&candles, params, pos_size_pct)?;
+    let snapshots = instrumented_range_run(&candles, mtf_candles.as_deref(), params, pos_size_pct)?;
 
     // Define o dia alvo
     let chosen_date = match fixed_date {
@@ -117,9 +127,12 @@ pub fn run_range_debug(
 }
 
 /// Versão instrumentada do `run_range_backtest` que registra estados internos.
-/// Retorna (snapshots, trades).
+/// Retorna (snapshots, trades). Espelha a lógica de `range::run_range_backtest`
+/// com todas as 5 alinhamentos MQL5 (throttle=1, MTF, no tp_inside_range guard,
+/// close_at_opposite_extreme, close_on_range_break).
 fn instrumented_range_run(
     candles: &[Candle],
+    mtf_candles: Option<&[Candle]>,
     params: &Value,
     pos_size_pct: f64,
 ) -> Result<(Vec<CandleSnapshot>, Vec<TradeMark>)> {
@@ -133,6 +146,9 @@ fn instrumented_range_run(
     let sl_range_pct      = g("sl_range_pct")?.as_f64().ok_or_else(|| anyhow!("sl_range_pct"))?;
     let recent_thresh_pct = g("recent_thresh_pct")?.as_f64().ok_or_else(|| anyhow!("recent_thresh_pct"))?;
     let max_orders        = g("max_orders")?.as_u64().ok_or_else(|| anyhow!("max_orders"))? as usize;
+    // Defaults MQL5 alignment
+    let close_at_opposite = p.get("close_at_opposite").and_then(|v| v.as_bool()).unwrap_or(true);
+    let close_on_break    = p.get("close_on_range_break").and_then(|v| v.as_bool()).unwrap_or(true);
 
     let n = candles.len();
     let atr = atr_wilder(candles, ATR_PERIOD);
@@ -142,6 +158,15 @@ fn instrumented_range_run(
         .collect();
     let highs: Vec<f64> = candles.iter().map(|c| c.high).collect();
     let lows:  Vec<f64> = candles.iter().map(|c| c.low ).collect();
+
+    // MTF
+    let (mtf_adx_vec, mtf_idx_map): (Option<Vec<f64>>, Option<Vec<Option<usize>>>) = match mtf_candles {
+        Some(mtf) if !mtf.is_empty() => (
+            Some(adx_wilder(mtf, ADX_PERIOD)),
+            Some(crate::strategy::range::build_mtf_idx_map(candles, mtf)),
+        ),
+        _ => (None, None),
+    };
 
     let min_history = range_lookback + ADX_PERIOD * 3;
     let mut snapshots = Vec::with_capacity(n);
@@ -153,10 +178,10 @@ fn instrumented_range_run(
     let mut next_trade_id: u32 = 1;
     let mut last_range_calc: usize = 0;
     let mut current_range: Option<(f64, f64, f64)> = None;  // (high, low, size)
+    let mut was_in_range: bool = false;
 
     for i in 0..n {
         let c = &candles[i];
-        // Snapshot básico (mesmo se ainda no warmup)
         let mut snap = CandleSnapshot {
             time: c.open_time,
             open: c.open, high: c.high, low: c.low, close: c.close,
@@ -169,7 +194,6 @@ fn instrumented_range_run(
             continue;
         }
 
-        // Detect range (throttled)
         if i - last_range_calc >= RANGE_THROTTLE || current_range.is_none() {
             let start = i - range_lookback;
             let h = highs[start..i].iter().fold(f64::NEG_INFINITY, |a,b| a.max(*b));
@@ -179,8 +203,16 @@ fn instrumented_range_run(
             last_range_calc = i;
         }
 
+        // MTF check
+        let mtf_ok = match (&mtf_adx_vec, &mtf_idx_map) {
+            (Some(madx), Some(map)) => map.get(i).copied().flatten()
+                .map(|idx| madx.get(idx).copied().unwrap_or(f64::INFINITY) <= adx_thresh)
+                .unwrap_or(false),
+            _ => true,
+        };
+
         let in_range = match current_range {
-            Some((_, _, s)) => adx[i] <= adx_thresh && atr_pct[i] <= atr_pct_thresh && s > 0.0,
+            Some((_, _, s)) => adx[i] <= adx_thresh && atr_pct[i] <= atr_pct_thresh && s > 0.0 && mtf_ok,
             None => false,
         };
 
@@ -189,6 +221,21 @@ fn instrumented_range_run(
             snap.range_low  = Some(l);
         }
         snap.in_range = in_range;
+
+        // CloseOnRangeBreak: registra closes na transição
+        if was_in_range && !in_range && close_on_break && !positions.is_empty() {
+            for pos in positions.drain(..) {
+                let pnl = if pos.side { (c.close - pos.entry) / pos.entry }
+                          else        { (pos.entry - c.close) / pos.entry };
+                trades.push(TradeMark {
+                    trade_id: pos.id, time: c.open_time, price: c.close,
+                    side: if pos.side { Direction::Long } else { Direction::Short },
+                    event: TradeEvent::Close,
+                    pnl_pct: Some(pnl * 100.0),
+                });
+            }
+        }
+        was_in_range = in_range;
 
         // Fecha posições no TP/SL (registra trade close)
         let mut remaining = Vec::new();
@@ -211,41 +258,62 @@ fn instrumented_range_run(
         }
         positions = remaining;
 
-        // Tenta abrir nova posição
+        // CloseAtOppositeExtreme + nova posição
         if in_range {
             let (rh, rl, rsize) = current_range.unwrap();
-            if positions.len() < max_orders {
-                let zone_height = rsize * zone_pct / 100.0;
-                let price = c.close;
-                let zone_buy  = price <= rl + zone_height;
-                let zone_sell = price >= rh - zone_height;
-                if zone_buy || zone_sell {
-                    let is_long = zone_buy;
-                    let threshold = rsize * recent_thresh_pct / 100.0;
-                    let has_recent = positions.iter().any(|p|
-                        p.side == is_long && (p.entry - price).abs() < threshold
-                    );
-                    if !has_recent {
-                        let tp_dist = rsize * tp_range_pct / 100.0;
-                        let sl_dist = if sl_range_pct > 0.0 { rsize * sl_range_pct / 100.0 } else { 0.0 };
-                        let (tp, sl) = if is_long {
-                            (price + tp_dist, if sl_dist > 0.0 { price - sl_dist } else { 0.0 })
-                        } else {
-                            (price - tp_dist, if sl_dist > 0.0 { price + sl_dist } else { 0.0 })
-                        };
-                        let tp_inside = if is_long { tp <= rh } else { tp >= rl };
-                        if tp_inside {
-                            let id = next_trade_id; next_trade_id += 1;
-                            positions.push(Pos { id, side: is_long, entry: price, tp, sl });
-                            trades.push(TradeMark {
-                                trade_id: id,
-                                time: c.open_time, price,
-                                side: if is_long { Direction::Long } else { Direction::Short },
-                                event: TradeEvent::Open,
-                                pnl_pct: None,
-                            });
-                        }
+            let price = c.close;
+            let zone_height = rsize * zone_pct / 100.0;
+            let zone_buy  = price <= rl + zone_height;
+            let zone_sell = price >= rh - zone_height;
+
+            // Fecha posições no extremo oposto (after TP/SL, antes de abrir nova)
+            if close_at_opposite && !positions.is_empty() {
+                let margin = rsize * OPPOSITE_EXTREME_MARGIN_PCT / 100.0;
+                let zone_for_close = if zone_buy { 0_i8 } else if zone_sell { 1 } else { -1 };
+                let mut to_keep = Vec::new();
+                for pos in positions.drain(..) {
+                    let force_close = match (pos.side, zone_for_close) {
+                        (true,  1) if c.high >= rh - margin => true,   // LONG no extremo SELL
+                        (false, 0) if c.low  <= rl + margin => true,   // SHORT no extremo BUY
+                        _ => false,
+                    };
+                    if force_close {
+                        let pnl = if pos.side { (c.close - pos.entry) / pos.entry }
+                                  else        { (pos.entry - c.close) / pos.entry };
+                        trades.push(TradeMark {
+                            trade_id: pos.id, time: c.open_time, price: c.close,
+                            side: if pos.side { Direction::Long } else { Direction::Short },
+                            event: TradeEvent::Close, pnl_pct: Some(pnl * 100.0),
+                        });
+                    } else {
+                        to_keep.push(pos);
                     }
+                }
+                positions = to_keep;
+            }
+
+            if positions.len() < max_orders && (zone_buy || zone_sell) {
+                let is_long = zone_buy;
+                let threshold = rsize * recent_thresh_pct / 100.0;
+                let has_recent = positions.iter().any(|p|
+                    p.side == is_long && (p.entry - price).abs() < threshold
+                );
+                if !has_recent {
+                    let tp_dist = rsize * tp_range_pct / 100.0;
+                    let sl_dist = if sl_range_pct > 0.0 { rsize * sl_range_pct / 100.0 } else { 0.0 };
+                    let (tp, sl) = if is_long {
+                        (price + tp_dist, if sl_dist > 0.0 { price - sl_dist } else { 0.0 })
+                    } else {
+                        (price - tp_dist, if sl_dist > 0.0 { price + sl_dist } else { 0.0 })
+                    };
+                    // (tp_inside_range guard removida — alinha com MQL5)
+                    let id = next_trade_id; next_trade_id += 1;
+                    positions.push(Pos { id, side: is_long, entry: price, tp, sl });
+                    trades.push(TradeMark {
+                        trade_id: id, time: c.open_time, price,
+                        side: if is_long { Direction::Long } else { Direction::Short },
+                        event: TradeEvent::Open, pnl_pct: None,
+                    });
                 }
             }
         }

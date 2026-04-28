@@ -481,7 +481,21 @@ fn run_sweep(args: SweepArgs) -> Result<()> {
         .collect::<Result<_>>()?;
 
     let sweep_id = Uuid::new_v4();
-    let ctx = Ctx { symbol: &symbol, timeframe, candles: &candles, days: &days };
+    // Carrega candles MTF (15m) pra Range strategy se "range" estiver no list.
+    let mtf_candles_opt = if args.strategy.iter().any(|s| s == "range") && timeframe.minutes() < 15 {
+        let mtf = db::load_candles(&mut client, &symbol, Timeframe::M15, from, until)?;
+        if mtf.is_empty() {
+            anyhow::bail!(
+                "MTF range enabled but no 15m candles for {symbol} — run:\n  poetry run python -m db.fetch_klines --symbol {symbol} --days N --timeframe 15m"
+            );
+        }
+        Some(mtf)
+    } else { None };
+    let ctx = Ctx {
+        symbol: &symbol, timeframe,
+        candles: &candles, days: &days,
+        mtf_candles: mtf_candles_opt.as_deref(),
+    };
 
     let results = sweep::run_sweep(&strategies, &exits, &ctx, args.pos_size, sweep_id);
     tracing::info!(n_results = results.len(), "sweep done");

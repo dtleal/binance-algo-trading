@@ -26,12 +26,27 @@ pub fn evaluate_combo(
     exit_params: &Value,
     pos_size: f64,
 ) -> Result<RunMetrics> {
+    evaluate_combo_with_mtf(candles, days, None, strategy, strategy_params, exit_name, exit_params, pos_size)
+}
+
+/// Versão estendida: aceita candles do TF maior pra Range strategy MTF check.
+#[allow(clippy::too_many_arguments)]
+pub fn evaluate_combo_with_mtf(
+    candles: &[Candle],
+    days: &DayIndex,
+    mtf_candles: Option<&[Candle]>,
+    strategy: &str,
+    strategy_params: &Value,
+    exit_name: &str,
+    exit_params: &Value,
+    pos_size: f64,
+) -> Result<RunMetrics> {
     if candles.is_empty() {
         return Ok(RunMetrics { final_capital: INITIAL_CAPITAL, ..Default::default() });
     }
 
     if strategy == "range" {
-        return evaluate_range(candles, strategy_params);
+        return evaluate_range(candles, mtf_candles, strategy_params);
     }
 
     // Path padrão: build_entries + per-entry exit dispatch
@@ -41,7 +56,11 @@ pub fn evaluate_combo(
     Ok(run_loop(&entries, candles, &exit_fn, pos_size))
 }
 
-fn evaluate_range(candles: &[Candle], params: &Value) -> Result<RunMetrics> {
+fn evaluate_range(
+    candles: &[Candle],
+    mtf_candles: Option<&[Candle]>,
+    params: &Value,
+) -> Result<RunMetrics> {
     // Precompute indicators
     let atr = atr_wilder(candles, ATR_PERIOD);
     let adx = adx_wilder(candles, ADX_PERIOD);
@@ -64,11 +83,30 @@ fn evaluate_range(candles: &[Candle], params: &Value) -> Result<RunMetrics> {
     let max_orders        = g("max_orders")?.as_u64().ok_or_else(|| anyhow!("max_orders"))? as usize;
     let pos_size          = g("pos_size")?.as_f64().ok_or_else(|| anyhow!("pos_size"))?;
 
+    // MQL5 alignment params (default ON se ausentes)
+    let mtf_enabled       = p.get("mtf_enabled").and_then(|v| v.as_bool()).unwrap_or(true);
+    let close_at_opposite = p.get("close_at_opposite").and_then(|v| v.as_bool()).unwrap_or(true);
+    let close_on_break    = p.get("close_on_range_break").and_then(|v| v.as_bool()).unwrap_or(true);
+
+    // MTF: pré-computa se enabled E há candles
+    let (mtf_adx_vec, mtf_idx_map_vec) = if mtf_enabled {
+        match mtf_candles {
+            Some(mtf) if !mtf.is_empty() => (
+                Some(adx_wilder(mtf, ADX_PERIOD)),
+                Some(range::build_mtf_idx_map(candles, mtf)),
+            ),
+            _ => (None, None),
+        }
+    } else { (None, None) };
+
     Ok(range::run_range_backtest(
         candles, &adx, &atr_pct,
+        mtf_adx_vec.as_deref(),
+        mtf_idx_map_vec.as_deref(),
         adx_thresh, atr_pct_thresh, range_lookback,
         zone_pct, tp_range_pct, sl_range_pct,
         recent_thresh_pct, max_orders, pos_size,
+        close_at_opposite, close_on_break,
     ))
 }
 
