@@ -14,53 +14,78 @@ ALTER TABLE presets ADD COLUMN overfit_test_uuid UUID;
 ```
 `walkforward_id UUID` já está correto.
 
-### 2. Range strategy precisa de dispatch dedicado em `evaluate_combo`
-`detail::build_entries` falha para range (entry+exit acoplados). `evaluate_combo` precisa:
+### 2. Range strategy precisa de dispatch dedicado + warmup buffer
+`detail::build_entries` falha para range (entry+exit acoplados). `evaluate_combo` precisa de path próprio. **Adicional**: range usa ATR(14) + ADX(14), que precisam de ~50 candles de warmup. Em walkforward com janela curta + timeframe coarse (ex.: 1d × 30 dias = 30 candles), warmup engole a janela inteira.
+
+**Regra**: quando o caller solicita evaluate_combo num intervalo `[start, end]`, ele carrega candles `[start - warmup_buffer, end]`. `run_range_backtest` já tem o `min_history = range_lookback + ADX_PERIOD * 3` interno que skip os primeiros candles. Métricas saem corretas porque o range backtest começa a operar só depois do warmup.
+
 ```rust
-match strategy {
-    "range" => {
-        let atr = atr_wilder(candles, ATR_PERIOD);
-        let adx = adx_wilder(candles, ADX_PERIOD);
-        let atr_pct = compute_atr_pct(candles, &atr);
-        let p: RangeParams = serde_json::from_value(strategy_params.clone())?;
-        Ok(range::run_range_backtest(candles, &adx, &atr_pct, p.adx_thresh, ...))
-    }
-    other => {
-        // Path padrão: build_entries + evaluate per-entry
-        let entries = detail::build_entries(other, candles, days, &params_to_detail(strategy_params))?;
-        Ok(run_loop(entries, candles, exit_fn, pos_size))
+fn evaluate_combo(candles: &[Candle], days: &DayIndex, ...) -> Result<RunMetrics> {
+    match strategy {
+        "range" => {
+            let p: RangeParams = serde_json::from_value(strategy_params.clone())?;
+            let atr = atr_wilder(candles, ATR_PERIOD);
+            let adx = adx_wilder(candles, ADX_PERIOD);
+            let atr_pct = compute_atr_pct(candles, &atr);
+            Ok(range::run_range_backtest(candles, &adx, &atr_pct, p.adx_thresh, ...))
+        }
+        other => {
+            let entries = detail::build_entries(other, candles, days,
+                                                &params_to_detail(strategy_params))?;
+            let exit_fn = exit_fn_from_json(exit_name, exit_params)?;
+            Ok(run_loop(&entries, candles, exit_fn, pos_size))
+        }
     }
 }
 ```
 
-### 3. Outcome `inconclusive` não cabe em `passed BOOLEAN`
-Schema atual de `overfit_tests` tem `passed BOOLEAN NOT NULL`. Mas plano fala em retornar inconclusive (ex.: param sensitivity com <4 vizinhos disponíveis). **Migration 012** adiciona:
+Walkforward que vai testar range deve carregar `from = window_start - warmup_days` na chamada `db::load_candles`. Constante `RANGE_WARMUP_DAYS = 7` (cobre ~50 candles em qualquer timeframe ≥1h).
+
+### 3. Substituir `passed BOOLEAN` por `outcome TEXT`
+Schema atual: `overfit_tests.passed BOOLEAN NOT NULL`. Não comporta "inconclusive". Como a tabela está vazia, **substituímos limpo** sem compat layer.
+
 ```sql
-ALTER TABLE overfit_tests ADD COLUMN outcome TEXT NOT NULL DEFAULT 'pending'
-   CHECK (outcome IN ('pass', 'fail', 'inconclusive'));
--- passed BOOLEAN fica como compat — true se outcome='pass', false caso contrário.
--- Eventualmente DROP passed (migration futura).
+-- Migration 012:
+ALTER TABLE overfit_tests DROP COLUMN passed;
+ALTER TABLE overfit_tests ADD COLUMN outcome TEXT NOT NULL
+    CHECK (outcome IN ('pass', 'fail', 'inconclusive'));
+-- Sem default — todo INSERT decide explicitamente.
 ```
 
-### 4. Walkforward: janelas com 0 trades
-Se uma janela não gera trades, `return_pct = 0`, `max_dd = 0`. Regra:
-- **Excluir janelas vazias do denominador** do "% positivas".
-- Se >50% das janelas forem vazias → outcome `inconclusive` (estratégia não dispara nessa frequência).
-- Reportar contagem `(positive, negative, empty)` no summary JSONB.
+### 4. Walkforward: janelas vazias contam separadamente, sem threshold arbitrário
+Se uma janela não gera trades, `return_pct = 0`. Regra (sem chute):
+- `non_empty = janelas com trades > 0`.
+- `positive_pct = positive / non_empty` (denominador exclui vazias).
+- **Pass criteria**:
+  - `non_empty ≥ min_non_empty` (default 5 — se menos, dataset/strategy não dispara o suficiente)
+  - E `positive_pct ≥ min_pct_positive` (default 0.70)
+  - E nenhuma janela com `max_dd > max_window_dd_pct` (default 30%)
+- Se `non_empty < min_non_empty` → outcome `inconclusive` (não dá pra concluir).
+- Summary JSONB sempre reporta `(positive, negative, empty, total)`.
 
-### 5. IS/OOS com IS negativo
-Se champion tem `is_return < 0`, ratio `oos/is` engana (números negativos bagunçam). Regra:
-- Se `is_return < 0` → outcome `fail` direto (candidato é ruim mesmo no IS, esquece OOS).
-- Se `is_return ≥ 0` → calcula ratio normalmente.
+Sem o threshold "≥50% empty → inconclusive" antigo (era arbitrário). Em vez disso: requer um número mínimo absoluto de janelas com atividade.
+
+### 5. IS/OOS — matriz completa de sinais (não só "IS negativo → fail")
+Tratamento por quadrante:
+
+| `is_return` | `oos_return` | Outcome | Por quê |
+|---|---|---|---|
+| ≥ 0 | ≥ 0 | `pass` se `oos/is ≥ min_ratio` E `oos_trades ≥ min` ; senão `fail` | Caso clássico de overfit — sweep funcionou, OOS confirma ou não |
+| ≥ 0 | < 0 | `fail` | Sweep funcionou, OOS quebrou: sinal forte de overfit |
+| < 0 | < 0 | `fail` | Champion ruim em ambos — sweep escolheu mal |
+| < 0 | ≥ 0 | `pass` | OOS recuperou apesar de IS ruim — improvável ser overfit (não havia o que decorar) |
+
+Pré-condição em todos os caminhos: se `oos_trades < min_trades` → `inconclusive` (ruído estatístico).
 
 ## Recap
 
 Antes de codar:
-1. Migration 012 (3 mudanças: presets.overfit_test_uuid, overfit_tests.outcome, presets backfill).
-2. evaluate_combo dispatcher por strategy (range path separado).
-3. TestResult tem 3 estados, não 2.
-4. Walkforward conta janelas vazias separadamente.
-5. IS/OOS rejeita IS negativo direto.
+1. **Migration 012** — 2 mudanças: `presets.overfit_test_uuid UUID` (substitui BIGINT antigo), `overfit_tests.outcome TEXT` (substitui passed boolean). Sem compat layer, tabelas vazias.
+2. **evaluate_combo** dispatcher por strategy. Range path: precompute ATR/ADX + chama `run_range_backtest` direto. Demais: build_entries + per-entry exit.
+3. **Range warmup**: walkforward que testa range carrega `RANGE_WARMUP_DAYS = 7` extras antes da janela; `run_range_backtest::min_history` skip ja existe.
+4. **TestResult** = 3 estados (pass/fail/inconclusive), schema enforça.
+5. **Walkforward**: janelas vazias excluídas do denominador; `min_non_empty=5` evita conclusões com poucos dados.
+6. **IS/OOS**: matriz 2×2 (IS≥0 / IS<0 × OOS≥0 / OOS<0) cobre todos os casos. `oos_trades < min` → inconclusive antes de qualquer outra regra.
 
 ## Conceitos
 
