@@ -127,6 +127,151 @@ fn json_strings(v: &[String]) -> String {
     s
 }
 
+// ── Range debug chart ─────────────────────────────────────────────────────────
+
+pub fn write_range_debug_html(path: &str, day: &crate::range_debug::DayDebug) -> Result<()> {
+    use crate::range_debug::TradeEvent;
+
+    let times: Vec<String> = day.snapshots.iter().map(|s| s.time.to_rfc3339()).collect();
+    let opens:  Vec<f64> = day.snapshots.iter().map(|s| s.open).collect();
+    let highs:  Vec<f64> = day.snapshots.iter().map(|s| s.high).collect();
+    let lows:   Vec<f64> = day.snapshots.iter().map(|s| s.low).collect();
+    let closes: Vec<f64> = day.snapshots.iter().map(|s| s.close).collect();
+    let adx:    Vec<f64> = day.snapshots.iter().map(|s| s.adx).collect();
+    let atr_pct:Vec<f64> = day.snapshots.iter().map(|s| s.atr_pct).collect();
+
+    // Shapes para lateral regions: rect translúcido azul
+    let mut shapes = String::from("[");
+    let mut first = true;
+    for r in &day.regions {
+        if !first { shapes.push(','); } first = false;
+        shapes.push_str(&format!(
+            r#"{{"type":"rect","xref":"x","yref":"y","x0":"{x0}","x1":"{x1}","y0":{y0},"y1":{y1},"fillcolor":"rgba(80,130,255,0.18)","line":{{"width":1,"color":"rgba(80,130,255,0.6)"}},"layer":"below"}}"#,
+            x0 = r.start_time.to_rfc3339(),
+            x1 = r.end_time.to_rfc3339(),
+            y0 = r.range_low,
+            y1 = r.range_high,
+        ));
+    }
+    shapes.push(']');
+
+    // Trade markers
+    let mut open_long_x  = Vec::new(); let mut open_long_y  = Vec::new();
+    let mut open_short_x = Vec::new(); let mut open_short_y = Vec::new();
+    let mut close_x      = Vec::new(); let mut close_y      = Vec::new();
+    let mut close_text   = Vec::new();
+    for t in &day.trades {
+        match (t.event, t.side) {
+            (TradeEvent::Open, crate::Direction::Long)  => { open_long_x.push(t.time.to_rfc3339()); open_long_y.push(t.price); }
+            (TradeEvent::Open, crate::Direction::Short) => { open_short_x.push(t.time.to_rfc3339()); open_short_y.push(t.price); }
+            (TradeEvent::Close, _) => {
+                close_x.push(t.time.to_rfc3339());
+                close_y.push(t.price);
+                close_text.push(format!("{:.2}%", t.pnl_pct.unwrap_or(0.0)));
+            }
+        }
+    }
+
+    let title = format!("Range debug — {} ({} regions, {} trades)",
+        day.date, day.regions.len(),
+        day.trades.iter().filter(|t| matches!(t.event, TradeEvent::Open)).count());
+    let params_str = serde_json::to_string_pretty(&day.params).unwrap_or_default();
+
+    let html = format!(
+r#"<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8"><title>{title}</title>
+<script src="{cdn}"></script>
+<style>
+body{{margin:0;background:#1a1a1a;color:#ddd;font-family:system-ui;}}
+#meta{{padding:12px 24px;font-size:12px;color:#aaa;}}
+pre{{display:inline-block;background:#222;padding:8px;border-radius:4px;font-size:11px;}}
+</style>
+</head><body>
+<div id="meta"><b>{title}</b><br>params: <pre>{params}</pre></div>
+<div id="chart" style="width:100%;height:88vh;"></div>
+<script>
+Plotly.newPlot('chart', [
+  {{
+    type: 'candlestick',
+    x: {times}, open: {opens}, high: {highs}, low: {lows}, close: {closes},
+    name: 'OHLC',
+    increasing: {{line:{{color:'#26a69a'}}}}, decreasing: {{line:{{color:'#ef5350'}}}},
+    xaxis: 'x', yaxis: 'y'
+  }},
+  {{
+    type: 'scatter', mode: 'markers', name: 'Open LONG',
+    x: {open_long_x}, y: {open_long_y},
+    marker: {{symbol: 'triangle-up', size: 14, color: '#00e676', line:{{width:1,color:'#fff'}}}},
+    xaxis: 'x', yaxis: 'y'
+  }},
+  {{
+    type: 'scatter', mode: 'markers', name: 'Open SHORT',
+    x: {open_short_x}, y: {open_short_y},
+    marker: {{symbol: 'triangle-down', size: 14, color: '#ff5252', line:{{width:1,color:'#fff'}}}},
+    xaxis: 'x', yaxis: 'y'
+  }},
+  {{
+    type: 'scatter', mode: 'markers+text', name: 'Close',
+    x: {close_x}, y: {close_y}, text: {close_text}, textposition: 'top center',
+    marker: {{symbol: 'x', size: 10, color: '#ffeb3b'}},
+    textfont: {{size: 9, color: '#ffeb3b'}},
+    xaxis: 'x', yaxis: 'y'
+  }},
+  {{
+    type: 'scatter', mode: 'lines', name: 'ADX',
+    x: {times}, y: {adx},
+    line: {{color: '#ba68c8', width: 1}},
+    xaxis: 'x2', yaxis: 'y2'
+  }},
+  {{
+    type: 'scatter', mode: 'lines', name: 'ATR%',
+    x: {times}, y: {atr_pct},
+    line: {{color: '#ffa726', width: 1}},
+    xaxis: 'x2', yaxis: 'y3'
+  }}
+], {{
+  template: 'plotly_dark',
+  paper_bgcolor: '#1a1a1a', plot_bgcolor: '#1a1a1a',
+  font: {{color: '#ddd'}},
+  shapes: {shapes},
+  grid: {{rows: 2, columns: 1, pattern: 'independent', roworder: 'top to bottom'}},
+  yaxis:  {{title: 'Price', domain: [0.30, 1.00]}},
+  yaxis2: {{title: 'ADX',   domain: [0.00, 0.28], side: 'left'}},
+  yaxis3: {{title: 'ATR%',  domain: [0.00, 0.28], side: 'right', overlaying: 'y2'}},
+  xaxis:  {{anchor: 'y',  rangeslider: {{visible: false}}}},
+  xaxis2: {{anchor: 'y2', matches: 'x'}},
+  legend: {{orientation: 'h', y: 1.05}},
+  margin: {{t: 30, b: 30, l: 60, r: 60}}
+}}, {{responsive: true, displaylogo: false}});
+</script>
+</body></html>
+"#,
+        title = title,
+        cdn = PLOTLY_CDN,
+        params = params_str,
+        times = json_strings(&times),
+        opens = json_floats(&opens),
+        highs = json_floats(&highs),
+        lows  = json_floats(&lows),
+        closes= json_floats(&closes),
+        adx   = json_floats(&adx),
+        atr_pct = json_floats(&atr_pct),
+        shapes = shapes,
+        open_long_x  = json_strings(&open_long_x),
+        open_long_y  = json_floats(&open_long_y),
+        open_short_x = json_strings(&open_short_x),
+        open_short_y = json_floats(&open_short_y),
+        close_x = json_strings(&close_x),
+        close_y = json_floats(&close_y),
+        close_text = json_strings(&close_text),
+    );
+
+    let mut f = File::create(path).with_context(|| format!("creating {path}"))?;
+    f.write_all(html.as_bytes())?;
+    Ok(())
+}
+
 fn json_floats(v: &[f64]) -> String {
     let mut s = String::from("[");
     for (i, x) in v.iter().enumerate() {

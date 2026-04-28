@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 
 use backtest::{
     db, sweep, detail, chart, release,
-    overfit, walkforward, onboard,
+    overfit, walkforward, onboard, range_debug,
     Symbol, Timeframe, Ctx,
     detail::DetailParams,
     exit::{Exit, build_exit},
@@ -35,6 +35,22 @@ enum Command {
     Walkforward(WalkforwardArgs),
     /// Onboard: pipeline completo (fetch → sweep IS → gates → release).
     Onboard(OnboardArgs),
+    /// Range debug: visualiza áreas laterais detectadas em 1 dia + entradas.
+    RangeDebug(RangeDebugArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct RangeDebugArgs {
+    #[arg(long)] symbol: String,
+    #[arg(long)] timeframe: String,
+    /// Data específica YYYY-MM-DD (default: dia com mais atividade nos últimos 30d).
+    #[arg(long)] date: Option<String>,
+    /// Pega params do top-1 dessa sweep_result (alternativa: --params JSON).
+    #[arg(long)] sweep_result_id: Option<i64>,
+    /// JSON dos params Range. Ex: '{"adx_thresh":20,...}'
+    #[arg(long)] params: Option<String>,
+    #[arg(long, default_value_t = 0.10)] pos_size: f64,
+    #[arg(long, default_value = "/tmp/range_debug.html")] output: String,
 }
 
 #[derive(clap::Args, Debug)]
@@ -183,7 +199,54 @@ fn main() -> Result<()> {
         Command::OverfitCheck(a) => run_overfit_check(a),
         Command::Walkforward(a)  => run_walkforward(a),
         Command::Onboard(a)      => run_onboard(a),
+        Command::RangeDebug(a)   => run_range_debug_cmd(a),
     }
+}
+
+fn run_range_debug_cmd(args: RangeDebugArgs) -> Result<()> {
+    use chrono::NaiveDate;
+    let symbol = Symbol::new(&args.symbol);
+    let timeframe = Timeframe::parse(&args.timeframe)
+        .with_context(|| format!("invalid timeframe '{}'", args.timeframe))?;
+    let target_date = args.date.as_deref()
+        .map(|s| NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+        .transpose()
+        .context("invalid --date")?;
+
+    let mut client = db::connect_from_env()?;
+
+    // Resolve params
+    let params: serde_json::Value = match (args.sweep_result_id, args.params.as_deref()) {
+        (Some(id), _) => {
+            let row = client.query_one(
+                "SELECT strategy_params FROM sweep_results WHERE id=$1 AND strategy='range'",
+                &[&id],
+            ).with_context(|| format!("sweep_result {id} not found or not range"))?;
+            row.get::<_, Option<serde_json::Value>>(0)
+                .ok_or_else(|| anyhow::anyhow!("sweep_result {id} has NULL strategy_params"))?
+        }
+        (None, Some(json)) => serde_json::from_str(json).context("invalid --params JSON")?,
+        (None, None) => {
+            // defaults do Grid::default()
+            serde_json::json!({
+                "adx_thresh": 25.0, "atr_pct_thresh": 0.5, "range_lookback": 50,
+                "zone_pct": 25.0, "tp_range_pct": 50.0, "sl_range_pct": 30.0,
+                "recent_thresh_pct": 2.0, "max_orders": 4, "pos_size": 0.10
+            })
+        }
+    };
+
+    let day = range_debug::run_range_debug(&mut client, &symbol, timeframe, target_date, &params, args.pos_size)?;
+
+    println!("Date:   {}", day.date);
+    println!("Candles:{}  Regions:{}  Trades:{} (opens) / {} (closes)",
+        day.snapshots.len(), day.regions.len(),
+        day.trades.iter().filter(|t| matches!(t.event, range_debug::TradeEvent::Open)).count(),
+        day.trades.iter().filter(|t| matches!(t.event, range_debug::TradeEvent::Close)).count());
+
+    chart::write_range_debug_html(&args.output, &day)?;
+    println!("HTML: {}", args.output);
+    Ok(())
 }
 
 fn run_onboard(args: OnboardArgs) -> Result<()> {
