@@ -155,21 +155,53 @@ pub fn write_range_debug_html(path: &str, day: &crate::range_debug::DayDebug) ->
     }
     shapes.push(']');
 
-    // Trade markers
+    // Pareia trades por trade_id
+    use std::collections::HashMap;
+    let mut opens_by_id: HashMap<u32, &crate::range_debug::TradeMark> = HashMap::new();
+    let mut closes_by_id: HashMap<u32, &crate::range_debug::TradeMark> = HashMap::new();
+    for t in &day.trades {
+        match t.event {
+            TradeEvent::Open  => { opens_by_id.insert(t.trade_id, t);  }
+            TradeEvent::Close => { closes_by_id.insert(t.trade_id, t); }
+        }
+    }
+
+    // Markers (mesmo de antes, mas separando close por win/loss pra cor)
     let mut open_long_x  = Vec::new(); let mut open_long_y  = Vec::new();
     let mut open_short_x = Vec::new(); let mut open_short_y = Vec::new();
-    let mut close_x      = Vec::new(); let mut close_y      = Vec::new();
-    let mut close_text   = Vec::new();
+    let mut close_win_x  = Vec::new(); let mut close_win_y  = Vec::new();  let mut close_win_text  = Vec::new();
+    let mut close_loss_x = Vec::new(); let mut close_loss_y = Vec::new();  let mut close_loss_text = Vec::new();
     for t in &day.trades {
         match (t.event, t.side) {
             (TradeEvent::Open, crate::Direction::Long)  => { open_long_x.push(t.time.to_rfc3339()); open_long_y.push(t.price); }
             (TradeEvent::Open, crate::Direction::Short) => { open_short_x.push(t.time.to_rfc3339()); open_short_y.push(t.price); }
             (TradeEvent::Close, _) => {
-                close_x.push(t.time.to_rfc3339());
-                close_y.push(t.price);
-                close_text.push(format!("{:.2}%", t.pnl_pct.unwrap_or(0.0)));
+                let pnl = t.pnl_pct.unwrap_or(0.0);
+                if pnl > 0.0 {
+                    close_win_x.push(t.time.to_rfc3339()); close_win_y.push(t.price);
+                    close_win_text.push(format!("#{} {:+.2}%", t.trade_id, pnl));
+                } else {
+                    close_loss_x.push(t.time.to_rfc3339()); close_loss_y.push(t.price);
+                    close_loss_text.push(format!("#{} {:+.2}%", t.trade_id, pnl));
+                }
             }
         }
+    }
+
+    // Linhas open→close (1 trace por trade, cor verde win / vermelho loss)
+    let mut trade_lines = String::new();
+    let mut ids: Vec<u32> = opens_by_id.keys().copied().collect();
+    ids.sort();
+    for id in ids {
+        let (Some(o), Some(cl)) = (opens_by_id.get(&id), closes_by_id.get(&id)) else { continue };
+        let pnl = cl.pnl_pct.unwrap_or(0.0);
+        let color = if pnl > 0.0 { "#26a69a" } else { "#ef5350" };
+        trade_lines.push_str(&format!(
+            r#",{{"type":"scatter","mode":"lines","showlegend":false,"hoverinfo":"text","text":"trade #{id} {pnl:+.3}%","x":["{x0}","{x1}"],"y":[{y0},{y1}],"line":{{"color":"{color}","width":1.5,"dash":"dot"}},"xaxis":"x","yaxis":"y"}}"#,
+            id = id, pnl = pnl,
+            x0 = o.time.to_rfc3339(), x1 = cl.time.to_rfc3339(),
+            y0 = o.price, y1 = cl.price, color = color
+        ));
     }
 
     let title = format!("Range debug — {} ({} regions, {} trades)",
@@ -212,12 +244,19 @@ Plotly.newPlot('chart', [
     xaxis: 'x', yaxis: 'y'
   }},
   {{
-    type: 'scatter', mode: 'markers+text', name: 'Close',
-    x: {close_x}, y: {close_y}, text: {close_text}, textposition: 'top center',
-    marker: {{symbol: 'x', size: 10, color: '#ffeb3b'}},
-    textfont: {{size: 9, color: '#ffeb3b'}},
+    type: 'scatter', mode: 'markers+text', name: 'Close (win)',
+    x: {close_win_x}, y: {close_win_y}, text: {close_win_text}, textposition: 'top center',
+    marker: {{symbol: 'x', size: 10, color: '#26a69a'}},
+    textfont: {{size: 9, color: '#26a69a'}},
     xaxis: 'x', yaxis: 'y'
   }},
+  {{
+    type: 'scatter', mode: 'markers+text', name: 'Close (loss)',
+    x: {close_loss_x}, y: {close_loss_y}, text: {close_loss_text}, textposition: 'bottom center',
+    marker: {{symbol: 'x', size: 10, color: '#ef5350'}},
+    textfont: {{size: 9, color: '#ef5350'}},
+    xaxis: 'x', yaxis: 'y'
+  }}{trade_lines},
   {{
     type: 'scatter', mode: 'lines', name: 'ADX',
     x: {times}, y: {adx},
@@ -262,9 +301,13 @@ Plotly.newPlot('chart', [
         open_long_y  = json_floats(&open_long_y),
         open_short_x = json_strings(&open_short_x),
         open_short_y = json_floats(&open_short_y),
-        close_x = json_strings(&close_x),
-        close_y = json_floats(&close_y),
-        close_text = json_strings(&close_text),
+        close_win_x  = json_strings(&close_win_x),
+        close_win_y  = json_floats(&close_win_y),
+        close_win_text = json_strings(&close_win_text),
+        close_loss_x = json_strings(&close_loss_x),
+        close_loss_y = json_floats(&close_loss_y),
+        close_loss_text = json_strings(&close_loss_text),
+        trade_lines = trade_lines,
     );
 
     let mut f = File::create(path).with_context(|| format!("creating {path}"))?;

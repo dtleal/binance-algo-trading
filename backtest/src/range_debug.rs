@@ -39,6 +39,7 @@ pub enum TradeEvent { Open, Close }
 
 #[derive(Debug, Clone)]
 pub struct TradeMark {
+    pub trade_id: u32,               // pareia Open com seu Close
     pub time: DateTime<Utc>,
     pub price: f64,
     pub side: Direction,
@@ -147,8 +148,9 @@ fn instrumented_range_run(
     let mut trades = Vec::new();
 
     // Estado da simulação
-    #[derive(Clone)] struct Pos { side: bool, entry: f64, tp: f64, sl: f64 }
+    #[derive(Clone)] struct Pos { id: u32, side: bool, entry: f64, tp: f64, sl: f64 }
     let mut positions: Vec<Pos> = Vec::new();
+    let mut next_trade_id: u32 = 1;
     let mut last_range_calc: usize = 0;
     let mut current_range: Option<(f64, f64, f64)> = None;  // (high, low, size)
 
@@ -197,6 +199,7 @@ fn instrumented_range_run(
                 let exit = if hit_tp { pos.tp } else { pos.sl };
                 let pnl = if pos.side { (exit - pos.entry) / pos.entry } else { (pos.entry - exit) / pos.entry };
                 trades.push(TradeMark {
+                    trade_id: pos.id,
                     time: c.open_time, price: exit,
                     side: if pos.side { Direction::Long } else { Direction::Short },
                     event: TradeEvent::Close,
@@ -232,8 +235,10 @@ fn instrumented_range_run(
                         };
                         let tp_inside = if is_long { tp <= rh } else { tp >= rl };
                         if tp_inside {
-                            positions.push(Pos { side: is_long, entry: price, tp, sl });
+                            let id = next_trade_id; next_trade_id += 1;
+                            positions.push(Pos { id, side: is_long, entry: price, tp, sl });
                             trades.push(TradeMark {
+                                trade_id: id,
                                 time: c.open_time, price,
                                 side: if is_long { Direction::Long } else { Direction::Short },
                                 event: TradeEvent::Open,
