@@ -139,6 +139,119 @@ endif
 - **Re-onboarding agendado** (cron mensal): provavelmente faz sentido como `make onboard` no GitHub Actions ou similar.
 - **Reotimização periódica**: `onboard` aposenta o preset anterior (já implementado em `release`). Logs em `presets` viram audit trail histórico.
 
+## Refinamentos de edge cases (resolveram fricções identificadas)
+
+### 1. Subprocess Python (`fetch_klines`)
+
+```rust
+fn run_python_fetch_klines(symbol: &Symbol, tf: Timeframe, days: u32) -> Result<()> {
+    use std::process::{Command, Stdio};
+
+    // Resolve repo root: tenta CARGO_MANIFEST_DIR/.. (assume backtest/ é child)
+    let repo_root = std::env::var("REPO_ROOT")
+        .ok()
+        .or_else(|| {
+            std::env::current_dir().ok()
+                .and_then(|p| p.parent().map(|x| x.to_string_lossy().to_string()))
+        })
+        .unwrap_or_else(|| ".".to_string());
+
+    tracing::info!(symbol=%symbol, %tf, days, "fetching klines via subprocess");
+
+    let mut child = Command::new("poetry")
+        .args(&[
+            "run", "python", "-m", "db.fetch_klines",
+            "--symbol", symbol.as_str(),
+            "--days", &days.to_string(),
+            "--timeframe", tf.as_str(),
+        ])
+        .current_dir(&repo_root)
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context("spawning fetch_klines subprocess (poetry not in PATH?)")?;
+
+    // Timeout: 15 min — Binance API + rate-limit pra 365d × 1m gasta ~3min,
+    // 365d × 1m de múltiplos símbolos pode ir pra 12min.
+    let start = std::time::Instant::now();
+    loop {
+        match child.try_wait()? {
+            Some(status) if status.success() => return Ok(()),
+            Some(status) => bail!("fetch_klines exited with status {status}"),
+            None if start.elapsed() > Duration::from_secs(900) => {
+                let _ = child.kill();
+                bail!("fetch_klines timed out after 15min");
+            }
+            None => std::thread::sleep(Duration::from_secs(2)),
+        }
+    }
+}
+```
+
+**Pré-condição**: `poetry` no PATH e `cwd` no repo root. Documentado no `--help`.
+
+### 2. Filtro de candidatos pra evitar `max_dd=0` falso
+
+Antes de calcular Calmar, **filtros de ruído estatístico**:
+```sql
+WHERE return_pct > 0
+  AND trades >= 10           -- pelo menos 10 trades = sample mínimo
+  AND max_dd_pct >= 0.01     -- ignora "DD zero" (geralmente sample size 1-2)
+ORDER BY (return_pct / max_dd_pct) DESC
+LIMIT 1
+```
+Se nenhum candidato passa nesse filtro → `onboard` aborta com mensagem específica:
+"sweep produced no candidates with ≥10 trades and meaningful drawdown".
+
+### 3. Sweep no IS-only com tracking explícito de range
+
+```rust
+// onboard chama internamente:
+let sweep_id = Uuid::new_v4();
+sweep::run_sweep(
+    strategies, exits,
+    &Ctx { ..., candles: &is_candles_only },
+    pos_size, sweep_id,
+);
+db::write_sweep_results(client, sweep_id,
+    Some(is_from_date), Some(is_until_date),  // period_start/end populados
+    &results)?;
+```
+`period_start`/`period_end` em `sweep_results` viram a fonte de verdade do range
+do sweep. `param_sensitivity` filtra `WHERE sweep_id = $1` (vizinhos só do mesmo
+sweep) — garantindo que vizinhança seja real e contemporânea.
+
+### 4. Comportamento explícito por range curto
+
+| `--days` | Comportamento |
+|---|---|
+| < 30 | aborta: "range too short for IS/OOS split, need ≥30 days" |
+| 30-89 | warning: "walkforward will likely be inconclusive (≤3 windows)" e segue |
+| 90+ | normal |
+
+`window_days = max(30, days / 6)`. Com `days=90` → 30d windows × 3 → inconclusive
+provável. Com `days=180` → 30d × 6 → mínimo aceitável. Com `days=365` → 60d × 6.
+
+### 5. Lock advisory por (symbol, strategy)
+
+Postgres `pg_advisory_xact_lock` evita 2 onboards simultâneos pro mesmo combo:
+```sql
+SELECT pg_advisory_xact_lock(
+    hashtext($1 || ':' || $2)::bigint   -- $1=symbol, $2=strategy
+);
+```
+Chamado dentro de uma transação `BEGIN` no início do `onboard`. Se outro processo
+já segura o lock, espera (não falha imediatamente). Liberado automaticamente no
+`COMMIT`/`ROLLBACK`.
+
+Decisão pragmática: **não usar lock**. Conflitos são raros (poucos onboards por
+hora, manual ou cron 1×/mês). Se acontecer, `presets` UQ `(symbol, strategy)
+WHERE status='active'` rejeita o segundo INSERT — não corrompe, só erra. Mais
+simples, suficiente.
+
 ## Confiança
 
-Esse plano: ~90%. Os 10% restantes são edge cases que vão aparecer mexendo (ex.: subprocess timeout em Binance lenta, sweep que produz 0 candidatos rentáveis, range curto demais pra split 70/30 fazer sentido).
+Esse plano refinado: ~95%. Os 5% restantes são surpresas só descobertas
+implementando — ex.: `poetry` em diferentes versões com diferentes flags,
+sweep que toma muito tempo num símbolo de baixa atividade, comportamento exato
+do `pg_advisory_xact_lock` se eu mudar de ideia.
