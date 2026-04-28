@@ -2,6 +2,66 @@
 
 Status: **planejado**. Tabelas (`overfit_tests`, `walkforward_runs`) já existem (migration 011). Falta o código que popula elas + gates no `release`.
 
+## Correções identificadas antes de implementar
+
+Revisão crítica achou 5 problemas no plano original:
+
+### 1. Migration 012 — `presets.overfit_test_id` deveria ser UUID
+Migration 011 criou `presets.overfit_test_id BIGINT`, mas `overfit_tests.test_uuid` é o que agrupa um teste (cada teste vira N rows, uma por check_type). BIGINT na presets não bate. **Migration 012** corrige:
+```sql
+ALTER TABLE presets DROP COLUMN overfit_test_id;
+ALTER TABLE presets ADD COLUMN overfit_test_uuid UUID;
+```
+`walkforward_id UUID` já está correto.
+
+### 2. Range strategy precisa de dispatch dedicado em `evaluate_combo`
+`detail::build_entries` falha para range (entry+exit acoplados). `evaluate_combo` precisa:
+```rust
+match strategy {
+    "range" => {
+        let atr = atr_wilder(candles, ATR_PERIOD);
+        let adx = adx_wilder(candles, ADX_PERIOD);
+        let atr_pct = compute_atr_pct(candles, &atr);
+        let p: RangeParams = serde_json::from_value(strategy_params.clone())?;
+        Ok(range::run_range_backtest(candles, &adx, &atr_pct, p.adx_thresh, ...))
+    }
+    other => {
+        // Path padrão: build_entries + evaluate per-entry
+        let entries = detail::build_entries(other, candles, days, &params_to_detail(strategy_params))?;
+        Ok(run_loop(entries, candles, exit_fn, pos_size))
+    }
+}
+```
+
+### 3. Outcome `inconclusive` não cabe em `passed BOOLEAN`
+Schema atual de `overfit_tests` tem `passed BOOLEAN NOT NULL`. Mas plano fala em retornar inconclusive (ex.: param sensitivity com <4 vizinhos disponíveis). **Migration 012** adiciona:
+```sql
+ALTER TABLE overfit_tests ADD COLUMN outcome TEXT NOT NULL DEFAULT 'pending'
+   CHECK (outcome IN ('pass', 'fail', 'inconclusive'));
+-- passed BOOLEAN fica como compat — true se outcome='pass', false caso contrário.
+-- Eventualmente DROP passed (migration futura).
+```
+
+### 4. Walkforward: janelas com 0 trades
+Se uma janela não gera trades, `return_pct = 0`, `max_dd = 0`. Regra:
+- **Excluir janelas vazias do denominador** do "% positivas".
+- Se >50% das janelas forem vazias → outcome `inconclusive` (estratégia não dispara nessa frequência).
+- Reportar contagem `(positive, negative, empty)` no summary JSONB.
+
+### 5. IS/OOS com IS negativo
+Se champion tem `is_return < 0`, ratio `oos/is` engana (números negativos bagunçam). Regra:
+- Se `is_return < 0` → outcome `fail` direto (candidato é ruim mesmo no IS, esquece OOS).
+- Se `is_return ≥ 0` → calcula ratio normalmente.
+
+## Recap
+
+Antes de codar:
+1. Migration 012 (3 mudanças: presets.overfit_test_uuid, overfit_tests.outcome, presets backfill).
+2. evaluate_combo dispatcher por strategy (range path separado).
+3. TestResult tem 3 estados, não 2.
+4. Walkforward conta janelas vazias separadamente.
+5. IS/OOS rejeita IS negativo direto.
+
 ## Conceitos
 
 ### Anti-overfit
