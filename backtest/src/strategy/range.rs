@@ -6,6 +6,8 @@
 //! Cada combinação de params produz um `MonolithicRun` que executa o backtest completo
 //! (entries + exits acoplados) e devolve `RunMetrics`.
 
+use std::sync::Arc;
+
 use crate::indicator::{atr_wilder, adx_wilder};
 use crate::types::*;
 
@@ -227,12 +229,14 @@ impl super::Strategy for RangeStrategy {
     fn name(&self) -> &'static str { "range" }
 
     fn build(&self, ctx: &Ctx<'_>) -> StrategyOutput {
-        // ATR e ADX precomputados uma vez (ATR%/close depende do close de cada candle)
+        // ATR e ADX precomputados uma vez. Wrap em Arc pra compartilhar entre os
+        // ~21k runs sem clonar (cada vetor tem ~50k f64s = 400KB; 21k clones
+        // estourariam memória — 18GB).
         let atr  = atr_wilder(ctx.candles, ATR_PERIOD);
-        let adx  = adx_wilder(ctx.candles, ADX_PERIOD);
-        let atr_pct: Vec<f64> = atr.iter().enumerate()
+        let adx  = Arc::new(adx_wilder(ctx.candles, ADX_PERIOD));
+        let atr_pct: Arc<Vec<f64>> = Arc::new(atr.iter().enumerate()
             .map(|(i, a)| if ctx.candles[i].close > 0.0 { a / ctx.candles[i].close * 100.0 } else { 0.0 })
-            .collect();
+            .collect());
 
         let mut runs = Vec::new();
         for &adx_t in &self.grid.adx_thresh {
@@ -258,15 +262,15 @@ impl super::Strategy for RangeStrategy {
                                                 "max_orders": mo,
                                                 "pos_size": ps,
                                             });
-                                            // Fecha sobre os params; cada run executa independente.
-                                            let adx_clone = adx.clone();
-                                            let atr_pct_clone = atr_pct.clone();
+                                            // Arc::clone só bumpa refcount, não duplica os dados.
+                                            let adx_arc = Arc::clone(&adx);
+                                            let atr_pct_arc = Arc::clone(&atr_pct);
                                             runs.push(MonolithicRun {
                                                 label,
                                                 strategy_params: params,
                                                 execute: Box::new(move |candles| {
                                                     run_range_backtest(
-                                                        candles, &adx_clone, &atr_pct_clone,
+                                                        candles, &adx_arc, &atr_pct_arc,
                                                         adx_t, atr_t, lb, zp, tp, sl, rt, mo, ps,
                                                     )
                                                 }),
