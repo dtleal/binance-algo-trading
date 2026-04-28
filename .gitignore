@@ -24,6 +24,9 @@ infra/ansible/*.retry
 target/
 backtest/target/
 
+# Generated plots (HTML charts from detail / range-debug)
+plots/
+
 # Redis
 dump.rdb
 

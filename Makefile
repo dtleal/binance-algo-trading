@@ -591,7 +591,8 @@ else
 	TF="$(or $(TIMEFRAME),5m)"; \
 	STRAT="$(or $(STRATEGY),vwap_pullback)"; \
 	EXIT="$(or $(EXIT),fixed_tp_sl)"; \
-	OUT="$(or $(OUTPUT),/tmp/$${SYMBOL_UPPER}_$${TF}_$${STRAT}_detail.html)"; \
+	OUT="$(or $(OUTPUT),plots/$${SYMBOL_UPPER}_$${TF}_$${STRAT}_detail.html)"; \
+	mkdir -p plots; \
 	ARGS=""; \
 	[ -n "$(FROM)" ]               && ARGS="$$ARGS --from $(FROM)"; \
 	[ -n "$(UNTIL)" ]              && ARGS="$$ARGS --until $(UNTIL)"; \

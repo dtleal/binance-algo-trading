@@ -50,7 +50,7 @@ struct RangeDebugArgs {
     /// JSON dos params Range. Ex: '{"adx_thresh":20,...}'
     #[arg(long)] params: Option<String>,
     #[arg(long, default_value_t = 0.10)] pos_size: f64,
-    #[arg(long, default_value = "/tmp/range_debug.html")] output: String,
+    #[arg(long, default_value = "plots/range_debug.html")] output: String,
 }
 
 #[derive(clap::Args, Debug)]
@@ -166,7 +166,7 @@ struct DetailArgs {
     #[arg(long, default_value_t = 0.10)] pos_size: f64,
 
     /// Path do HTML de output. Vazio para pular geração.
-    #[arg(long, default_value = "backtest_detail.html")] output: String,
+    #[arg(long, default_value = "plots/backtest_detail.html")] output: String,
     #[arg(long)] no_chart: bool,
 }
 

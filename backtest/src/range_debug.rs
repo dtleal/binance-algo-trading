@@ -161,9 +161,19 @@ fn instrumented_range_run(
     let sl_range_pct      = g("sl_range_pct")?.as_f64().ok_or_else(|| anyhow!("sl_range_pct"))?;
     let recent_thresh_pct = g("recent_thresh_pct")?.as_f64().ok_or_else(|| anyhow!("recent_thresh_pct"))?;
     let max_orders        = g("max_orders")?.as_u64().ok_or_else(|| anyhow!("max_orders"))? as usize;
-    // Defaults MQL5 alignment
     let close_at_opposite = p.get("close_at_opposite").and_then(|v| v.as_bool()).unwrap_or(true);
     let close_on_break    = p.get("close_on_range_break").and_then(|v| v.as_bool()).unwrap_or(false);
+    // Detection mode (default Indicator = MQL5; opt-in Geometric ou Visual)
+    let mode_str = p.get("detection_mode").and_then(|v| v.as_str()).unwrap_or("indicator");
+    let geometric_mode = mode_str == "geometric";
+    let visual_mode    = mode_str == "visual";
+    let touch_thr_pct   = p.get("touch_threshold_pct").and_then(|v| v.as_f64()).unwrap_or(15.0);
+    let min_touches     = p.get("min_touches_each_side").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
+    let max_size_pct    = p.get("max_size_pct").and_then(|v| v.as_f64()).unwrap_or(2.0);
+    let confirmation_candles = p.get("confirmation_candles").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+    let break_candles        = p.get("break_candles").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+    let tolerance_pct        = p.get("tolerance_pct").and_then(|v| v.as_f64()).unwrap_or(5.0);
+    let _ = (close_at_opposite, close_on_break);  // não usados no debug (já existia)
 
     let n = candles.len();
     let atr = atr_wilder(candles, ATR_PERIOD);
@@ -194,6 +204,9 @@ fn instrumented_range_run(
     let mut last_range_calc: usize = 0;
     let mut current_range: Option<(f64, f64, f64)> = None;  // (high, low, size)
     let mut was_in_range: bool = false;
+    // State machine do modo Visual
+    let closes: Vec<f64> = candles.iter().map(|c| c.close).collect();
+    let mut visual_state: Option<crate::strategy::range::VisualRangeState> = None;
 
     for i in 0..n {
         let c = &candles[i];
@@ -209,26 +222,49 @@ fn instrumented_range_run(
             continue;
         }
 
-        if i - last_range_calc >= RANGE_THROTTLE || current_range.is_none() {
+        if visual_mode {
+            // State machine: avança 1 passo
+            let (new_state, active_range) = crate::strategy::range::visual_step(
+                visual_state, &highs, &lows, &closes, i,
+                confirmation_candles, break_candles, tolerance_pct,
+                touch_thr_pct, min_touches, max_size_pct, range_lookback,
+            );
+            visual_state = new_state;
+            current_range = active_range.map(|r| (r.high, r.low, r.size));
+        } else if i - last_range_calc >= RANGE_THROTTLE || current_range.is_none() {
             let start = i - range_lookback;
             let h = highs[start..i].iter().fold(f64::NEG_INFINITY, |a,b| a.max(*b));
             let l = lows [start..i].iter().fold(f64::INFINITY,     |a,b| a.min(*b));
             let s = h - l;
-            current_range = if s > 0.0 { Some((h, l, s)) } else { None };
+            current_range = if geometric_mode {
+                if s <= 0.0 || s / c.close * 100.0 > max_size_pct {
+                    None
+                } else {
+                    let touch_dist = s * touch_thr_pct / 100.0;
+                    let touches_top = highs[start..i].iter().filter(|&&x| x >= h - touch_dist).count();
+                    let touches_bot = lows [start..i].iter().filter(|&&x| x <= l + touch_dist).count();
+                    if touches_top >= min_touches && touches_bot >= min_touches {
+                        Some((h, l, s))
+                    } else { None }
+                }
+            } else if s > 0.0 { Some((h, l, s)) } else { None };
             last_range_calc = i;
         }
 
-        // MTF check
-        let mtf_ok = match (&mtf_adx_vec, &mtf_idx_map) {
-            (Some(madx), Some(map)) => map.get(i).copied().flatten()
-                .map(|idx| madx.get(idx).copied().unwrap_or(f64::INFINITY) <= adx_thresh)
-                .unwrap_or(false),
-            _ => true,
-        };
-
-        let in_range = match current_range {
-            Some((_, _, s)) => adx[i] <= adx_thresh && atr_pct[i] <= atr_pct_thresh && s > 0.0 && mtf_ok,
-            None => false,
+        // in_range: indicator mode usa filtros ADX/ATR + MTF; geometric/visual só checa range existe
+        let in_range = if geometric_mode || visual_mode {
+            current_range.is_some()
+        } else {
+            let mtf_ok = match (&mtf_adx_vec, &mtf_idx_map) {
+                (Some(madx), Some(map)) => map.get(i).copied().flatten()
+                    .map(|idx| madx.get(idx).copied().unwrap_or(f64::INFINITY) <= adx_thresh)
+                    .unwrap_or(false),
+                _ => true,
+            };
+            match current_range {
+                Some((_, _, s)) => adx[i] <= adx_thresh && atr_pct[i] <= atr_pct_thresh && s > 0.0 && mtf_ok,
+                None => false,
+            }
         };
 
         if let Some((h, l, _)) = current_range {
@@ -340,32 +376,39 @@ fn instrumented_range_run(
     Ok((snapshots, trades))
 }
 
-/// Agrupa snapshots in_range consecutivos com MESMO range em LateralRegions.
+/// Agrupa snapshots in_range consecutivos em LateralRegions.
+/// **Bounds (range_high/range_low) são recalculados como max/min dos candles
+/// ATIVOS dentro da região**, evitando bounds "presos" no warmup pre-day.
 fn group_regions(snapshots: &[CandleSnapshot]) -> Vec<LateralRegion> {
     let mut regions = Vec::new();
-    let mut current: Option<(DateTime<Utc>, DateTime<Utc>, f64, f64)> = None;
-    for s in snapshots {
+    // Acumula índices dos snapshots ativos pra cada região
+    let mut current_start_idx: Option<usize> = None;
+    for (idx, s) in snapshots.iter().enumerate() {
         if s.in_range {
-            if let (Some(h), Some(l)) = (s.range_high, s.range_low) {
-                match current {
-                    Some((start, _last_t, ch, cl)) if (ch - h).abs() < 1e-9 && (cl - l).abs() < 1e-9 => {
-                        current = Some((start, s.time, ch, cl));
-                    }
-                    Some((start, last_t, ch, cl)) => {
-                        regions.push(LateralRegion { start_time: start, end_time: last_t, range_high: ch, range_low: cl });
-                        current = Some((s.time, s.time, h, l));
-                    }
-                    None => current = Some((s.time, s.time, h, l)),
-                }
+            if current_start_idx.is_none() {
+                current_start_idx = Some(idx);
             }
-        } else if let Some((start, last_t, h, l)) = current.take() {
-            regions.push(LateralRegion { start_time: start, end_time: last_t, range_high: h, range_low: l });
+        } else if let Some(start) = current_start_idx.take() {
+            // Região termina em idx-1
+            push_region(&mut regions, snapshots, start, idx - 1);
         }
     }
-    if let Some((start, last_t, h, l)) = current {
-        regions.push(LateralRegion { start_time: start, end_time: last_t, range_high: h, range_low: l });
+    if let Some(start) = current_start_idx {
+        push_region(&mut regions, snapshots, start, snapshots.len() - 1);
     }
     regions
+}
+
+fn push_region(regions: &mut Vec<LateralRegion>, snapshots: &[CandleSnapshot], start: usize, end: usize) {
+    let slice = &snapshots[start..=end];
+    let high = slice.iter().map(|s| s.high).fold(f64::NEG_INFINITY, f64::max);
+    let low  = slice.iter().map(|s| s.low ).fold(f64::INFINITY,     f64::min);
+    regions.push(LateralRegion {
+        start_time: slice[0].time,
+        end_time:   slice[slice.len()-1].time,
+        range_high: high,
+        range_low:  low,
+    });
 }
 
 /// Escolhe o dia com mais candles in_range (mais didático pra visualizar).
