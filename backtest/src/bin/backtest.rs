@@ -238,13 +238,52 @@ fn run_range_debug_cmd(args: RangeDebugArgs) -> Result<()> {
 
     let day = range_debug::run_range_debug(&mut client, &symbol, timeframe, target_date, &params, args.pos_size)?;
 
-    println!("Date:   {}", day.date);
-    println!("Candles:{}  Regions:{}  Trades:{} (opens) / {} (closes)",
-        day.snapshots.len(), day.regions.len(),
-        day.trades.iter().filter(|t| matches!(t.event, range_debug::TradeEvent::Open)).count(),
-        day.trades.iter().filter(|t| matches!(t.event, range_debug::TradeEvent::Close)).count());
+    println!("Date:    {}", day.date);
+    let opens  = day.trades.iter().filter(|t| matches!(t.event, range_debug::TradeEvent::Open )).count();
+    let closes = day.trades.iter().filter(|t| matches!(t.event, range_debug::TradeEvent::Close)).count();
+    println!("Candles: {}  Regions: {}  Trades: {} opens / {} closes",
+        day.snapshots.len(), day.regions.len(), opens, closes);
+
+    // Resumo de PnL (assumindo qty_pct=pos_size, fees 0.04% × 2)
+    let fee_total = 0.0004 * 2.0 * 100.0;   // 0.08%
+    let wins:  Vec<f64> = day.trades.iter()
+        .filter_map(|t| match t.event { range_debug::TradeEvent::Close => t.pnl_pct, _ => None })
+        .filter(|p| *p > 0.0).collect();
+    let losses: Vec<f64> = day.trades.iter()
+        .filter_map(|t| match t.event { range_debug::TradeEvent::Close => t.pnl_pct, _ => None })
+        .filter(|p| *p <= 0.0).collect();
+    let gross_sum: f64 = wins.iter().chain(losses.iter()).sum();
+    let net_sum_per_trade = gross_sum - fee_total * (closes as f64);
+    let win_rate = if closes > 0 { 100.0 * wins.len() as f64 / closes as f64 } else { 0.0 };
+    let avg_win = if !wins.is_empty()   { wins.iter().sum::<f64>() / wins.len() as f64   } else { 0.0 };
+    let avg_loss= if !losses.is_empty() { losses.iter().sum::<f64>() / losses.len() as f64 } else { 0.0 };
+
+    // PnL no capital (chain compounded com pos_size)
+    let mut capital = 1.0_f64;
+    for t in &day.trades {
+        if let range_debug::TradeEvent::Close = t.event {
+            if let Some(p) = t.pnl_pct {
+                let net_pct = (p - fee_total) / 100.0;
+                capital *= 1.0 + args.pos_size * net_pct;
+            }
+        }
+    }
+    let chained_return_pct = (capital - 1.0) * 100.0;
+
+    println!();
+    println!("─── Daily PnL summary ───────────────────────────────────────");
+    println!("  Wins:        {:>3}  ({:>5.1}%)", wins.len(), win_rate);
+    println!("  Losses:      {:>3}", losses.len());
+    println!("  Avg win:     {:>+6.3}%", avg_win);
+    println!("  Avg loss:    {:>+6.3}%", avg_loss);
+    println!("  Σ gross:     {:>+6.3}% (sum por-trade, sem fees)", gross_sum);
+    println!("  Σ net:       {:>+6.3}% (sum por-trade, descontando fees 0.08% × {} closes)",
+        net_sum_per_trade, closes);
+    println!("  Compounded:  {:>+6.3}% (capital final / inicial, pos_size={:.0}%)",
+        chained_return_pct, args.pos_size * 100.0);
 
     chart::write_range_debug_html(&args.output, &day)?;
+    println!();
     println!("HTML: {}", args.output);
     Ok(())
 }
