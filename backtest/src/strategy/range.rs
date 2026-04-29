@@ -19,10 +19,10 @@ const ATR_PERIOD: usize = 14;
 const OPPOSITE_EXTREME_MARGIN_PCT: f64 = 5.0;   // 5% do range — match MQL5
 
 #[derive(Clone, Copy)]
-pub struct Range {
-    pub high: f64,
-    pub low:  f64,
-    pub size: f64,
+struct Range {
+    high: f64,
+    low:  f64,
+    size: f64,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -47,110 +47,6 @@ fn detect_range(highs: &[f64], lows: &[f64], end_idx: usize, lookback: usize) ->
     Some(Range { high, low, size })
 }
 
-/// State machine do modo Visual. Avança 1 candle, retorna (estado novo, range ativo).
-/// Estado None = NoRange. Some(s) com confirmed=false = Forming. Some(s) com confirmed=true = Active.
-#[allow(clippy::too_many_arguments)]
-pub fn visual_step(
-    state: Option<VisualRangeState>,
-    highs: &[f64], lows: &[f64], closes: &[f64], i: usize,
-    confirmation_candles: usize, break_candles: usize,
-    tolerance_pct: f64, touch_threshold_pct: f64,
-    min_touches_each_side: usize, max_size_pct: f64, lookback: usize,
-) -> (Option<VisualRangeState>, Option<Range>) {
-    let high_i = highs[i]; let low_i = lows[i]; let close_i = closes[i];
-
-    match state {
-        None => {
-            // Detecta candidato baseado em lookback passado (filtro: parece range?).
-            // Mas RESETA bounds pro candle atual — bounds expandem apenas com candles
-            // posteriores, evitando "rectangle preso em preços antigos".
-            let candidate = detect_geometric_range(
-                highs, lows, i + 1, lookback,
-                touch_threshold_pct, min_touches_each_side, max_size_pct, close_i,
-            );
-            match candidate {
-                Some(_) => (Some(VisualRangeState {
-                    high: high_i, low: low_i,                  // expansivo (visual)
-                    anchor_high: high_i, anchor_low: low_i,    // fixo (tolerance)
-                    confirmed: false,
-                    candles_inside: 1, candles_broken: 0,
-                }), None),
-                None => (None, None),
-            }
-        }
-        Some(mut s) => {
-            // Tolerance é % do RANGE SIZE (não do preço). Banda é anchor ± tolerance*size.
-            // Ex: anchor=[77800,78000] (size $200), tolerance_pct=25 → banda [77750,78050].
-            let anchor_size = (s.anchor_high - s.anchor_low).max(1.0);
-            let cushion = anchor_size * tolerance_pct / 100.0;
-            let band_high = s.anchor_high + cushion;
-            let band_low  = s.anchor_low  - cushion;
-            let in_band = high_i <= band_high && low_i >= band_low;
-
-            if !s.confirmed {
-                // Forming: expande bounds com candles que entram, conta confirmação
-                if in_band {
-                    if high_i > s.high { s.high = high_i; }
-                    if low_i  < s.low  { s.low  = low_i; }
-                    s.candles_inside += 1;
-                    if s.candles_inside >= confirmation_candles {
-                        s.confirmed = true;
-                    }
-                    let r = if s.confirmed { Some(Range { high: s.high, low: s.low, size: s.high - s.low }) } else { None };
-                    (Some(s), r)
-                } else {
-                    (None, None)
-                }
-            } else {
-                // Active
-                if in_band {
-                    if high_i > s.high { s.high = high_i; }
-                    if low_i  < s.low  { s.low  = low_i; }
-                    s.candles_broken = 0;
-                } else {
-                    s.candles_broken += 1;
-                }
-                if s.candles_broken >= break_candles {
-                    (None, None)   // Broken
-                } else {
-                    (Some(s), Some(Range { high: s.high, low: s.low, size: s.high - s.low }))
-                }
-            }
-        }
-    }
-}
-
-/// Geometric range detection — alinha com percepção visual (touches dos extremos).
-/// Substitui filtros ADX/ATR.
-#[allow(clippy::too_many_arguments)]
-pub fn detect_geometric_range(
-    highs: &[f64], lows: &[f64], end_idx: usize,
-    lookback: usize,
-    touch_threshold_pct: f64,    // ex: 15 = 15% do range_size
-    min_touches_each_side: usize, // ex: 2
-    max_size_pct: f64,            // ex: 2 = range_size ≤ 2% do preço
-    current_price: f64,
-) -> Option<Range> {
-    if end_idx < lookback { return None; }
-    let start = end_idx - lookback;
-    let high = highs[start..end_idx].iter().fold(f64::NEG_INFINITY, |a, b| a.max(*b));
-    let low  = lows [start..end_idx].iter().fold(f64::INFINITY,     |a, b| a.min(*b));
-    let size = high - low;
-    if size <= 0.0 { return None; }
-    // Filtro: range tight (size / preço atual ≤ max_size_pct)
-    if size / current_price * 100.0 > max_size_pct { return None; }
-    // Touches
-    let touch_dist = size * touch_threshold_pct / 100.0;
-    let top_zone = high - touch_dist;
-    let bot_zone = low  + touch_dist;
-    let touches_top = highs[start..end_idx].iter().filter(|&&x| x >= top_zone).count();
-    let touches_bot = lows [start..end_idx].iter().filter(|&&x| x <= bot_zone).count();
-    if touches_top < min_touches_each_side || touches_bot < min_touches_each_side {
-        return None;
-    }
-    Some(Range { high, low, size })
-}
-
 fn price_zone(price: f64, range: &Range, zone_pct: f64) -> Zone {
     let zone_height = range.size * zone_pct / 100.0;
     if price <= range.low + zone_height  { return Zone::Buy;  }
@@ -167,46 +63,13 @@ pub fn build_mtf_idx_map(base: &[Candle], mtf: &[Candle]) -> Vec<Option<usize>> 
     }).collect()
 }
 
-/// Modo de detecção do range.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum DetectionMode {
-    /// MQL5-aligned: ADX(14) + ATR%(14) thresholds + MTF.
-    Indicator,
-    /// Geometric: range size, touches dos extremos. Sem ADX/ATR.
-    Geometric { touch_threshold_pct: f64, min_touches_each_side: usize, max_size_pct: f64 },
-    /// Visual: state machine — confirma range após N candles dentro, persiste
-    /// enquanto preço respeitar tolerance, quebra após M closes fora.
-    /// Match visão humana: 1 macro-region por consolidação, tolera spikes.
-    Visual {
-        confirmation_candles: usize,    // N candles forming antes de Active (ex: 5)
-        break_candles: usize,            // M closes fora antes de Broken (ex: 3)
-        tolerance_pct: f64,              // % além das bordas que conta como "dentro" (ex: 5)
-        touch_threshold_pct: f64,        // pra detecção inicial (ex: 15)
-        min_touches_each_side: usize,    // pra detecção inicial (ex: 3)
-        max_size_pct: f64,               // ex: 5
-    },
-}
-
-/// Estado do range no modo Visual (state machine).
-/// `anchor_*` é fixo (pra tolerância do break); `high/low` expandem (pra visualização).
-#[derive(Clone, Copy, Debug)]
-pub struct VisualRangeState {
-    pub high: f64,           // expansivo (max visto)
-    pub low:  f64,           // expansivo (min visto)
-    pub anchor_high: f64,    // fixo no início (tolerance check)
-    pub anchor_low:  f64,    // fixo no início
-    pub confirmed: bool,
-    pub candles_inside: usize,
-    pub candles_broken: usize,
-}
-
 #[allow(clippy::too_many_arguments)]
 pub fn run_range_backtest(
     candles: &[Candle],
     adx: &[f64],
     atr_pct: &[f64],
-    mtf_adx: Option<&[f64]>,
-    mtf_idx_map: Option<&[Option<usize>]>,
+    mtf_adx: Option<&[f64]>,                // None = MTF disabled
+    mtf_idx_map: Option<&[Option<usize>]>,  // None = MTF disabled
     adx_thresh:        f64,
     atr_pct_thresh:    f64,
     range_lookback:    usize,
@@ -216,9 +79,8 @@ pub fn run_range_backtest(
     recent_thresh_pct: f64,
     max_orders:        usize,
     pos_size_pct:      f64,
-    close_at_opposite: bool,
-    close_on_break:    bool,
-    detection_mode:    DetectionMode,       // novo
+    close_at_opposite: bool,                // default true (MQL5)
+    close_on_break:    bool,                // default true (MQL5)
 ) -> RunMetrics {
     let n = candles.len();
     let min_history = range_lookback + ADX_PERIOD * 3;
@@ -246,35 +108,22 @@ pub fn run_range_backtest(
         let c = &candles[i];
 
         if i - last_range_calc >= RANGE_THROTTLE || current_range.is_none() {
-            current_range = match detection_mode {
-                DetectionMode::Indicator => detect_range(&highs, &lows, i, range_lookback),
-                DetectionMode::Geometric { touch_threshold_pct, min_touches_each_side, max_size_pct } =>
-                    detect_geometric_range(
-                        &highs, &lows, i, range_lookback,
-                        touch_threshold_pct, min_touches_each_side, max_size_pct,
-                        c.close,
-                    ),
-                DetectionMode::Visual { .. } => detect_range(&highs, &lows, i, range_lookback),
-                // Nota: Visual em sweep não está implementado ainda (só em range-debug).
-                // Cai pro classic detect_range. Pra Visual no sweep, precisa state machine.
-            };
+            current_range = detect_range(&highs, &lows, i, range_lookback);
             last_range_calc = i;
         }
 
-        // in_range depende do modo
-        let in_range = match (detection_mode, &current_range) {
-            (DetectionMode::Indicator, Some(r)) => {
-                let mtf_ok = match (mtf_adx, mtf_idx_map) {
-                    (Some(madx), Some(map)) => map.get(i).copied().flatten()
-                        .map(|idx| madx.get(idx).copied().unwrap_or(f64::INFINITY) <= adx_thresh)
-                        .unwrap_or(false),
-                    _ => true,
-                };
-                adx[i] <= adx_thresh && atr_pct[i] <= atr_pct_thresh && r.size > 0.0 && mtf_ok
-            }
-            (DetectionMode::Geometric { .. }, Some(r)) => r.size > 0.0,
-            (DetectionMode::Visual { .. }, Some(r)) => r.size > 0.0,  // simplificado
-            (_, None) => false,
+        // MTF check: se enabled, só está in_range se MTF ADX também estiver baixo
+        let mtf_ok = match (mtf_adx, mtf_idx_map) {
+            (Some(madx), Some(map)) => map.get(i).copied().flatten()
+                .map(|idx| madx.get(idx).copied().unwrap_or(f64::INFINITY) <= adx_thresh)
+                .unwrap_or(false),  // sem MTF candle fechado ainda → bloqueia
+            _ => true,              // MTF disabled
+        };
+
+        let in_range = if let Some(ref r) = current_range {
+            adx[i] <= adx_thresh && atr_pct[i] <= atr_pct_thresh && r.size > 0.0 && mtf_ok
+        } else {
+            false
         };
 
         // CloseOnRangeBreak: transição in_range → !in_range fecha tudo no close atual
@@ -482,22 +331,22 @@ impl super::Strategy for RangeStrategy {
                                                 "adx={adx_t:.1} atr={atr_t:.2} lb={lb} zone={zp:.1} tp={tp:.1} sl={sl:.1} recent={rt:.1} max_orders={mo} pos={ps:.2}"
                                             );
                                             let mtf_enabled = mtf_adx_arc.is_some();
-                                            let params = serde_json::json!({
-                                                "adx_thresh": adx_t,
-                                                "atr_pct_thresh": atr_t,
-                                                "range_lookback": lb,
-                                                "zone_pct": zp,
-                                                "tp_range_pct": tp,
-                                                "sl_range_pct": sl,
-                                                "recent_thresh_pct": rt,
-                                                "max_orders": mo,
-                                                "pos_size": ps,
-                                                // MQL5 alignment defaults (fixos, não expandidos no grid)
-                                                "mtf_enabled": mtf_enabled,
-                                                "mtf_timeframe": "15m",
-                                                "close_at_opposite": true,
-                                                "close_on_range_break": false,    // match MQL5 default
-                                            });
+                                            let params = StrategyParamsRow {
+                                                adx_thresh:           Some(adx_t),
+                                                atr_pct_thresh:       Some(atr_t),
+                                                range_lookback:       Some(lb as i32),
+                                                zone_pct:             Some(zp),
+                                                tp_range_pct:         Some(tp),
+                                                sl_range_pct:         Some(sl),
+                                                recent_thresh_pct:    Some(rt),
+                                                max_orders:           Some(mo as i32),
+                                                pos_size:             Some(ps),
+                                                mtf_enabled:          Some(mtf_enabled),
+                                                mtf_timeframe:        Some("15m".to_string()),
+                                                close_at_opposite:    Some(true),
+                                                close_on_range_break: Some(false),
+                                                ..Default::default()
+                                            };
                                             // Arc::clone só bumpa refcount, não duplica os dados.
                                             let adx_arc      = Arc::clone(&adx);
                                             let atr_pct_arc  = Arc::clone(&atr_pct);
@@ -514,7 +363,6 @@ impl super::Strategy for RangeStrategy {
                                                         adx_t, atr_t, lb, zp, tp, sl, rt, mo, ps,
                                                         true,    // close_at_opposite default ON
                                                         false,   // close_on_break default OFF (match MQL5)
-                                                        DetectionMode::Indicator,  // default MQL5
                                                     )
                                                 }),
                                             });
