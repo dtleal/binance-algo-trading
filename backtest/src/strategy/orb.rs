@@ -93,10 +93,11 @@ impl super::Strategy for Orb {
             for &buf in &self.grid.buffer_pct {
                 let entries = find_entries_orb(ctx.candles, ctx.days, rm, buf);
                 let label = format!("range_mins={rm} buffer_pct={buf:.4}");
-                let params = serde_json::json!({
-                    "range_mins": rm,
-                    "buffer_pct": buf,
-                });
+                let params = StrategyParamsRow {
+                    range_mins: Some(rm as i32),
+                    buffer_pct: Some(buf),
+                    ..Default::default()
+                };
                 sets.push(EntrySet {
                     strategy_label: label,
                     strategy_params: params,

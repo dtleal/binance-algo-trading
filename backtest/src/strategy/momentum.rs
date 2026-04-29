@@ -210,17 +210,18 @@ impl super::Strategy for Momentum {
                                         let label = format!(
                                             "kind={kind_name} min_bars={mb} vol_filter={vf} confirm_bars={cb} trend_filter={tf} window={es}-{ec} vwap_prox={vp:.4} vwap_window={vw}d"
                                         );
-                                        let params = serde_json::json!({
-                                            "kind": kind_name,
-                                            "min_bars": mb,
-                                            "vol_filter": vf,
-                                            "confirm_bars": cb,
-                                            "trend_filter": tf,
-                                            "entry_start_min": es,
-                                            "entry_cutoff_min": ec,
-                                            "vwap_prox": vp,
-                                            "vwap_window_days": vw,
-                                        });
+                                        let params = StrategyParamsRow {
+                                            kind:               Some(kind_name.to_string()),
+                                            min_bars:           Some(mb as i32),
+                                            vol_filter:         Some(vf),
+                                            confirm_bars:       Some(cb as i32),
+                                            trend_filter:       Some(tf),
+                                            entry_window_start: Some(es as i32),
+                                            entry_window_end:   Some(ec as i32),
+                                            vwap_prox:          Some(vp),
+                                            vwap_window_days:   Some(vw as i32),
+                                            ..Default::default()
+                                        };
                                         sets.push(EntrySet {
                                             strategy_label: label,
                                             strategy_params: params,

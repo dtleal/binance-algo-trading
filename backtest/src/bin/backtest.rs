@@ -218,12 +218,16 @@ fn run_range_debug_cmd(args: RangeDebugArgs) -> Result<()> {
     // Resolve params
     let params: serde_json::Value = match (args.sweep_result_id, args.params.as_deref()) {
         (Some(id), _) => {
-            let row = client.query_one(
-                "SELECT strategy_params FROM sweep_results WHERE id=$1 AND strategy='range'",
-                &[&id],
-            ).with_context(|| format!("sweep_result {id} not found or not range"))?;
-            row.get::<_, Option<serde_json::Value>>(0)
-                .ok_or_else(|| anyhow::anyhow!("sweep_result {id} has NULL strategy_params"))?
+            use backtest::params_row::{
+                strategy_params_from_row, strategy_params_to_value,
+                SELECT_STRATEGY_PARAMS_COLS,
+            };
+            let sql = format!(
+                "SELECT {SELECT_STRATEGY_PARAMS_COLS} FROM sweep_results WHERE id=$1 AND strategy='range'"
+            );
+            let row = client.query_one(sql.as_str(), &[&id])
+                .with_context(|| format!("sweep_result {id} not found or not range"))?;
+            strategy_params_to_value(&strategy_params_from_row(&row))
         }
         (None, Some(json)) => serde_json::from_str(json).context("invalid --params JSON")?,
         (None, None) => {

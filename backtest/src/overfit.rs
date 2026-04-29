@@ -55,83 +55,120 @@ impl Default for ParamSensitivityConfig {
 }
 
 /// Procura no `sweep_results` combos vizinhos do champion (mesma strategy/exit,
-/// todos os params iguais menos um). Compara return_pct.
+/// todos os params numéricos iguais menos um). Compara return_pct.
 pub fn check_param_sensitivity(
     client: &mut Client,
     input: &OverfitInput,
     cfg: &ParamSensitivityConfig,
     test_uuid: Uuid,
 ) -> Result<CheckResult> {
-    // 1. Pega return_pct do champion
-    let champ = client.query_opt(
-        "SELECT return_pct FROM sweep_results
-         WHERE symbol=$1 AND timeframe=$2 AND strategy=$3 AND exit_name=$4
-           AND strategy_params = $5 AND exit_params = $6
+    use crate::params_row::{numeric_strategy_param_cols, numeric_exit_param_cols};
+    use rust_decimal::Decimal;
+    use rust_decimal::prelude::FromPrimitive;
+    use postgres::types::ToSql;
+
+    // Helper: extract champion numeric value from input Value object
+    let extract_dec = |v: &Value, key: &str| -> Option<Decimal> {
+        v.get(key)
+            .and_then(|x| x.as_f64())
+            .and_then(Decimal::from_f64)
+    };
+
+    let strategy_cols = numeric_strategy_param_cols(&input.strategy);
+    let exit_cols     = numeric_exit_param_cols(&input.exit_name);
+
+    // 1. return_pct do champion: encontra row exata cruzando todos os numéricos.
+    //    Se não encontrar, marca inconclusive.
+    let exit_name_opt = Some(input.exit_name.clone());
+
+    // Pré-materializa todos os valores Decimal do champion (lifetime estende ao loop).
+    let s_vals: Vec<(&str, Decimal)> = strategy_cols.iter()
+        .filter_map(|c| extract_dec(&input.strategy_params, c).map(|d| (*c, d)))
+        .collect();
+    let e_vals: Vec<(&str, Decimal)> = exit_cols.iter()
+        .filter_map(|c| extract_dec(&input.exit_params, c).map(|d| (*c, d)))
+        .collect();
+
+    let symbol_str    = input.symbol.as_str();
+    let timeframe_str = input.timeframe.as_str();
+
+    let mut where_eq: Vec<String> = Vec::new();
+    let mut champ_params: Vec<&(dyn ToSql + Sync)> = vec![
+        &symbol_str, &timeframe_str, &input.strategy, &exit_name_opt,
+    ];
+    let mut idx = 5;
+    for (col, _) in &s_vals {
+        where_eq.push(format!("{col}::numeric = ${idx}::numeric"));
+        idx += 1;
+    }
+    for (col, _) in &e_vals {
+        where_eq.push(format!("{col}::numeric = ${idx}::numeric"));
+        idx += 1;
+    }
+    for (_, d) in &s_vals { champ_params.push(d); }
+    for (_, d) in &e_vals { champ_params.push(d); }
+
+    let champ_sql = format!(
+        "SELECT return_pct FROM sweep_results \
+         WHERE symbol=$1 AND timeframe=$2 AND strategy=$3 AND exit_name=$4{}{} \
          LIMIT 1",
-        &[
-            &input.symbol.as_str(), &input.timeframe.as_str(),
-            &input.strategy, &Some(input.exit_name.clone()),
-            &input.strategy_params, &Some(input.exit_params.clone()),
-        ],
-    )?;
-    let champ_return: rust_decimal::Decimal = match champ {
-        Some(r) => r.get::<_, Option<rust_decimal::Decimal>>(0).unwrap_or_default(),
+        if where_eq.is_empty() { "".to_string() } else { format!(" AND {}", where_eq.join(" AND ")) },
+        ""
+    );
+    let champ = client.query_opt(champ_sql.as_str(), &champ_params)?;
+    let champ_return: f64 = match champ {
+        Some(r) => {
+            let d: Option<Decimal> = r.get(0);
+            d.and_then(|v| v.try_into().ok()).unwrap_or(0.0)
+        }
         None => {
-            // Champion não está em sweep_results → não dá pra comparar com vizinhos
             let metrics = json!({"reason": "champion not found in sweep_results"});
             return persist(client, test_uuid, "param_sensitivity", input, Outcome::Inconclusive, &metrics);
         }
     };
-    let champ_return: f64 = champ_return.try_into().unwrap_or(0.0);
 
-    // 2. Coleta vizinhos: pra cada chave numérica dos strategy_params, busca
-    //    rows com mesma strategy/exit + mesmos outros params + mesmo exit_params,
-    //    diferindo só naquela chave.
+    // 2. Para cada coluna numérica de strategy: query vizinhos (target != champion, outros =).
     let mut neighbors: Vec<f64> = Vec::new();
     let mut tested_keys: Vec<String> = Vec::new();
 
-    if let Some(obj) = input.strategy_params.as_object() {
-        for (key, val) in obj {
-            // Só perturba numéricos
-            if !val.is_number() { continue; }
-            // Build params com TODAS as keys, marca a target como "diferente"
-            // SQL: strategy_params @> all_keys_except_target AND strategy_params->target != val
-            // Aproximação: comparar igualdade de todos os outros params
-            let mut other_pairs: Vec<(String, Value)> = obj.iter()
-                .filter(|(k, _)| k.as_str() != key)
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect();
-            // Constrói JSONB de "containment" pros outros params
-            let mut contain = serde_json::Map::new();
-            for (k, v) in &other_pairs { contain.insert(k.clone(), v.clone()); }
-            let contain_v = Value::Object(contain);
-
-            let rows = client.query(
-                "SELECT return_pct FROM sweep_results
-                 WHERE symbol=$1 AND timeframe=$2 AND strategy=$3 AND exit_name=$4
-                   AND exit_params = $5
-                   AND strategy_params @> $6
-                   AND (strategy_params -> $7) IS DISTINCT FROM $8::jsonb
-                   AND return_pct IS NOT NULL",
-                &[
-                    &input.symbol.as_str(), &input.timeframe.as_str(),
-                    &input.strategy, &Some(input.exit_name.clone()),
-                    &Some(input.exit_params.clone()),
-                    &contain_v,
-                    &key.as_str(),
-                    &val,
-                ],
-            )?;
-            // Coleta só os 2 mais próximos (1 acima, 1 abaixo) usando max/min
-            // de return_pct... na real coletamos todos e deixa median absorver.
-            for r in rows {
-                if let Some(d) = r.get::<_, Option<rust_decimal::Decimal>>(0) {
-                    let f: f64 = d.try_into().unwrap_or(0.0);
-                    neighbors.push(f);
-                }
+    for (target_col, target_val) in &s_vals {
+        // WHERE: strategy + exit cols all equal champion EXCEPT target_col which is different.
+        let mut clauses: Vec<String> = Vec::new();
+        let mut params: Vec<&(dyn ToSql + Sync)> = vec![
+            &symbol_str, &timeframe_str, &input.strategy, &exit_name_opt,
+        ];
+        let mut i = 5;
+        for (c, d) in &s_vals {
+            if c == target_col {
+                clauses.push(format!("{c}::numeric != ${i}::numeric"));
+            } else {
+                clauses.push(format!("{c}::numeric = ${i}::numeric"));
             }
-            tested_keys.push(key.clone());
+            params.push(d);
+            i += 1;
+            // unused warning suppression
+            let _ = target_val;
         }
+        for (c, d) in &e_vals {
+            clauses.push(format!("{c}::numeric = ${i}::numeric"));
+            params.push(d);
+            i += 1;
+        }
+        let sql = format!(
+            "SELECT return_pct FROM sweep_results \
+             WHERE symbol=$1 AND timeframe=$2 AND strategy=$3 AND exit_name=$4 \
+               AND {} AND return_pct IS NOT NULL",
+            clauses.join(" AND ")
+        );
+        let rows = client.query(sql.as_str(), &params)?;
+        for r in rows {
+            let d: Option<Decimal> = r.get(0);
+            if let Some(d) = d {
+                let f: f64 = d.try_into().unwrap_or(0.0);
+                neighbors.push(f);
+            }
+        }
+        tested_keys.push((*target_col).to_string());
     }
 
     let n = neighbors.len();
@@ -312,29 +349,36 @@ pub fn load_input_from_sweep_result(
     pos_size: f64,
 ) -> Result<(OverfitInput, Option<DateTime<Utc>>, Option<DateTime<Utc>>)> {
     use anyhow::anyhow;
-    let row = client.query_opt(
-        "SELECT symbol, timeframe, strategy, exit_name,
-                strategy_params, exit_params, period_start, period_end
-         FROM sweep_results WHERE id = $1",
-        &[&sweep_result_id],
-    )?
-    .ok_or_else(|| anyhow!("sweep_result {sweep_result_id} not found"))?;
+    use crate::params_row::{
+        strategy_params_from_row, exit_params_from_row,
+        strategy_params_to_value, exit_params_to_value,
+        SELECT_STRATEGY_PARAMS_COLS, SELECT_EXIT_PARAMS_COLS,
+    };
+    let sql = format!(
+        "SELECT symbol, timeframe, strategy, exit_name, period_start, period_end, \
+         {SELECT_STRATEGY_PARAMS_COLS}, {SELECT_EXIT_PARAMS_COLS} \
+         FROM sweep_results WHERE id = $1"
+    );
+    let row = client.query_opt(sql.as_str(), &[&sweep_result_id])?
+        .ok_or_else(|| anyhow!("sweep_result {sweep_result_id} not found"))?;
 
-    let symbol_s: String = row.get(0);
-    let tf_s:     String = row.get(1);
-    let strategy: String = row.get(2);
-    let exit_name: Option<String> = row.get(3);
-    let strategy_params: Option<Value> = row.get(4);
-    let exit_params:     Option<Value> = row.get(5);
-    let period_start: Option<chrono::NaiveDate> = row.get(6);
-    let period_end:   Option<chrono::NaiveDate> = row.get(7);
+    let symbol_s:  String = row.get("symbol");
+    let tf_s:      String = row.get("timeframe");
+    let strategy:  String = row.get("strategy");
+    let exit_name: Option<String> = row.get("exit_name");
+    let period_start: Option<chrono::NaiveDate> = row.get("period_start");
+    let period_end:   Option<chrono::NaiveDate> = row.get("period_end");
+
+    let strategy_params_row = strategy_params_from_row(&row);
+    let exit_params_row     = exit_params_from_row(&row);
 
     let symbol = Symbol::new(symbol_s);
     let timeframe = Timeframe::parse(&tf_s)
         .ok_or_else(|| anyhow!("invalid timeframe '{tf_s}' in sweep_results"))?;
-    let exit_name  = exit_name.ok_or_else(|| anyhow!("exit_name NULL — strategy monolítica não suporta IS/OOS"))?;
-    let strategy_params = strategy_params.ok_or_else(|| anyhow!("strategy_params NULL — re-run sweep"))?;
-    let exit_params     = exit_params.ok_or_else(|| anyhow!("exit_params NULL — re-run sweep"))?;
+    let exit_name = exit_name.ok_or_else(|| anyhow!("exit_name NULL — strategy monolítica não suporta IS/OOS"))?;
+
+    let strategy_params = strategy_params_to_value(&strategy_params_row);
+    let exit_params     = exit_params_to_value(&exit_params_row);
 
     let from  = period_start.map(|d| d.and_hms_opt(0, 0, 0).unwrap().and_utc());
     let until = period_end.map(|d| d.and_hms_opt(23, 59, 59).unwrap().and_utc());

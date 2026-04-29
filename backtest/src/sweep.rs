@@ -95,7 +95,7 @@ pub fn run_sweep(
                 strategy_params: run.strategy_params.clone(),
                 exit_name: Some("range_tp_sl".to_string()),
                 exit_params_label: Some("baked-in".to_string()),
-                exit_params: Some(serde_json::json!({})),
+                exit_params: Some(ExitParamsRow::default()),
                 period_start: None,
                 period_end: None,
                 sweep_id,

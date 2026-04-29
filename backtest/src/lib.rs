@@ -19,6 +19,7 @@ pub mod walkforward;
 pub mod onboard;
 pub mod progress;
 pub mod range_debug;
+pub mod params_row;
 
 mod types;
 

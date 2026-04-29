@@ -109,11 +109,12 @@ impl super::Strategy for EmaScalp {
                         ctx.candles, ctx.days, &fasts[fi], &slows[si], mt,
                     );
                     let label = format!("fast_period={fp} slow_period={sp} max_trades_per_day={mt}");
-                    let params = serde_json::json!({
-                        "fast_period": fp,
-                        "slow_period": sp,
-                        "max_trades_per_day": mt,
-                    });
+                    let params = StrategyParamsRow {
+                        fast_period:        Some(fp as i32),
+                        slow_period:        Some(sp as i32),
+                        max_trades_per_day: Some(mt as i32),
+                        ..Default::default()
+                    };
                     sets.push(EntrySet {
                         strategy_label: label,
                         strategy_params: params,

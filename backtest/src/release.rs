@@ -28,36 +28,18 @@ pub struct ReleaseOutput {
 }
 
 pub fn release(client: &mut Client, input: ReleaseInput) -> Result<ReleaseOutput> {
-    // 1. Pega a row do sweep_results
+    // 1. Pega metadata do sweep_results (gates checks). Params em si vão via
+    //    INSERT...SELECT no final pra evitar listar 35 colunas aqui.
     let row = client.query_opt(
-        "SELECT symbol, timeframe, strategy, exit_name,
-                strategy_params, exit_params,
-                sweep_id, return_pct, win_rate, trades, max_dd_pct
-         FROM sweep_results WHERE id = $1",
+        "SELECT symbol, strategy, exit_name FROM sweep_results WHERE id = $1",
         &[&input.sweep_result_id],
     )?
     .ok_or_else(|| anyhow!("sweep_result {} not found", input.sweep_result_id))?;
 
     let symbol:    String = row.get(0);
-    let timeframe: String = row.get(1);
-    let strategy:  String = row.get(2);
-    let exit_name: Option<String> = row.get(3);
-    let strategy_params: Option<serde_json::Value> = row.get(4);
-    let exit_params:     Option<serde_json::Value> = row.get(5);
-    let sweep_id:    Option<uuid::Uuid> = row.get(6);
-    let return_pct:  Option<rust_decimal::Decimal> = row.get(7);
-    let win_rate:    Option<rust_decimal::Decimal> = row.get(8);
-    let trades:      Option<i32> = row.get(9);
-    let max_dd_pct:  Option<rust_decimal::Decimal> = row.get(10);
+    let strategy:  String = row.get(1);
+    let exit_name: Option<String> = row.get(2);
 
-    let strategy_params = strategy_params.ok_or_else(|| anyhow!(
-        "sweep_result {} has NULL strategy_params — re-run sweep to populate",
-        input.sweep_result_id
-    ))?;
-    let exit_params = exit_params.ok_or_else(|| anyhow!(
-        "sweep_result {} has NULL exit_params — strategy monolítica (range) ou sweep antigo",
-        input.sweep_result_id
-    ))?;
     let exit_name = exit_name.ok_or_else(|| anyhow!(
         "sweep_result {} has NULL exit_name — strategy monolítica não suporta release ainda",
         input.sweep_result_id
@@ -117,30 +99,45 @@ pub fn release(client: &mut Client, input: ReleaseInput) -> Result<ReleaseOutput
     )?;
     let retired_id: Option<i64> = retired.map(|r| r.get(0));
 
-    // 4. Insere novo preset 'active' (com UUIDs dos gates pra audit trail)
+    // 4. Insere novo preset 'active' via INSERT...SELECT (copia 35+ cols
+    //    sem listar manualmente — só sobrescreve sweep_result_id, walkforward_id, etc.).
     let new_row = tx.query_one(
         "INSERT INTO presets (
             symbol, timeframe, strategy, exit_name,
-            strategy_params, exit_params,
-            sweep_id, sweep_result_id,
-            walkforward_id, overfit_test_uuid,
+            sweep_id, sweep_result_id, walkforward_id, overfit_test_uuid,
             return_pct, win_rate, trades, max_dd_pct,
-            released_by, notes
-         ) VALUES (
-            $1, $2, $3, $4, $5, $6,
-            $7, $8,
-            $9, $10,
-            $11, $12, $13, $14,
-            $15, $16
+            released_by, notes,
+            -- strategy params
+            adx_thresh, atr_pct_thresh, range_lookback, zone_pct,
+            tp_range_pct, sl_range_pct, recent_thresh_pct, max_orders,
+            pos_size, mtf_enabled, close_at_opposite, close_on_range_break, mtf_timeframe,
+            min_bars, confirm_bars, vwap_prox, vwap_window_days, ema_period,
+            max_trades_per_day, kind, vol_filter, trend_filter,
+            entry_window_start, entry_window_end,
+            fast_period, slow_period, range_mins, buffer_pct, prox_pct,
+            -- exit params
+            tp_pct, sl_pct, max_hold_min, be_r, trail_step, tp_r
          )
+         SELECT
+            symbol, timeframe, strategy, exit_name,
+            sweep_id, $1, $2, $3,
+            return_pct, win_rate, trades, max_dd_pct,
+            $4, $5,
+            adx_thresh, atr_pct_thresh, range_lookback, zone_pct,
+            tp_range_pct, sl_range_pct, recent_thresh_pct, max_orders,
+            pos_size, mtf_enabled, close_at_opposite, close_on_range_break, mtf_timeframe,
+            min_bars, confirm_bars, vwap_prox, vwap_window_days, ema_period,
+            max_trades_per_day, kind, vol_filter, trend_filter,
+            entry_window_start, entry_window_end,
+            fast_period, slow_period, range_mins, buffer_pct, prox_pct,
+            tp_pct, sl_pct, max_hold_min, be_r, trail_step, tp_r
+         FROM sweep_results WHERE id = $6
          RETURNING id",
         &[
-            &symbol, &timeframe, &strategy, &exit_name,
-            &strategy_params, &exit_params,
-            &sweep_id, &input.sweep_result_id,
+            &input.sweep_result_id,
             &input.require_walkforward_id, &input.require_overfit_test_uuid,
-            &return_pct, &win_rate, &trades, &max_dd_pct,
             &input.released_by, &input.notes,
+            &input.sweep_result_id,
         ],
     )
     .with_context(|| format!("inserting preset for {symbol} {strategy}"))?;

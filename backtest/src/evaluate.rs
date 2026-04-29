@@ -99,17 +99,6 @@ fn evaluate_range(
         }
     } else { (None, None) };
 
-    // detection_mode: opt-in geometric via JSON. Default = Indicator (MQL5).
-    let detection_mode = match p.get("detection_mode").and_then(|v| v.as_str()) {
-        Some("geometric") => {
-            let touch_threshold_pct = p.get("touch_threshold_pct").and_then(|v| v.as_f64()).unwrap_or(15.0);
-            let min_touches_each_side = p.get("min_touches_each_side").and_then(|v| v.as_u64()).unwrap_or(2) as usize;
-            let max_size_pct = p.get("max_size_pct").and_then(|v| v.as_f64()).unwrap_or(2.0);
-            range::DetectionMode::Geometric { touch_threshold_pct, min_touches_each_side, max_size_pct }
-        }
-        _ => range::DetectionMode::Indicator,
-    };
-
     Ok(range::run_range_backtest(
         candles, &adx, &atr_pct,
         mtf_adx_vec.as_deref(),
@@ -118,7 +107,6 @@ fn evaluate_range(
         zone_pct, tp_range_pct, sl_range_pct,
         recent_thresh_pct, max_orders, pos_size,
         close_at_opposite, close_on_break,
-        detection_mode,
     ))
 }
 

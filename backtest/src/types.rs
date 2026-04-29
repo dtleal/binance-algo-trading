@@ -146,6 +146,60 @@ impl RunMetrics {
     }
 }
 
+/// Params tipados de strategy — todos Option, cada strategy popula só o seu set.
+/// Wide-table flat: cada row de sweep_results tem ~30 colunas, ~70% NULL.
+#[derive(Clone, Debug, Default)]
+pub struct StrategyParamsRow {
+    // range
+    pub adx_thresh:           Option<f64>,
+    pub atr_pct_thresh:       Option<f64>,
+    pub range_lookback:       Option<i32>,
+    pub zone_pct:             Option<f64>,
+    pub tp_range_pct:         Option<f64>,
+    pub sl_range_pct:         Option<f64>,
+    pub recent_thresh_pct:    Option<f64>,
+    pub max_orders:           Option<i32>,
+    pub pos_size:             Option<f64>,
+    pub mtf_enabled:          Option<bool>,
+    pub close_at_opposite:    Option<bool>,
+    pub close_on_range_break: Option<bool>,
+    pub mtf_timeframe:        Option<String>,
+    // vwap_pullback / momentum (compartilham vários)
+    pub min_bars:             Option<i32>,
+    pub confirm_bars:         Option<i32>,
+    pub vwap_prox:            Option<f64>,
+    pub vwap_window_days:     Option<i32>,
+    pub ema_period:           Option<i32>,
+    pub max_trades_per_day:   Option<i32>,
+    // momentum
+    pub kind:                 Option<String>,
+    pub vol_filter:           Option<bool>,
+    pub trend_filter:         Option<bool>,
+    pub entry_window_start:   Option<i32>,
+    pub entry_window_end:     Option<i32>,
+    // ema_scalp
+    pub fast_period:          Option<i32>,
+    pub slow_period:          Option<i32>,
+    // orb
+    pub range_mins:           Option<i32>,
+    pub buffer_pct:           Option<f64>,
+    // pdhl
+    pub prox_pct:             Option<f64>,
+}
+
+/// Params tipados de exit — todos Option, cada exit popula só o seu set.
+#[derive(Clone, Debug, Default)]
+pub struct ExitParamsRow {
+    // fixed_tp_sl
+    pub tp_pct:       Option<f64>,
+    pub sl_pct:       Option<f64>,
+    pub max_hold_min: Option<i32>,
+    // trailing_stop
+    pub be_r:         Option<f64>,
+    pub trail_step:   Option<f64>,
+    pub tp_r:         Option<f64>,
+}
+
 /// Linha final escrita em sweep_results.
 #[derive(Clone, Debug)]
 pub struct RunResult {
@@ -153,15 +207,15 @@ pub struct RunResult {
     pub timeframe: Timeframe,
     pub strategy: String,
     pub strategy_params_label: String,
-    pub strategy_params: serde_json::Value,    // JSONB em sweep_results
+    pub strategy_params: StrategyParamsRow,
     pub exit_name: Option<String>,
     pub exit_params_label: Option<String>,
-    pub exit_params: Option<serde_json::Value>,  // JSONB em sweep_results
+    pub exit_params: Option<ExitParamsRow>,
     pub period_start: Option<chrono::NaiveDate>,
     pub period_end: Option<chrono::NaiveDate>,
     pub sweep_id: uuid::Uuid,
     pub params_hash: String,         // md5 hex (32 chars)
-    pub source: &'static str,        // "backtest" para o crate novo
+    pub source: &'static str,
     pub metrics: RunMetrics,
 }
 
@@ -172,7 +226,7 @@ pub struct RunResult {
 #[derive(Clone)]
 pub struct EntrySet {
     pub strategy_label: String,
-    pub strategy_params: serde_json::Value,    // serializado em sweep_results.strategy_params
+    pub strategy_params: StrategyParamsRow,
     pub entries: Arc<Vec<Entry>>,
 }
 
@@ -180,7 +234,7 @@ pub struct EntrySet {
 #[derive(Clone)]
 pub struct ExitVariant {
     pub label: String,
-    pub params: serde_json::Value,             // serializado em sweep_results.exit_params
+    pub params: ExitParamsRow,
     pub eval: ExitFn,
 }
 
@@ -203,7 +257,7 @@ pub const END_OF_DAY: u16           = 1430;  // 23:50 UTC
 /// exits externos (Range é o caso — TP/SL acoplados ao entry).
 pub struct MonolithicRun {
     pub label: String,
-    pub strategy_params: serde_json::Value,
+    pub strategy_params: StrategyParamsRow,
     pub execute: Box<dyn Fn(&[Candle]) -> RunMetrics + Send + Sync>,
 }
 
