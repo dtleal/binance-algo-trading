@@ -37,6 +37,15 @@ enum Command {
     Onboard(OnboardArgs),
     /// Range debug: visualiza áreas laterais detectadas em 1 dia + entradas.
     RangeDebug(RangeDebugArgs),
+    /// Correlate: matriz Pearson de returns mensais entre presets (M0b da skill regime-conditional).
+    Correlate(CorrelateArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct CorrelateArgs {
+    /// Comma-separated preset IDs (ex: "1,2,3,4")
+    #[arg(long)] preset_ids: String,
+    #[arg(long, default_value_t = 0.10)] pos_size: f64,
 }
 
 #[derive(clap::Args, Debug)]
@@ -200,7 +209,64 @@ fn main() -> Result<()> {
         Command::Walkforward(a)  => run_walkforward(a),
         Command::Onboard(a)      => run_onboard(a),
         Command::RangeDebug(a)   => run_range_debug_cmd(a),
+        Command::Correlate(a)    => run_correlate(a),
     }
+}
+
+fn run_correlate(args: CorrelateArgs) -> Result<()> {
+    use backtest::correlate;
+    let preset_ids: Vec<i64> = args.preset_ids.split(',')
+        .map(|s| s.trim().parse::<i64>().map_err(|e| anyhow::anyhow!("bad preset id '{s}': {e}")))
+        .collect::<Result<_>>()?;
+
+    let mut client = db::connect_from_env()?;
+    let out = correlate::correlate_presets(&mut client, &preset_ids, args.pos_size)?;
+
+    println!("\n═══════════════════════════════════════════════════════════════");
+    println!("  Correlation matrix — {} presets", out.preset_ids.len());
+    println!("═══════════════════════════════════════════════════════════════");
+    for (i, label) in out.labels.iter().enumerate() {
+        println!("  [{}] {} ({} months)", i, label, out.n_months[i]);
+    }
+    println!();
+    print!("       ");
+    for i in 0..out.preset_ids.len() {
+        print!("  [{}]   ", i);
+    }
+    println!();
+    for i in 0..out.preset_ids.len() {
+        print!("  [{}]  ", i);
+        for j in 0..out.preset_ids.len() {
+            let v = out.matrix[i][j];
+            if v.is_nan() {
+                print!("  n/a   ");
+            } else {
+                print!(" {:+.3} ", v);
+            }
+        }
+        println!();
+    }
+
+    // Decisão de portfolio (alinhado com SKILL.md)
+    let mut max_corr = 0.0_f64;
+    let mut min_corr = 1.0_f64;
+    for i in 0..out.preset_ids.len() {
+        for j in (i+1)..out.preset_ids.len() {
+            let v = out.matrix[i][j];
+            if !v.is_nan() {
+                max_corr = max_corr.max(v.abs());
+                min_corr = min_corr.min(v.abs());
+            }
+        }
+    }
+    println!();
+    println!("Max |corr|: {:.3}  |  Min |corr|: {:.3}", max_corr, min_corr);
+    let verdict = if min_corr < 0.5 { "✅ portfolio descorrelacionado (vale composite)" }
+                  else if max_corr <= 0.7 { "⚠ aceitável (composite agrega valor marginal)" }
+                  else if max_corr <= 0.8 { "⚠ alto (risk-management sem diversificação real)" }
+                  else { "❌ aborta — algum par >0.8 vê o mesmo regime" };
+    println!("Verdict: {}", verdict);
+    Ok(())
 }
 
 fn run_range_debug_cmd(args: RangeDebugArgs) -> Result<()> {
