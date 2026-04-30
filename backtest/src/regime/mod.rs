@@ -5,5 +5,7 @@
 
 pub mod features;
 pub mod fingerprint;
+pub mod score;
 
 pub use features::{RegimeVector, RegimeArrays};
+pub use score::{StrategyFingerprint, BucketProfile, regime_match_score, load_fingerprint};
