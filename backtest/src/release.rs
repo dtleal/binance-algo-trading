@@ -31,14 +31,15 @@ pub fn release(client: &mut Client, input: ReleaseInput) -> Result<ReleaseOutput
     // 1. Pega metadata do sweep_results (gates checks). Params em si vão via
     //    INSERT...SELECT no final pra evitar listar 35 colunas aqui.
     let row = client.query_opt(
-        "SELECT symbol, strategy, exit_name FROM sweep_results WHERE id = $1",
+        "SELECT symbol, timeframe, strategy, exit_name FROM sweep_results WHERE id = $1",
         &[&input.sweep_result_id],
     )?
     .ok_or_else(|| anyhow!("sweep_result {} not found", input.sweep_result_id))?;
 
     let symbol:    String = row.get(0);
-    let strategy:  String = row.get(1);
-    let exit_name: Option<String> = row.get(2);
+    let timeframe: String = row.get(1);
+    let strategy:  String = row.get(2);
+    let exit_name: Option<String> = row.get(3);
 
     let exit_name = exit_name.ok_or_else(|| anyhow!(
         "sweep_result {} has NULL exit_name — strategy monolítica não suporta release ainda",
@@ -93,9 +94,9 @@ pub fn release(client: &mut Client, input: ReleaseInput) -> Result<ReleaseOutput
     let retired = tx.query_opt(
         "UPDATE presets
          SET status='retired', retired_at=NOW(), retired_reason='superseded'
-         WHERE symbol=$1 AND strategy=$2 AND status='active'
+         WHERE symbol=$1 AND timeframe=$2 AND strategy=$3 AND status='active'
          RETURNING id",
-        &[&symbol, &strategy],
+        &[&symbol, &timeframe, &strategy],
     )?;
     let retired_id: Option<i64> = retired.map(|r| r.get(0));
 
