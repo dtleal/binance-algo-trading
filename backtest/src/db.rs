@@ -195,6 +195,16 @@ pub fn write_sweep_results(
     let mut writer = BinaryCopyInWriter::new(copy_in, &types);
 
     for r in rows {
+        // Filtra rows pathológicos: trades=0 sem signal útil; ou strings
+        // requeridas vazias (raríssimo edge case, mas viola check constraint).
+        if r.metrics.trades == 0
+            || r.symbol.as_str().is_empty()
+            || r.strategy.is_empty()
+            || r.exit_name.as_deref().map_or(false, str::is_empty)
+        {
+            continue;
+        }
+
         let win_rate   = to_dec(r.metrics.win_rate());
         let return_pct = to_dec(r.metrics.return_pct(INITIAL_CAPITAL));
         let final_cap  = to_dec(r.metrics.final_capital);
