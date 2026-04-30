@@ -22,6 +22,7 @@ pub mod range_debug;
 pub mod params_row;
 pub mod correlate;
 pub mod regime;
+pub mod composite;
 
 mod types;
 

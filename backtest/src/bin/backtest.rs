@@ -41,6 +41,18 @@ enum Command {
     Correlate(CorrelateArgs),
     /// Fingerprint: per-strategy regime profile (M2 da skill regime-conditional).
     Fingerprint(FingerprintArgs),
+    /// Composite: backtest com regime-gated entries (M4 da skill regime-conditional).
+    CompositeBacktest(CompositeBacktestArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct CompositeBacktestArgs {
+    #[arg(long)] preset_ids: String,    // "1,3,5"
+    #[arg(long, default_value_t = 0.40)] activate_threshold: f64,
+    #[arg(long, default_value_t = 0.65)] full_position_threshold: f64,
+    #[arg(long, default_value_t = 0.05)] kill_switch_dd: f64,
+    #[arg(long)] from:  Option<String>,
+    #[arg(long)] until: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -221,7 +233,54 @@ fn main() -> Result<()> {
         Command::RangeDebug(a)   => run_range_debug_cmd(a),
         Command::Correlate(a)    => run_correlate(a),
         Command::Fingerprint(a)  => run_fingerprint_cmd(a),
+        Command::CompositeBacktest(a) => run_composite_cmd(a),
     }
+}
+
+fn run_composite_cmd(args: CompositeBacktestArgs) -> Result<()> {
+    use backtest::composite;
+    let preset_ids: Vec<i64> = args.preset_ids.split(',')
+        .map(|s| s.trim().parse::<i64>().map_err(|e| anyhow::anyhow!("bad id '{s}': {e}")))
+        .collect::<Result<_>>()?;
+
+    let cfg = composite::CompositeConfig {
+        activate_threshold: args.activate_threshold,
+        full_position_threshold: args.full_position_threshold,
+        kill_switch_dd: args.kill_switch_dd,
+    };
+    let from = args.from.as_deref().map(parse_date_naive).transpose()?;
+    let until = args.until.as_deref().map(parse_date_naive).transpose()?;
+
+    let mut client = db::connect_from_env()?;
+    let result = composite::run_composite(&mut client, &preset_ids, &cfg, from, until)?;
+
+    println!("\n═══════════════════════════════════════════════════════════════");
+    println!("  Composite backtest — {} preset(s)", result.preset_results.len());
+    println!("═══════════════════════════════════════════════════════════════");
+    println!("  activate_threshold = {:.2}", cfg.activate_threshold);
+    println!("  full_threshold     = {:.2}", cfg.full_position_threshold);
+    println!("  kill_switch_dd     = {:.2}%", cfg.kill_switch_dd * 100.0);
+    println!();
+    for pr in &result.preset_results {
+        println!("  [{}] {}", pr.preset_id, pr.label);
+        println!("      avg score: {:.3}  candles active: {} ({}@full)",
+            pr.avg_score, pr.n_candles_active, pr.n_candles_full);
+        println!("      entries: {} total → {} executed (regime mask + kill switch)",
+            pr.n_trades_total, pr.n_trades_active);
+        println!("      return: {:+.2}%   max DD: {:.2}%",
+            pr.return_pct, pr.max_dd_pct);
+        println!();
+    }
+    println!("─── Aggregated ─────────────────");
+    println!("  return_pct (mean):  {:+.2}%", result.aggregated.return_pct_mean);
+    println!("  return_pct (sum):   {:+.2}%", result.aggregated.return_pct_sum);
+    println!("  max DD (worst):     {:.2}%",  result.aggregated.max_dd_pct_max);
+    println!("  total trades:       {}",      result.aggregated.n_trades_total);
+    Ok(())
+}
+
+fn parse_date_naive(s: &str) -> Result<chrono::NaiveDate> {
+    chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| anyhow::anyhow!("bad date '{s}': {e}"))
 }
 
 fn run_fingerprint_cmd(args: FingerprintArgs) -> Result<()> {
