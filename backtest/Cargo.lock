@@ -120,6 +120,7 @@ dependencies = [
  "md-5 0.10.6",
  "postgres",
  "postgres-types",
+ "rand 0.8.6",
  "rayon",
  "rust_decimal",
  "serde",

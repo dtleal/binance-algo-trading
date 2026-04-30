@@ -39,6 +39,8 @@ enum Command {
     RangeDebug(RangeDebugArgs),
     /// Correlate: matriz Pearson de returns mensais entre presets (M0b da skill regime-conditional).
     Correlate(CorrelateArgs),
+    /// Fingerprint: per-strategy regime profile (M2 da skill regime-conditional).
+    Fingerprint(FingerprintArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -46,6 +48,14 @@ struct CorrelateArgs {
     /// Comma-separated preset IDs (ex: "1,2,3,4")
     #[arg(long)] preset_ids: String,
     #[arg(long, default_value_t = 0.10)] pos_size: f64,
+}
+
+#[derive(clap::Args, Debug)]
+struct FingerprintArgs {
+    #[arg(long)] preset_id: i64,
+    #[arg(long, default_value_t = 0.10)] pos_size: f64,
+    /// Skip persistência (só print)
+    #[arg(long)] dry_run: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -210,7 +220,49 @@ fn main() -> Result<()> {
         Command::Onboard(a)      => run_onboard(a),
         Command::RangeDebug(a)   => run_range_debug_cmd(a),
         Command::Correlate(a)    => run_correlate(a),
+        Command::Fingerprint(a)  => run_fingerprint_cmd(a),
     }
+}
+
+fn run_fingerprint_cmd(args: FingerprintArgs) -> Result<()> {
+    use backtest::regime::fingerprint;
+    let mut client = db::connect_from_env()?;
+    let out = fingerprint::run_fingerprint(&mut client, args.preset_id, args.pos_size)?;
+
+    println!("\n═══════════════════════════════════════════════════════════════");
+    println!("  Fingerprint preset_id={} ({})", out.preset_id, out.label);
+    println!("═══════════════════════════════════════════════════════════════");
+    let features = ["adx14", "atr_pct", "rsi14", "bb_squeeze"];
+    for &feat in &features {
+        let (q33, q67) = out.quantiles[feat];
+        println!("\n{} (q33={:.4}, q67={:.4}):", feat, q33, q67);
+        for &bname in &["low", "mid", "high"] {
+            let b = out.buckets.iter()
+                .find(|b| b.feature == feat && b.bucket == bname)
+                .expect("12 buckets always present");
+            let useful = if b.is_useful { "✅" } else { "❌" };
+            println!(
+                "  {:4} : {:5} trades  avg={:+.3}%  fp_a={:+.3}% fp_b={:+.3}%  persist={}  ic=[{:+.3}, {:+.3}]  bonf={}  {}",
+                bname, b.n_trades, b.avg_pnl,
+                b.fp_a_avg, b.fp_b_avg,
+                if b.persistence_ok { "✓" } else { "✗" },
+                b.ic_lo, b.ic_hi,
+                if b.bonferroni_ok { "✓" } else { "✗" },
+                useful,
+            );
+        }
+    }
+    println!();
+    println!("Useful buckets: {}/12", out.useful_count);
+    if out.useful_count == 0 {
+        println!("⚠ Strategy is regime-insensitive. Won't be filterable by regime detector.");
+    }
+
+    if !args.dry_run {
+        backtest::regime::fingerprint::persist_fingerprint(&mut client, &out)?;
+        println!("\nPersisted to strategy_regime_profile.");
+    }
+    Ok(())
 }
 
 fn run_correlate(args: CorrelateArgs) -> Result<()> {

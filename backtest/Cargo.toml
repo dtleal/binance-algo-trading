@@ -13,6 +13,9 @@ postgres = { version = "0.19", features = ["with-chrono-0_4", "with-uuid-1", "wi
 postgres-types = { version = "0.2", features = ["derive"] }
 rust_decimal = { version = "1", features = ["db-postgres"] }
 
+# RNG (bootstrap reamostragens no fingerprint)
+rand = "0.8"
+
 # CPU paralelismo
 rayon = "1"
 

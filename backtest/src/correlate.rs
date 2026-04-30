@@ -125,7 +125,7 @@ fn replay_preset_monthly(
         let d = t.exit_time.date_naive();
         let key = NaiveDate::from_ymd_opt(d.year(), d.month(), 1)
             .ok_or_else(|| anyhow!("invalid date {d}"))?;
-        *monthly.entry(key).or_insert(0.0) += t.pnl_pct * 100.0;
+        *monthly.entry(key).or_insert(0.0) += t.pnl_pct;    // já em %
     }
 
     Ok((label, monthly))

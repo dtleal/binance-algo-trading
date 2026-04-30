@@ -4,5 +4,6 @@
 //!   de forma causal (look-ahead-free). NaN antes do warmup.
 
 pub mod features;
+pub mod fingerprint;
 
 pub use features::{RegimeVector, RegimeArrays};
